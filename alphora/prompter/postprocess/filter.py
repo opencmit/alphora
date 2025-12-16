@@ -78,6 +78,23 @@ class FilterPP(BasePostProcessor):
                             content_type=output.content_type
                         )
 
+            async def agenerate(self) -> Iterator[GeneratorOutput]:
+                async for output in self.original_generator:
+                    # 内容类型过滤
+                    if self.include_content_types and output.content_type not in self.include_content_types:
+                        continue
+                    if self.exclude_content_types and output.content_type in self.exclude_content_types:
+                        continue
+
+                    # 字符过滤
+                    filtered_content = ''.join(c for c in output.content if c not in self.filter_chars)
+
+                    if filtered_content:
+                        yield GeneratorOutput(
+                            content=filtered_content,
+                            content_type=output.content_type
+                        )
+
         return FilteredGenerator(
             generator,
             self.filter_chars,

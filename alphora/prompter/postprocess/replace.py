@@ -83,6 +83,20 @@ class ReplacePP(BasePostProcessor):
                         content_type=output.content_type
                     )
 
+            async def agenerate(self) -> Iterator[GeneratorOutput]:
+                async for output in self.original_generator:
+                    # 应用替换规则
+                    replaced_content = self._apply_replacements(
+                        output.content,
+                        output.content_type
+                    )
+
+                    # 生成替换后的输出
+                    yield GeneratorOutput(
+                        content=replaced_content,
+                        content_type=output.content_type
+                    )
+
         return ReplacedGenerator(
             generator,
             self.replace_map,

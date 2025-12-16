@@ -30,4 +30,19 @@ class SplitterPP(BasePostProcessor):
                             content_type=output.content_type
                         )
 
+            async def agenerate(self) -> Iterator[GeneratorOutput]:
+                # 逐个处理原始生成器的输出
+                async for output in self.original_generator:
+                    # 如果内容为空，则直接传递
+                    if not output.content:
+                        yield output
+                        continue
+
+                    # 将内容拆分成单个字符并逐个输出
+                    for char in output.content:
+                        yield GeneratorOutput(
+                            content=char,
+                            content_type=output.content_type
+                        )
+
         return CharacterSplitGenerator(generator)

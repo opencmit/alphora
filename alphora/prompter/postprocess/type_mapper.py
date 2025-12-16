@@ -47,4 +47,21 @@ class TypeMapperPP(BasePostProcessor):
                     else:
                         yield output
 
+            async def agenerate(self) -> Iterator[GeneratorOutput]:
+                """生成处理后的输出"""
+                async for output in self.original_generator:
+                    original_type = output.content_type
+                    if original_type in self.mapping:
+                        new_type = self.mapping[original_type]
+                    else:
+                        new_type = original_type
+
+                    if new_type != original_type:
+                        yield GeneratorOutput(
+                            content=output.content,
+                            content_type=new_type
+                        )
+                    else:
+                        yield output
+
         return ContentTypeMappedGenerator(generator, self.mapping)

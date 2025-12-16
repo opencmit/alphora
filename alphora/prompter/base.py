@@ -46,14 +46,14 @@ class PrompterOutput(str):
         return self._finish_reason
 
     def __repr__(self):
-        return f'PrompterOutput({super().__repr__()}, reason={self._reasoning!r}, finish_reason={self._finish_reason!r})'
+        return f'PrompterOutput({super().__repr__()}, reasoning={self._reasoning!r}, finish_reason={self._finish_reason!r})'
 
 
 class BasePrompt:
-    template_path: str = None  # tmpl文件的路径
-    template_desc: str = ""  # tmpl文件的描述
 
     def __init__(self,
+                 template_path: str = None,
+                 template_desc: str = "",
                  verbose: bool = False,
                  callback: Optional[DataStreamer] = None,
                  **kwargs):
@@ -65,13 +65,14 @@ class BasePrompt:
             **kwargs: 占位符
         """
 
+        self.template_path = template_path
+        self.template_desc = template_desc
+
         self.is_stream: bool = False
 
         self.llm: BaseLLM | None = None
         self.callback: Optional[DataStreamer] = callback
         self.verbose: bool = verbose
-
-        self.llm_data_streamer = None  # self.llm 自带的 callback
 
         self.context = kwargs
 
@@ -87,7 +88,6 @@ class BasePrompt:
         self.env: Optional[Environment] = None
 
         if self.prompt:
-            # 使用 AST 分析获取所有变量
             self.env = self.prompt.environment
             self.placeholders = self._get_template_variables()
 
@@ -327,22 +327,23 @@ class BasePrompt:
                 output_str = ''
                 reasoning_content = ''
 
-                # for ck in generator_with_content_type:
-                #     output_str += self._character_level_streaming(output_content=ck)
-
                 for ck in generator_with_content_type:
 
                     content = ck.content
                     content_type = ck.content_type
 
-                    if content_type == 'think' and enable_thinking:
-                        self.callback.send_data(content_type=content_type, content=content)
-                        reasoning_content += content
-                        continue
+                    if self.callback:
 
-                    if content:
-                        self.callback.send_data(content_type=content_type, content=content)
-                        output_str += content
+                        if content_type == 'think' and enable_thinking:
+                            self.callback.send_data(content_type=content_type, content=content)
+                            reasoning_content += content
+                            continue
+
+                        if content:
+                            self.callback.send_data(content_type=content_type, content=content)
+                            output_str += content
+                    else:
+                        print(content, end='', flush=True)
 
                 if force_json:
                     try:
@@ -452,22 +453,24 @@ class BasePrompt:
                 output_str = ''
                 reasoning_content = ''
 
-                # for ck in generator_with_content_type:
-                #     output_str += self._character_level_streaming(output_content=ck)
-
-                for ck in generator_with_content_type:
+                async for ck in generator_with_content_type:
 
                     content = ck.content
                     content_type = ck.content_type
 
-                    if content_type == 'think' and enable_thinking:
-                        await self.callback.send_data(content_type=content_type, content=content)
-                        reasoning_content += content
-                        continue
+                    if self.callback:
 
-                    if content:
-                        await self.callback.send_data(content_type=content_type, content=content)
-                        output_str += content
+                        if content_type == 'think' and enable_thinking:
+                            await self.callback.send_data(content_type=content_type, content=content)
+                            reasoning_content += content
+                            continue
+
+                        if content:
+                            await self.callback.send_data(content_type=content_type, content=content)
+                            output_str += content
+
+                    else:
+                        print(content, end='', flush=True)
 
                 if force_json:
                     try:
