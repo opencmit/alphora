@@ -233,13 +233,9 @@ class OpenAILike(BaseLLM):
 
         return gen
 
-    def _get_extra_body(self, enable_thinking: bool = False) -> Optional[Dict[str, Any]]:
-        if self.model_name and self.model_name.startswith("qwen3-3") and not self.model_name.endswith("jz"):
-            return {
-                "chat_template_kwargs": {"enable_thinking": enable_thinking},
-                "enable_thinking": enable_thinking
-            }
-        return None
+    def _get_extra_body(self, **kwargs) -> dict:
+        """由子类重写"""
+        return {}
 
     def set_temperature(self, temp: float):
         if not (0.0 <= temp <= 1.0):
