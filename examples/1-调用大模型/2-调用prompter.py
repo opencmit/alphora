@@ -14,17 +14,27 @@ llm2 = OpenAILike(api_key=llm_api_key, base_url=llm_base_url, model_name='deepse
 
 llm = llm1 + llm2
 
-bp = BasePrompt(template_path='/Users/tiantiantian/Code/alphadata-ms/alphora/examples/uu.tmpl')
+bp1 = BasePrompt(verbose=True)
+bp2 = BasePrompt(verbose=True)
 
-bp.add_llm(model=llm)
+bp1.add_llm(model=llm)
+bp2.add_llm(model=llm)
 
-bp.load_from_string(prompt='翻译英文:{{query}}')
+bp1.load_from_string(prompt='用中文介绍你自己并翻译英文:{{query}}')
+bp2.load_from_string(prompt='用中文介绍你自己并翻译日文:{{query}}')
 
-rpp = ReplacePP(replace_map={' ': '※'})
+# rpp = ReplacePP(replace_map={' ': '※'})
+
+bp = bp1 | bp2
 
 bpac = bp.acall(
     query='AlphaData 2.0 产品全面更新，由 AlphaData 1.0 版本的单体架构升级至了微服务架构，实现流量统一管控、核心业务解耦、弹性扩展、多版本并行发布，同时极大提升了系统稳定性、可维护性和可扩展性。',
-    postprocessor=rpp,
-    is_stream=True)
+    # postprocessor=rpp,
+    is_stream=True,
+    force_json=True,
+    return_generator=False)
 
-asyncio.run(bpac)
+# for i in bpac:
+#     print(i)
+
+x = asyncio.run(bpac)
