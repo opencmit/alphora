@@ -15,7 +15,7 @@ class AsyncAgent:
 
         # 模拟最终结果
         await self.streamer.send_data("result", "Task completed successfully!")
-        await self.streamer.send_stop()
+        await self.streamer.stop(stop_reason='end')
 
 
 # main.py
@@ -33,4 +33,10 @@ async def stream():
     asyncio.create_task(agent.run())
 
     return streamer.start_streaming_openai()
+
+import uvicorn
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 

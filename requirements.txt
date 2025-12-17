@@ -1,0 +1,17 @@
+dill==0.3.9
+fastapi==0.121.3
+Jinja2==3.1.6
+numpy==2.3.5
+openai==2.8.1
+openpyxl==3.1.5
+pyarrow==20.0.0
+pydantic==2.12.4
+pyodbc==5.1.0
+PyYAML==6.0.3
+Requests==2.32.5
+
+setuptools==80.9.0
+starlette==0.50.0
+tqdm==4.66.6
+typing_extensions==4.15.0
+uvicorn==0.38.0
