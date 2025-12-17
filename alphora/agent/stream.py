@@ -1,3 +1,7 @@
+"""
+因为改了异步，所有的同步方法都不允许使用了！！！
+"""
+
 from alphora.server.stream_responser import DataStreamer
 from typing import Optional, List, Any, Iterator
 import random
@@ -5,11 +9,14 @@ import time
 from alphora.models.llms.stream_helper import BaseGenerator, GeneratorOutput
 from alphora.prompter.postprocess.base import BasePostProcessor
 
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
 
 class Stream:
     def __init__(self, callback: Optional[DataStreamer] = None):
         self.callback = callback
-        self.post_processors: List[BasePostProcessor] = []
 
     async def astream_message(self,
                               content: str,
@@ -112,17 +119,16 @@ class Stream:
         """
         终结流式输出
         """
-        if self.callback:
-            self.callback.stop(stop_reason=stop_reason)
-        else:
-            print(f"\n[Stream stopped: {stop_reason}]")
+        print(f"\n[Stream stopped: {stop_reason}]")
 
-    async def astream_to_response(self, generator: BaseGenerator) -> str:
+    async def astream_to_response(self,
+                                  generator: BaseGenerator,
+                                  post_processors: List[BasePostProcessor] = []) -> str:
         """
-        将生成器转为实际的字符串，同时发送流式输出(如果有DS)
-        Args:
-            generator: BaseGenerator
-        Returns: String
+        将生成器转为实际的字符串，同时发送流式输出
+
+        :param generator:
+        :param post_processors:
         """
 
         data_streamer: Optional[DataStreamer] = self.callback
@@ -130,7 +136,7 @@ class Stream:
 
         # 应用所有后处理器
         processed_generator = generator
-        for processor in self.post_processors:
+        for processor in post_processors:
             processed_generator = processor(processed_generator)
 
         # 处理最终的生成器
@@ -151,20 +157,26 @@ class Stream:
 
         return response
 
-    def stream_to_response(self, generator: BaseGenerator) -> str:
+    @staticmethod
+    def stream_to_response(generator: BaseGenerator,
+                           post_processors: List[BasePostProcessor] = []) -> str:
         """
-        将生成器转为实际的字符串，同时发送流式输出(如果有DS)
-        Args:
-            generator: BaseGenerator
-        Returns: String
-        """
+        将生成器转为实际的字符串，但是同步方法中调用不会发送到接口！！！
 
-        data_streamer: Optional[DataStreamer] = self.callback
+        :param generator:
+        :param post_processors:
+        """
+        logger.warning(
+            "当前使用同步方法 `stream_to_response`，无法向客户端发送流式响应；"
+            "请改用异步方法 `astream_to_response`。"
+            " [Synchronous `stream_to_response` does not support client streaming; use `astream_to_response` for API streaming.]"
+        )
+
         response = ''
 
         # 应用所有后处理器
         processed_generator = generator
-        for processor in self.post_processors:
+        for processor in post_processors:
             processed_generator = processor(processed_generator)
 
         # 处理最终的生成器
@@ -174,8 +186,7 @@ class Stream:
                 content_type = output_content.content_type
 
                 if content:
-                    if data_streamer:
-                        data_streamer.send_data(content_type=content_type, content=content)
+                    print(content, end='', flush=True)
 
             except Exception as e:
                 print(f"Streaming Parsing Error: {str(e)}")

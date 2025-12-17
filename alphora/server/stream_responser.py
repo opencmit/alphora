@@ -1,8 +1,6 @@
 import asyncio
 import json
-from datetime import datetime
 from fastapi.responses import StreamingResponse
-from datetime import datetime, timezone
 from pydantic import BaseModel
 import queue
 from typing import List, Optional, Dict, Any
@@ -31,7 +29,7 @@ class Choice(BaseModel):
 class ChatCompletionChunk(BaseModel):
     id: str
     object: str = "chat.completion.chunk"
-    created: str
+    created: int
     model: str
     choices: List[Choice]
     system_fingerprint: Optional[str] = None
@@ -41,7 +39,7 @@ class ChatCompletionResponse(BaseModel):
     """完整的非流式响应模型，符合OpenAI格式"""
     id: str
     object: str = "chat.completion"
-    created: str
+    created: int
     model: str
     choices: List[Choice]
     system_fingerprint: Optional[str] = None
@@ -83,7 +81,7 @@ class DataStreamer:
         :param finish_reason: 完成原因，可选
         :return: SSE 格式的字符串
         """
-        created_time = datetime.now(timezone.utc).astimezone().isoformat()
+        created_time = int(time.time() * 1000)
 
         try:
             chunk = ChatCompletionChunk(
@@ -131,11 +129,12 @@ class DataStreamer:
                     yield self._generate_sse_chunk(content="", content_type='stop', finish_reason='timeout')
                     break
 
-                yield self._generate_sse_chunk(content=data['content'], content_type=data['type'])
-
                 if data["type"] == "stop":
                     yield self._generate_sse_chunk(content='', content_type='stop', finish_reason=data['content'])
                     break
+                else:
+                    yield self._generate_sse_chunk(content=data['content'], content_type=data['type'])
+
         finally:
             self._closed = True
 
@@ -153,14 +152,26 @@ class DataStreamer:
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
+                "X-Accel-Buffering": "no",
             }
         )
 
+    def _wrap_content_with_xml(self, content_type: str, content: str) -> str:
+        """将聚合后的内容用XML标签包裹"""
+        # 转义XML特殊字符，避免格式错误
+        escaped_content = (
+            content.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&apos;")
+        )
+        return f"<content type=\"{content_type}\">{escaped_content}</content>"
+
     async def _collect_full_response(self) -> ChatCompletionResponse:
-        """收集所有流式数据，生成完整响应"""
+        """收集所有流式数据，按type聚合后生成XML包裹的完整响应"""
         end_time = asyncio.get_event_loop().time() + self.timeout
-        self.full_content = []
+        self.content_by_type = {}  # 重置：按类型聚合内容
         self.finish_reason = None
 
         try:
@@ -174,17 +185,21 @@ class DataStreamer:
                 try:
                     # 带超时等待数据
                     data = await asyncio.wait_for(self.data_queue.get(), timeout=remaining)
-                    print('debug', data)
                 except asyncio.TimeoutError:
                     self.finish_reason = 'timeout'
                     break
 
-                # 收集内容（跳过stop类型的控制消息）
-                if data["type"] != "stop":
-                    self.full_content.append(data.get('content', ''))
-                else:
+                # 处理数据：聚合相同类型的内容
+                if data["type"] == "stop":
                     self.finish_reason = data.get('content', 'stop')
                     break
+                elif data.get('content'):  # 仅处理非空内容
+                    content_type = data['type']
+                    # 聚合：相同type的content拼在一起
+                    if content_type in self.content_by_type:
+                        self.content_by_type[content_type] += data['content']
+                    else:
+                        self.content_by_type[content_type] = data['content']
 
         finally:
             self._closed = True
@@ -195,9 +210,12 @@ class DataStreamer:
                 except asyncio.QueueEmpty:
                     break
 
-        # 拼接完整内容
-        full_content = ''.join(self.full_content)
-        created_time = datetime.now(timezone.utc).astimezone().isoformat()
+        # 拼接XML：每个type生成一个XML标签（而非每个chunk）
+        full_content = ""
+        for content_type, content in self.content_by_type.items():
+            full_content += self._wrap_content_with_xml(content_type, content)
+
+        created_time = int(time.time() * 1000)
 
         return ChatCompletionResponse(
             id=self.completion_id,
@@ -205,7 +223,10 @@ class DataStreamer:
             model=self.model_name,
             choices=[Choice(
                 index=0,
-                delta=ChoiceDelta(content=full_content, content_type='text'),
+                delta=ChoiceDelta(
+                    content=full_content,
+                    content_type="mixed-xml"
+                ),
                 finish_reason=self.finish_reason or 'stop'
             )]
         )

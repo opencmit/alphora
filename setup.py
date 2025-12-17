@@ -5,10 +5,9 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="alphora",  # 包名
-    version="1.0.1",  # 版本号
+    name="alphora",
+    version="1.0.1",
     description="AI Agent Development Toolkit",
-
     author="Tian tian",
     author_email="tiantianit@chinamobile.com",
     license="MIT",

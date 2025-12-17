@@ -1,2 +1,2 @@
 # MANIFEST.in
-recursive-include chatbi * *.tmpl
+recursive-include alphora * *.tmpl

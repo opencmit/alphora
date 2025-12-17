@@ -136,33 +136,3 @@ class EmbeddingModel:
         except Exception as e:
             return False
 
-
-if __name__ == "__main__":
-    apikey = "chatbi"
-    base_url = "http://10.217.247.48:9050/llmm-prod/v1"
-    header = {
-        'Content-Type': 'application/json;charset=UTF-8',
-        'X-Server-Param': 'eyJhcHBpZCI6ICJkc2p5eWJhaSIsICJjc2lkIjogImRzanl5YmFpcXdlbjJfNzJiX2luc3RydWN0MDAwMDAwNTkyMDdjNjZjZTYyNDY4ZmIyNWI2MTY5OTE3ZDczNzUifQ==',
-        'X-CurTime': '1750347052',
-        'X-CheckSum': '52d20c17e4645907f43e71d3983102c8'
-    }
-    embd = EmbeddingModel(api_key=apikey, base_url=base_url, model="bge-m3-hc", header=header)
-    txts = [
-        "风急天高猿啸哀",
-        "渚清沙白鸟飞回",
-        "无边落木萧萧下",
-        "不尽长江滚滚来"
-    ]
-
-    # 同步调用
-    result = embd.get_text_embeddings(txts)
-    print("同步结果:", result)
-
-    # 异步调用示例（需在 async 环境中运行）
-    import asyncio
-
-    async def test_async():
-        aresult = await embd.aget_text_embeddings(txts)
-        print("异步结果:", aresult)
-
-    asyncio.run(test_async())

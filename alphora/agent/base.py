@@ -114,13 +114,7 @@ class BaseAgent(object):
         )
 
     def __or__(self, other):
-        from chatbi.agent.foundation.utils.parallel import ParallelFoundationLayer
-        """允许在FoundationLayer后面加入 | 实现并行"""
-        if isinstance(other, FoundationLayer):
-            return ParallelFoundationLayer([self, other])
-        elif isinstance(other, ParallelFoundationLayer):
-            other.agents.append(self)
-            return other
-        else:
-            raise TypeError("The right-hand side of the 'or' must be an instance of FDLayer or Parallel FDlayer.")
+        # TODO
+        pass
+
 

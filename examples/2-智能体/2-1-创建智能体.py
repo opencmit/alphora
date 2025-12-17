@@ -37,8 +37,10 @@ async def stream():
     # 启动智能体
     asyncio.create_task(agent.execute())
 
+    # 阻塞式输出
     return await streamer.start_non_streaming_openai()
 
+    # 流式输出
     # return streamer.start_streaming_openai()
 
 import uvicorn

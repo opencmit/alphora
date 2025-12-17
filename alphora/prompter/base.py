@@ -256,6 +256,11 @@ class BasePrompt:
         msg.add_text(content=instruction)
 
         if is_stream:
+            logger.warning(
+                "当前使用同步方法 `call`，无法向客户端发送流式响应；"
+                "请改用异步方法 `acall`。"
+                " [Synchronous `call` does not support client streaming; use `acall` for API streaming.]"
+            )
             try:
                 generator_with_content_type: BaseGenerator = self.llm.get_streaming_response(message=msg,
                                                                                              content_type=content_type,
@@ -288,25 +293,14 @@ class BasePrompt:
                     content = ck.content
                     content_type = ck.content_type
 
-                    if self.callback:
+                    if content_type == 'think' and enable_thinking:
+                        reasoning_content += content
+                        print(content, end='', flush=True)
+                        continue
 
-                        if content_type == 'think' and enable_thinking:
-                            self.callback.send_data(content_type=content_type, content=content)
-                            reasoning_content += content
-                            continue
-
-                        if content:
-                            self.callback.send_data(content_type=content_type, content=content)
-                            output_str += content
-                    else:
-                        if content_type == 'think' and enable_thinking:
-                            reasoning_content += content
-                            print(content, end='', flush=True)
-                            continue
-
-                        if content:
-                            output_str += content
-                            print(content, end='', flush=True)
+                    if content:
+                        output_str += content
+                        print(content, end='', flush=True)
 
                 if force_json:
                     try:

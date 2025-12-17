@@ -4,19 +4,15 @@ import json
 from typing import (
     List, Dict, Union, Optional, Iterator, Mapping, Any, AsyncIterator
 )
-from functools import wraps
-
 from openai import AsyncOpenAI, OpenAI
-
 from alphora.models.message import Message
 from alphora.models.llms.base import BaseLLM
 from alphora.models.llms.stream_helper import BaseGenerator, GeneratorOutput
-from alphora.server.stream_responser import DataStreamer
-
 from alphora.models.llms.balancer import _LLMLoadBalancer
 
-from alphora.utils.logger import get_logger
-logger = get_logger("test", level="DEBUG")
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 
 class APIInvalidResponse(Exception):
