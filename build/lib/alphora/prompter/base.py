@@ -268,6 +268,8 @@ class BasePrompt:
                                                                                              enable_thinking=enable_thinking,
                                                                                              system_prompt=system_prompt)
 
+                generator_with_content_type.callback = self.callback
+
                 # 后处理咯
                 if postprocessor:
                     if isinstance(postprocessor, List):
@@ -299,9 +301,12 @@ class BasePrompt:
                         print(content, end='', flush=True)
                         continue
 
-                    if content:
+                    if content and content_type == '[IGNORE]':
                         output_str += content
+
+                    if content and content_type != '[IGNORE]':
                         print(content, end='', flush=True)
+                        output_str += content
 
                 if force_json:
                     try:
@@ -390,6 +395,8 @@ class BasePrompt:
                                                                                                     enable_thinking=enable_thinking,
                                                                                                     system_prompt=system_prompt)
 
+                generator_with_content_type.callback = self.callback
+
                 # 后处理
                 if postprocessor:
                     if isinstance(postprocessor, List):
@@ -423,7 +430,10 @@ class BasePrompt:
                             reasoning_content += content
                             continue
 
-                        if content:
+                        if content and content_type == '[IGNORE]':
+                            output_str += content
+
+                        if content and content_type != '[IGNORE]':
                             await self.callback.send_data(content_type=content_type, content=content)
                             output_str += content
 
@@ -433,9 +443,12 @@ class BasePrompt:
                             print(content, end='', flush=True)
                             continue
 
-                        if content:
+                        if content and content_type == '[IGNORE]':
                             output_str += content
+
+                        if content and content_type != '[IGNORE]':
                             print(content, end='', flush=True)
+                            output_str += content
 
                 if force_json:
                     try:

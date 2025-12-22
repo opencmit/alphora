@@ -1,5 +1,5 @@
 from typing import Dict
-
+import json
 from alphora.agent.base import BaseAgent
 # from alphora.agent.models import AgentInput, AgentOutput
 from alphora.models.llms.openai_like import OpenAILike
@@ -22,13 +22,22 @@ class TeacherAgent(BaseAgent):
 
     async def teacher(self, query):
 
+        history = self.memory.build_history()
+
+        prompt = self.create_prompt(prompt="你是一个大学数学老师，目前正在回复学生的问题，请你准确的回复学生的问题，并且在回复之前先思考，输出格式需要是Json，包含 'thinking', 'response'这两个key。\n\n历史对话: \n{{history}} \n\n学生说:{{query}}")
+
+        prompt.update_placeholder(history=history)
+
         json_pp = JsonKeyExtractorPP(target_key='thinking')
 
-        prompt = self.create_prompt(prompt="你是一个高中数学老师，目前正在回复学生的问题，请你准确的回复学生的问题，并且在回复之前先思考，输出格式需要是Json，包含 'thinking', 'response'这两个key。\n\n学生说:{{query}}")
-
         print(prompt.render())
+
         teacher_resp = await prompt.acall(query=query, is_stream=True, force_json=True, postprocessor=json_pp)
-        print(teacher_resp)
+
+        teacher_resp = json.loads(teacher_resp).get('response', '')
+
+        self.memory.add_memory(role='学生', content=query)
+        self.memory.add_memory(role='老师', content=teacher_resp)
 
         await self.stream.astop(stop_reason='111')
 

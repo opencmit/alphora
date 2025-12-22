@@ -71,6 +71,7 @@ alphora/prompter/postprocess/__init__.py
 alphora/prompter/postprocess/base.py
 alphora/prompter/postprocess/dynamic_type.py
 alphora/prompter/postprocess/filter.py
+alphora/prompter/postprocess/json_key_extractor.py
 alphora/prompter/postprocess/pattern_match.py
 alphora/prompter/postprocess/replace.py
 alphora/prompter/postprocess/split_char.py
@@ -79,6 +80,7 @@ alphora/prompter/postprocess/__pycache__/__init__.cpython-311.pyc
 alphora/prompter/postprocess/__pycache__/base.cpython-311.pyc
 alphora/prompter/postprocess/__pycache__/dynamic_type.cpython-311.pyc
 alphora/prompter/postprocess/__pycache__/filter.cpython-311.pyc
+alphora/prompter/postprocess/__pycache__/json_key_extractor.cpython-311.pyc
 alphora/prompter/postprocess/__pycache__/pattern_match.cpython-311.pyc
 alphora/prompter/postprocess/__pycache__/replace.cpython-311.pyc
 alphora/prompter/postprocess/__pycache__/split_char.cpython-311.pyc

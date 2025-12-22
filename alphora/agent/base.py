@@ -1,21 +1,43 @@
-from fastapi import Request
+import inspect
+import uuid
+import time
 import asyncio
 from uuid import uuid4
-from alphora.models.llms.openai_like import OpenAILike
-from typing import Optional, List, Any, overload, Union, Dict, Iterator, TypeVar, Type
-from alphora.server.stream_responser import DataStreamer
+from datetime import datetime
+from fastapi import FastAPI, HTTPException
+from typing import TypeVar
 import logging
-from alphora.prompter import BasePrompt
 
+from alphora.models.llms.openai_like import OpenAILike
+from alphora.server.stream_responser import DataStreamer
+from alphora.prompter import BasePrompt
 from alphora.memory.base import BaseMemory
 from alphora.memory.memories.short_term_memory import ShortTermMemory
 from alphora.agent.stream import Stream
 from alphora.server.openai_request_body import OpenAIRequest
-
 from alphora.agent.agent_contract import *
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger(__name__)
 
 
 T = TypeVar('T', bound='BaseAgent')
+
+
+class MemoryPoolItem(BaseModel):
+    """记忆池项模型，包含记忆实例和元数据"""
+    memory: BaseMemory
+    create_time: float
+    last_access_time: float
+    agent_id: str
+    session_id: str
+
+    class Config:
+        arbitrary_types_allowed = True
 
 
 class BaseAgent(object):
@@ -329,12 +351,20 @@ class BaseAgent(object):
     def to_api(
             self,
             method: str,
-            path: str = "/alphadata"
-    ) -> "FastAPI":
+            path: str = "/alphadata",
+            memory_ttl: int = 3600,  # 记忆过期时间（秒），默认1小时
+            max_memory_items: int = 1000,  # 记忆池最大容量
+            auto_clean_interval: int = 600  # 自动清理过期记忆的间隔（秒）
+    ) -> FastAPI:
         """
         将当前 agent 的指定方法暴露为可直接运行的 FastAPI 应用。
+        记忆池功能：
+        - 基于session_id管理会话记忆
+        - 自动清理过期记忆
+        - 限制记忆池最大容量
+        - 自动更新记忆访问时间
 
-        要求目标方法：
+        目标方法：
           - 是 async def 定义的异步方法
           - 有且仅有一个参数，类型注解为 OpenAIRequest
 
@@ -345,16 +375,13 @@ class BaseAgent(object):
         Args:
             method: 要暴露的方法名（如 "chat"）
             path: API 路径（默认 "/invoke"）
-            title: FastAPI 文档标题
-            description: FastAPI 文档描述
+            memory_ttl: 记忆过期时间（秒），默认3600秒（1小时）
+            max_memory_items: 记忆池最大容量，默认1000个会话
+            auto_clean_interval: 自动清理过期记忆的间隔（秒），默认600秒（10分钟）
 
         Returns:
             FastAPI 实例，可直接传给 uvicorn.run()
         """
-        import inspect
-        from fastapi import FastAPI
-        from alphora.server.openai_request_body import OpenAIRequest
-        import asyncio
 
         if not hasattr(self, method):
             raise ValueError(f"Method '{method}' not found in {self.__class__.__name__}")
@@ -375,29 +402,174 @@ class BaseAgent(object):
                 f"but got: {param.annotation}"
             )
 
-        app = FastAPI()
+        app = FastAPI(
+            title=f"{self.agent_type} API",
+            description=f"Auto-generated API for {self.agent_type} (method: {method})"
+        )
 
-        # 获取原始函数
+        # 记忆池存储 - 使用session_id作为key
+        memory_pool: Dict[str, MemoryPoolItem] = {}
+
+        # 自动清理任务的控制标志
+        cleanup_task: Optional[asyncio.Task] = None
+
         original_func = getattr(self, method)
 
-        path = f'{path}/chat/completions'
+        api_path = f'{path}/chat/completions'
 
-        @app.post(path)
-        async def dynamic_endpoint(request: OpenAIRequest):
+        async def clean_expired_memory():
+            """后台任务：定期清理过期记忆"""
+            while True:
+                try:
+                    current_time = time.time()
+                    expired_keys = []
 
-            is_stream = request.stream
+                    # 收集过期的记忆项
+                    for session_id, item in memory_pool.items():
+                        # 检查是否过期
+                        if current_time - item.last_access_time > memory_ttl:
+                            expired_keys.append(session_id)
+                        # 检查是否超出最大容量（LRU策略）
+                        elif len(memory_pool) > max_memory_items:
+                            # 找到最久未访问的项
+                            lru_key = min(memory_pool.keys(),
+                                          key=lambda k: memory_pool[k].last_access_time)
+                            expired_keys.append(lru_key)
 
-            # 换一个新的DataStreamer
-            new_callback = DataStreamer(timeout=300)
-            self.callback = new_callback
-            self.stream = Stream(callback=self.callback)
+                    # 清理过期项
+                    for key in expired_keys:
+                        if key in memory_pool:
+                            del memory_pool[key]
+                            logging.debug(f"Removed expired memory for session: {key}")
 
-            _ = asyncio.create_task(original_func(request))
+                except Exception as e:
+                    logging.error(f"Error cleaning memory pool: {e}")
 
-            if is_stream:
-                return self.callback.start_streaming_openai()
+                # 等待下一次清理
+                await asyncio.sleep(auto_clean_interval)
+
+        def get_or_create_memory(session_id: str) -> BaseMemory:
+            """获取或创建会话记忆"""
+            if session_id in memory_pool:
+                memory_item = memory_pool[session_id]
+                memory_item.last_access_time = time.time()
+                logging.debug(f"Using existing memory for session: {session_id}")
+                return memory_item.memory
             else:
-                return await self.callback.start_non_streaming_openai()
+                # 创建新的记忆实例（克隆当前agent的记忆配置）
+                new_memory = ShortTermMemory() if self.memory is None else self.memory.__class__()
+                # 复制记忆配置（如果有）
+                if hasattr(self.memory, 'config'):
+                    new_memory.config = self.memory.config.copy()
+
+                # 添加到记忆池
+                memory_pool[session_id] = MemoryPoolItem(
+                    memory=new_memory,
+                    create_time=time.time(),
+                    last_access_time=time.time(),
+                    agent_id=self.agent_id,
+                    session_id=session_id
+                )
+
+                logging.debug(f"Created new memory for session: {session_id} (total items: {len(memory_pool)})")
+                return new_memory
+
+        @app.on_event("startup")
+        async def startup_event():
+            nonlocal cleanup_task
+            cleanup_task = asyncio.create_task(clean_expired_memory())
+
+            # 构建标准化的启动信息
+            startup_info = {
+                "Agent基础信息": {
+                    "Agent类型": self.__class__.__name__,
+                    "暴露的业务方法": method,
+                    "LLM模型配置": self.llm.model_name if self.llm else "未配置",
+                    "默认记忆实现类": self.memory.__class__.__name__ if self.memory else "ShortTermMemory"
+                },
+                "API服务配置": {
+                    "基础访问路径": path,
+                    "完整接口路径": api_path,
+                    "请求参数规范": "OpenAIRequest 数据模型",
+                    "流式响应支持": "已启用",
+                    "非流式响应支持": "已启用"
+                },
+                "会话记忆池配置": {
+                    "记忆过期时间(TTL)": f"{memory_ttl} 秒（{memory_ttl/60:.1f} 分钟）",
+                    "最大会话容量": f"{max_memory_items} 个会话",
+                    "自动清理周期": f"{auto_clean_interval} 秒（{auto_clean_interval/60:.1f} 分钟）",
+                    "清理策略": "TTL过期清理 + LRU淘汰（超出容量时清理最久未访问会话）"
+                },
+                "运行环境信息": {
+                    "服务启动时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                }
+            }
+
+            logger.info("-" * 88)
+            logger.info("Agent API 服务启动配置信息")
+            logger.info("-" * 88)
+
+            for module, config_items in startup_info.items():
+                for key, value in config_items.items():
+                    logger.info(f"{key}: {value}")
+
+            logger.info("-" * 88)
+            logger.info("API 服务初始化完成，已进入就绪状态")
+            logger.info(f" * 服务访问端点: POST http://<部署地址>:<端口>{api_path}")
+            logger.info(f" * 会话隔离方式: 通过 session_id 参数区分不同会话记忆空间")
+            logger.info(f" * 记忆池清理任务: 已启动（TTL: {memory_ttl} 秒，清理周期: {auto_clean_interval} 秒）")
+            logger.info("-" * 88)
+
+        @app.on_event("shutdown")
+        async def shutdown_event():
+            """关闭时停止自动清理任务"""
+            nonlocal cleanup_task
+            if cleanup_task and not cleanup_task.done():
+                cleanup_task.cancel()
+                try:
+                    await cleanup_task
+                except asyncio.CancelledError:
+                    pass
+            logging.info("Memory pool auto-cleanup task stopped")
+
+        @app.post(api_path)
+        async def dynamic_endpoint(request: OpenAIRequest):
+            """动态API端点处理函数"""
+            try:
+                # 生成或使用session_id
+                session_id = request.session_id or str(uuid.uuid4())
+
+                # 获取/创建会话记忆
+                session_memory = get_or_create_memory(session_id)
+
+                # 保存原始memory以便恢复
+                original_memory = self.memory
+
+                try:
+                    # 将当前agent的memory切换为会话专属记忆
+                    self.memory = session_memory
+
+                    # 创建新的DataStreamer确保隔离
+                    new_callback = DataStreamer(timeout=300)
+                    self.callback = new_callback
+                    self.stream = Stream(callback=self.callback)
+
+                    _ = asyncio.create_task(original_func(request))
+
+                    if request.stream:
+                        return self.callback.start_streaming_openai()
+                    else:
+                        return await self.callback.start_non_streaming_openai()
+
+                finally:
+
+                    pass
+
+            except Exception as e:
+                logging.error(f"Error processing request: {e}", exc_info=True)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error processing request: {str(e)}"
+                )
 
         return app
-
