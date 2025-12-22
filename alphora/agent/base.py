@@ -43,7 +43,7 @@ class BaseAgent(object):
         self.llm = llm
 
         # Agent配置字典，会继承给派生智能体
-        self.config: Dict[str, Any]= {}
+        self.config: Dict[str, Any] = {}
 
         self.stream = Stream(callback=self.callback)
 
@@ -63,39 +63,32 @@ class BaseAgent(object):
 
     def update_config(self,
                       key: str,
-                      value: Any = None,
-                      merge: bool = True) -> None:
+                      value: Any = None) -> None:
         """
         更新单个配置项。
         :param key: 配置项的键名（必须为字符串）
         :param value: 配置项的值。若为 None，可将该 key 设为 None（允许）。
-        :param merge:
-            - 若为 True（默认）：将该 key-value 合并到现有 config 中。
-            - 若为 False：先清空 config，再仅设置此 key-value。
         :return: None
         """
         if not isinstance(key, str):
             raise TypeError("Parameter 'key' must be a string.")
 
-        if not merge:
-            # 清空现有配置，仅保留当前这一项
-            self.config = {key: value}
-        else:
-            self.config[key] = value
-        pass
+        self.config[key] = value
 
-    def get_config(self, key: str, default: Any = None) -> Any:
+    def get_config(self, key: str) -> Any:
         """
         获取指定配置项的值。
 
         :param key: 配置项的键名（必须为字符串）
-        :param default: 如果 key 不存在时返回的默认值（默认为 None）
         :return: 配置项的值，若不存在则返回 default
         """
         if not isinstance(key, str):
             raise TypeError("Parameter 'key' must be a string.")
 
-        return self.config.get(key, default)
+        if key not in self.config:
+            raise ValueError(f'{key} dose not exist.')
+
+        return self.config.get(key)
 
     def _reinitialize(self, **new_kwargs) -> None:
         merged_params = {**self.init_params, **new_kwargs}

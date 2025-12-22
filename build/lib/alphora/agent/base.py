@@ -27,9 +27,13 @@ class BaseAgent(object):
                  verbose: bool = False,
                  memory: Optional[BaseMemory] = None,
                  agent_id: Optional[str] = None,
+                 callback: Optional[DataStreamer] = None,
                  **kwargs):
 
-        self.callback = DataStreamer(timeout=300)
+        if not callback:
+            self.callback = DataStreamer(timeout=300)
+        else:
+            self.callback = callback
 
         self.agent_id = agent_id or str(uuid4())
 
@@ -37,6 +41,9 @@ class BaseAgent(object):
         self.memory = memory if memory is not None else ShortTermMemory()
 
         self.llm = llm
+
+        # Agent配置字典，会继承给派生智能体
+        self.config: Dict[str, Any] = {}
 
         self.stream = Stream(callback=self.callback)
 
@@ -53,6 +60,35 @@ class BaseAgent(object):
         # self._outputs: Dict[str, AgentOutput] = {}
 
         self._log = []
+
+    def update_config(self,
+                      key: str,
+                      value: Any = None) -> None:
+        """
+        更新单个配置项。
+        :param key: 配置项的键名（必须为字符串）
+        :param value: 配置项的值。若为 None，可将该 key 设为 None（允许）。
+        :return: None
+        """
+        if not isinstance(key, str):
+            raise TypeError("Parameter 'key' must be a string.")
+
+        self.config[key] = value
+
+    def get_config(self, key: str) -> Any:
+        """
+        获取指定配置项的值。
+
+        :param key: 配置项的键名（必须为字符串）
+        :return: 配置项的值，若不存在则返回 default
+        """
+        if not isinstance(key, str):
+            raise TypeError("Parameter 'key' must be a string.")
+
+        if key not in self.config:
+            raise ValueError(f'{key} dose not exist.')
+
+        return self.config.get(key)
 
     def _reinitialize(self, **new_kwargs) -> None:
         merged_params = {**self.init_params, **new_kwargs}

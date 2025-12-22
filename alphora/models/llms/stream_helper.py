@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import Iterator, AsyncIterator, Generic, TypeVar, Optional, Coroutine, Any
 from abc import ABC, abstractmethod
 
+from alphora.server.stream_responser import DataStreamer
+
 
 T = TypeVar('T')
 
@@ -14,10 +16,12 @@ class GeneratorOutput:
 
 
 class BaseGenerator(ABC, Generic[T]):
-    def __init__(self, content_type: str = 'text'):
+    def __init__(self, content_type: str = 'text', callback: DataStreamer = None):
         self.content_type = content_type
         self.instruction: Optional[str] = None
         self.finish_reason: Optional[str] = None
+
+        self.callback = callback
 
     def get_finish_reason(self) -> str:
         return self.finish_reason
