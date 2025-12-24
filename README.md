@@ -1,6 +1,6 @@
 # Alphora: 一个轻量的智能体开发框架
 
-Alphora 是一个轻量级的 AI 智能体开发工具包，提供了构建、部署和管理智能体所需的核心功能。它设计简洁、易于扩展，支持多种 LLM 模型，内置记忆管理、后处理、提示词模板等功能，帮助开发者快速构建复杂的智能体应用。
+Alphora 是一个轻量级的 AI 智能体开发工具包，提供了构建、部署和管理智能体所需的核心功能。设计简洁、易于扩展，支持多种 LLM 模型，内置记忆管理、后处理、提示词模板等功能，帮助开发者快速构建复杂的智能体应用。
 
 ## 🌟 核心特性
 
@@ -203,31 +203,9 @@ alphora/
 - `2-5-示例.py`：基础使用示例
 - `2-5-调用API.py`：展示如何调用外部 API
 
-## 🤝 贡献
-
-欢迎贡献代码、报告问题或提出建议！请遵循以下步骤：
-
-1. Fork 仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 打开 Pull Request
-
 ## 📄 许可证
 
 本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
-## 📧 联系方式
-
-- 作者：Tian tian
-- 邮箱：tiantianit@chinamobile.com
-
-## 📚 文档
-
-更多详细文档，请参考：
-- [API 文档](docs/api.md)
-- [快速入门指南](docs/quickstart.md)
-- [高级功能](docs/advanced.md)
 
 
 

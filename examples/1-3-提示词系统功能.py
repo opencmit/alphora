@@ -33,7 +33,7 @@ class PromptAgent(BaseAgent):
         
         # 从文件加载提示词模板
         prompt = self.create_prompt(
-            template_path="prompt_template.tmpl",
+            template_path="2-智能体/prompt_template.tmpl",
             template_desc="通用职业角色回答模板"
         )
         
