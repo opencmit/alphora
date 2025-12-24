@@ -190,10 +190,13 @@ class JsonKeyExtractorPP(BasePostProcessor):
                             valid_content = value_text[:valid_end_pos]
                             if valid_content:
                                 try:
-                                    await self.original_generator.callback.send_data(
-                                        content=valid_content,
-                                        content_type=self.content_type
-                                    )
+                                    if self.original_generator.callback:
+                                        await self.original_generator.callback.send_data(
+                                            content=valid_content,
+                                            content_type=self.content_type
+                                        )
+                                    else:
+                                        print(valid_content, end='', flush=True)
                                 except Exception as e:
                                     print(f"Callback send failed: {e}")
 
@@ -214,10 +217,14 @@ class JsonKeyExtractorPP(BasePostProcessor):
                             valid_content = self.buffer[:valid_end_pos]
                             if valid_content:
                                 try:
-                                    await self.original_generator.callback.send_data(
-                                        content=valid_content,
-                                        content_type=self.content_type
-                                    )
+                                    if self.original_generator.callback:
+                                        await self.original_generator.callback.send_data(
+                                            content=valid_content,
+                                            content_type=self.content_type
+                                        )
+                                    else:
+                                        print(valid_content, end='', flush=True)
+
                                 except Exception as e:
                                     print(f"Callback send failed: {e}")
 

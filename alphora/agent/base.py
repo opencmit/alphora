@@ -45,11 +45,12 @@ class BaseAgent(object):
                  callback: Optional[DataStreamer] = None,
                  **kwargs):
 
-        if not callback:
-            self.callback = DataStreamer(timeout=300)
-        else:
-            self.callback = callback
+        # if not callback:
+        #     self.callback = DataStreamer(timeout=300)
+        # else:
+        #     self.callback = callback
 
+        self.callback = callback
         self.agent_id = agent_id or str(uuid4())
 
         self.verbose = verbose
