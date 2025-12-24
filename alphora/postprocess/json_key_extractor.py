@@ -14,15 +14,47 @@ class JsonKeyExtractorPP(BasePostProcessor):
             self,
             target_key: str,
             stop_on_comma_or_brace: bool = True,
-            content_type: str = "text"
+            content_type: str = "text",
+            stream_only_target: bool = True,
+            response_only_target: bool = False,
     ):
+        """
+        :param target_key: 要提取的 JSON 字段名，如 'intent'
+        :param stop_on_comma_or_brace: 提取完目标 value 后，遇到 ',' 或 '}' 是否提前终止解析
+        :param content_type: 输出内容类型（暂用于兼容，如 "text"）
+        :param stream_only_target: 若为 True，流式输出（yield）仅包含 target_key 的 value 内容；
+                                   若为 False，则透传原始流。
+        :param response_only_target: 若为 True，最终返回的响应体（如 acall() 的 resp）仅包含
+                                   {target_key: extracted_value}；
+                                   若为 False，则返回完整解析出的 JSON 对象。
+
+        示例：
+            json_pp = JsonKeyExtractorPP(
+                target_key='intent',
+                stream_only_target=True,
+                response_only_target=False
+            )
+            resp = await prompter.acall(postprocessor=json_pp)
+            # 流式输出: "Data Query"
+            # resp.content: {"intent": "Data Query", "reason": "因为xxx"}
+        """
         self.target_key = target_key
         self.stop_on_comma_or_brace = stop_on_comma_or_brace
         self.output_content_type = content_type
 
+        self.stream_only_target = stream_only_target
+        self.response_only_target = response_only_target
+
     def process(self, generator: BaseGenerator[GeneratorOutput]) -> BaseGenerator[GeneratorOutput]:
         class JsonKeyExtractingGenerator(BaseGenerator[GeneratorOutput]):
-            def __init__(self, original_generator: BaseGenerator[GeneratorOutput], target_key: str, stop_flag: bool, out_type: str):
+            def __init__(self,
+                         original_generator: BaseGenerator[GeneratorOutput],
+                         target_key: str,
+                         stop_flag: bool,
+                         out_type: str,
+                         stream_only_target: bool = True,
+                         response_only_target: bool = False,):
+
                 super().__init__(out_type)
                 self.original_generator = original_generator
                 self.target_key = target_key
@@ -40,6 +72,9 @@ class JsonKeyExtractorPP(BasePostProcessor):
                 self.nest_level = 0  # 当前value内的嵌套层级
                 self.value_quote_type = None  # 目标value的引号类型（" / ' / None）
                 self.value_is_string = False  # 是否是字符串类型value
+
+                self.stream_only_target = stream_only_target
+                self.response_only_target = response_only_target
 
             def _parse_value_state(self, text: str) -> tuple[int, bool]:
                 """
@@ -110,6 +145,67 @@ class JsonKeyExtractorPP(BasePostProcessor):
                     return match.end()
                 return -1
 
+            async def agenerate(self) -> AsyncIterator[GeneratorOutput]:
+                """异步生成器：适配大chunk，通过callback输出完整value（修复内容重复/多余后缀问题）"""
+                async for output in self.original_generator:
+                    # ===================== 第一阶段：提取完成后的剩余内容处理 =====================
+                    if self.finished:
+                        # 提取完成后，直接忽略所有剩余内容（既不流式也不拼接），彻底终止后续处理
+                        yield GeneratorOutput(content=output.content, content_type='[BOTH_IGNORE]')
+                        continue
+
+                    # ===================== 第二阶段：未完成提取时的原始内容处理 =====================
+                    if self.stream_only_target and self.response_only_target:
+                        yield GeneratorOutput(content=output.content, content_type='[BOTH_IGNORE]')
+                    elif self.stream_only_target and not self.response_only_target:
+                        yield GeneratorOutput(content=output.content, content_type='[STREAM_IGNORE]')
+                    elif not self.stream_only_target and self.response_only_target:
+                        yield GeneratorOutput(content=output.content, content_type='[RESPONSE_IGNORE]')
+
+                    self.buffer += output.content
+
+                    # 阶段1：未找到目标key
+                    if not self.in_target_value:
+                        self.value_start_pos = self._find_target_key_position()
+                        if self.value_start_pos == -1:
+                            continue
+
+                        self.in_target_value = True
+                        value_text = self.buffer[self.value_start_pos:]
+                        valid_end_pos, is_finished = self._parse_value_state(value_text)
+
+                        if valid_end_pos > 0:
+                            valid_content = value_text[:valid_end_pos]
+                            if valid_content:
+                                yield GeneratorOutput(content=valid_content, content_type=self.content_type)
+
+                        if is_finished:
+                            self.finished = True
+                            # 关键修复1：提取完成后清空缓冲区，避免残留字符
+                            self.buffer = ""
+                            continue
+                        # 关键修复2：截断时包含终止符，避免残留
+                        self.buffer = self.buffer[self.value_start_pos + valid_end_pos:]
+                        self.value_start_pos = 0
+
+                    else:
+                        if not self.buffer:
+                            continue
+
+                        valid_end_pos, is_finished = self._parse_value_state(self.buffer)
+                        if valid_end_pos > 0:
+                            valid_content = self.buffer[:valid_end_pos]
+                            if valid_content:
+                                yield GeneratorOutput(content=valid_content, content_type=self.content_type)
+
+                        if is_finished:
+                            self.finished = True
+                            # 关键修复1：提取完成后清空缓冲区
+                            self.buffer = ""
+                            continue
+                        # 关键修复2：彻底截断到有效位置，不含残留
+                        self.buffer = self.buffer[valid_end_pos:]
+
             def generate(self) -> Iterator[GeneratorOutput]:
                 """同步生成器：适配大chunk，完整提取value"""
                 for output in self.original_generator:
@@ -164,80 +260,13 @@ class JsonKeyExtractorPP(BasePostProcessor):
 
                         self.buffer = self.buffer[valid_end_pos:]
 
-            async def agenerate(self) -> AsyncIterator[GeneratorOutput]:
-                """异步生成器：适配大chunk，通过callback输出完整value"""
-                async for output in self.original_generator:
-                    if self.finished:
-                        yield GeneratorOutput(content=output.content, content_type='[IGNORE]')
-                        continue
-
-                    yield GeneratorOutput(content=output.content, content_type='[IGNORE]')
-
-                    self.buffer += output.content
-
-                    # 阶段1：未找到目标key
-                    if not self.in_target_value:
-                        self.value_start_pos = self._find_target_key_position()
-                        if self.value_start_pos == -1:
-                            continue
-
-                        self.in_target_value = True
-                        value_text = self.buffer[self.value_start_pos:]
-
-                        valid_end_pos, is_finished = self._parse_value_state(value_text)
-
-                        if valid_end_pos > 0 and hasattr(self.original_generator, 'callback'):
-                            valid_content = value_text[:valid_end_pos]
-                            if valid_content:
-                                try:
-                                    if self.original_generator.callback:
-                                        await self.original_generator.callback.send_data(
-                                            content=valid_content,
-                                            content_type=self.content_type
-                                        )
-                                    else:
-                                        print(valid_content, end='', flush=True)
-                                except Exception as e:
-                                    print(f"Callback send failed: {e}")
-
-                        if is_finished:
-                            self.finished = True
-                            continue
-                        self.buffer = self.buffer[self.value_start_pos + valid_end_pos:]
-                        self.value_start_pos = 0
-
-                    else:
-                        if not self.buffer:
-                            continue
-
-                        valid_end_pos, is_finished = self._parse_value_state(self.buffer)
-
-                        # 输出有效内容
-                        if valid_end_pos > 0 and hasattr(self.original_generator, 'callback'):
-                            valid_content = self.buffer[:valid_end_pos]
-                            if valid_content:
-                                try:
-                                    if self.original_generator.callback:
-                                        await self.original_generator.callback.send_data(
-                                            content=valid_content,
-                                            content_type=self.content_type
-                                        )
-                                    else:
-                                        print(valid_content, end='', flush=True)
-
-                                except Exception as e:
-                                    print(f"Callback send failed: {e}")
-
-                        # 更新状态
-                        if is_finished:
-                            self.finished = True
-                            continue
-                        self.buffer = self.buffer[valid_end_pos:]
 
         return JsonKeyExtractingGenerator(
             generator,
             self.target_key,
             self.stop_on_comma_or_brace,
-            self.output_content_type
+            self.output_content_type,
+            self.stream_only_target,
+            self.response_only_target,
         )
 

@@ -75,7 +75,7 @@ class MyAgent(BaseAgent):
         # 首先查询天气
         weather = await weather_agent.get_weather(city=city)
 
-        json_pp = JsonKeyExtractorPP(target_key='response')  # 这里创建的后处理器，只会输出大模型输出Json中的response部分
+        json_pp = JsonKeyExtractorPP(target_key='thinking')  # 这里创建的后处理器，只会输出大模型输出Json中的response部分
         # replace_pp = ReplacePP(replace_map={'北京': '******'})  # 这里假设有若干敏感词，也会在API接口中被替换、屏蔽
 
         history = self.memory.build_history()  # 构建历史对话
@@ -88,6 +88,7 @@ class MyAgent(BaseAgent):
                                           force_json=True,  # 可以强制输出Json
                                           postprocessor=json_pp)  # 后处理器
 
+        print('debug', guide_resp)
         self.memory.add_memory(role='游客', content=query)
         self.memory.add_memory(role='导游', content=guide_resp)
 

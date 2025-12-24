@@ -278,8 +278,6 @@ class BasePrompt:
                                                                                              enable_thinking=enable_thinking,
                                                                                              system_prompt=system_prompt)
 
-                generator_with_content_type.callback = self.callback
-
                 # 后处理咯
                 if postprocessor:
                     if isinstance(postprocessor, List):
@@ -311,12 +309,24 @@ class BasePrompt:
                         print(content, end='', flush=True)
                         continue
 
-                    if content and content_type == '[IGNORE]':
+                    if content and content_type == '[STREAM_IGNORE]':
                         output_str += content
+                        continue
 
-                    if content and content_type != '[IGNORE]':
+                    if content and content_type == '[RESPONSE_IGNORE]':
+                        # 只流式输出，不拼接到返回里面
+                        print(content, end='', flush=True)
+                        continue
+
+                    if content_type == '[BOTH_IGNORE]':
+                        # 不流式输出，也不拼接到返回里
+                        continue
+
+                    if content and content_type not in ['[STREAM_IGNORE]', '[RESPONSE_IGNORE]']:
+                        # 又流式输出，又拼接到返回
                         print(content, end='', flush=True)
                         output_str += content
+                        continue
 
                 if force_json:
                     try:
@@ -405,8 +415,6 @@ class BasePrompt:
                                                                                                     enable_thinking=enable_thinking,
                                                                                                     system_prompt=system_prompt)
 
-                generator_with_content_type.callback = self.callback
-
                 # 后处理
                 if postprocessor:
                     if isinstance(postprocessor, List):
@@ -440,12 +448,24 @@ class BasePrompt:
                             reasoning_content += content
                             continue
 
-                        if content and content_type == '[IGNORE]':
+                        if content and content_type == '[STREAM_IGNORE]':
                             output_str += content
+                            continue
 
-                        if content and content_type != '[IGNORE]':
+                        if content and content_type == '[RESPONSE_IGNORE]':
+                            # 只流式输出，不拼接到返回里面
+                            await self.callback.send_data(content_type=content_type, content=content)
+                            continue
+
+                        if content_type == '[BOTH_IGNORE]':
+                            # 不流式输出，也不拼接到返回里
+                            continue
+
+                        if content and content_type not in ['[STREAM_IGNORE]', '[RESPONSE_IGNORE]']:
+                            # 又流式输出，又拼接到返回
                             await self.callback.send_data(content_type=content_type, content=content)
                             output_str += content
+                            continue
 
                     else:
                         if content_type == 'think' and enable_thinking:
@@ -453,12 +473,24 @@ class BasePrompt:
                             print(content, end='', flush=True)
                             continue
 
-                        if content and content_type == '[IGNORE]':
+                        if content and content_type == '[STREAM_IGNORE]':
                             output_str += content
+                            continue
 
-                        if content and content_type != '[IGNORE]':
+                        if content and content_type == '[RESPONSE_IGNORE]':
+                            # 只流式输出，不拼接到返回里面
+                            print(content, end='', flush=True)
+                            continue
+
+                        if content_type == '[BOTH_IGNORE]':
+                            # 不流式输出，也不拼接到返回里
+                            continue
+
+                        if content and content_type not in ['[STREAM_IGNORE]', '[RESPONSE_IGNORE]']:
+                            # 又流式输出，又拼接到返回
                             print(content, end='', flush=True)
                             output_str += content
+                            continue
 
                 if force_json:
                     try:

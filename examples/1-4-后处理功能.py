@@ -24,14 +24,17 @@ class ProductInfoAgent(BaseAgent):
         prompt = "请提供关于{{ product_name }}的详细信息，包括：名称、价格、分类和描述。"
         prompt += "请以JSON格式返回，包含name、price、category和description字段。"
 
-        json_pp = JsonKeyExtractorPP(target_key="description")
+        json_pp = JsonKeyExtractorPP(target_key="description",
+                                     stream_only_target=True,
+                                     response_only_target=True)
+
         replace_pp = ReplacePP(replace_map={"苹果": "华为"})
 
         complex_pp = replace_pp >> json_pp
         
         prompter = self.create_prompt(prompt=prompt)
         prompter.update_placeholder(product_name=product_name)
-        resp = await prompter.acall(is_stream=True, force_json=True, postprocessor=complex_pp)
+        resp = await prompter.acall(is_stream=True, force_json=True, postprocessor=json_pp)
         print('完整输出：', resp)
         return resp
 
