@@ -496,7 +496,7 @@ class BasePrompt:
                     try:
                         output_str = json.dumps(json.loads(repair_json(json_str=output_str)), ensure_ascii=False)
                     except Exception as e:
-                        raise RuntimeError(f"流式响应时发生错误: {e}")
+                        raise RuntimeError(f"该提示词下无法将输出解析为Json，请修改提示词或将 `force_json` 设为 False 再尝试")
 
                 finish_reason = generator_with_content_type.finish_reason
 
