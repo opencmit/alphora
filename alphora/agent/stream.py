@@ -119,6 +119,12 @@ class Stream:
         """
         终结流式输出
         """
+        logger.warning(
+            "当前使用同步方法 `stop`，无法向客户端发送流式响应；"
+            "请改用异步方法 `astop`。"
+            " [Synchronous `stop` does not support client streaming; use `astop` for API streaming.]"
+        )
+
         print(f"\n[Stream stopped: {stop_reason}]")
 
     async def astream_to_response(self,
