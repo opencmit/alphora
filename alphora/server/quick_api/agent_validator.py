@@ -35,7 +35,7 @@ def validate_agent_method(
 
     if not hasattr(agent, method_name):
         raise AgentValidationError(
-            f"Agent类 {agent.__name__} 不存在方法: {method_name}"
+            f"Agent类 {agent.__class__.__name__} 不存在方法: {method_name}"
         )
 
     # 校验方法是异步的
