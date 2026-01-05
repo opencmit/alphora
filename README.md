@@ -19,7 +19,19 @@ Alphora 是一个轻量级的 AI 智能体开发工具包，提供了构建、�
 ### 依赖要求
 
 - Python >= 3.9
-- 依赖库：fastapi, uvicorn, pydantic, openai, numpy 等
+
+最小依赖：
+- dill==0.3.9
+- fastapi==0.128.0
+- Jinja2==3.1.6
+- json_repair==0.52.1
+- openai==2.14.0
+- pandas==2.3.3
+- pydantic==2.12.5
+- Requests==2.32.5
+- setuptools==80.9.0
+- typing_extensions==4.15.0
+- uvicorn==0.40.0
 
 ### 安装步骤
 
