@@ -738,7 +738,7 @@ if __name__ == '__main__':
     from alphora.utils.base64 import file_to_base64
 
     llm = OpenAILike(base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                     api_key="sk-3d3f75c8f74b46ceb8397b69218667fd",
+                     api_key="sk-xxx",
                      model_name='qwen-vl-max-latest',
                      is_multimodal=True)
 

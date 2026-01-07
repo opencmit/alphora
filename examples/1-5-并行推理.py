@@ -32,7 +32,7 @@ class ParallelAgent(BaseAgent):
 async def main():
     print("===== 后处理功能示例 =====\n")
 
-    llm_api_key: str = 'sk-68ac5f5ccf3540ba834deeeaecb48987'
+    llm_api_key: str = 'sk-xxx'
     llm_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     llm_model_name: str = "qwen-plus"
     

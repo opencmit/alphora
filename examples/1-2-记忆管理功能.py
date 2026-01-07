@@ -2,7 +2,7 @@ from alphora.agent.base import BaseAgent
 from alphora.models.llms.openai_like import OpenAILike
 
 # 配置LLM
-llm_api_key: str = 'sk-68ac5f5ccf3540ba834deeeaecb48987'  # 替换为您的API密钥
+llm_api_key: str = 'sk-xxx'  # 替换为您的API密钥
 llm_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 llm_model_name: str = "qwen-plus"
 

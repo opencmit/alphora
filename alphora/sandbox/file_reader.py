@@ -343,17 +343,17 @@ if __name__ == '__main__':
     from alphora.models import OpenAILike
 
     # lm1 = OpenAILike(base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    #                  api_key="sk-3d3f75c8f74b46ceb8397b69218667fd",
+    #                  api_key="sk-xxx",
     #                  model_name='qwen-vl-max-latest',
     #                  is_multimodal=True)
 
     lm1 = OpenAILike(base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                     api_key="sk-3d3f75c8f74b46ceb8397b69218667fd",
+                     api_key="sk-xxx",
                      model_name='qwen-plus',
                      is_multimodal=False)
 
     lm2 = OpenAILike(base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                     api_key="sk-3d3f75c8f74b46ceb8397b69218667fd",
+                     api_key="sk-xxx",
                      model_name='qwen-plus',
                      is_multimodal=False)
 
