@@ -231,7 +231,8 @@ class BasePrompt:
                             List['BasePostProcessor'] | List[Callable[[BaseGenerator], BaseGenerator]] | None = None,
              enable_thinking: bool = False,
              force_json: bool = False,
-             long_response: bool = False
+             long_response: bool = False,
+             system_prompt: str = None
              ) -> BaseGenerator | str | Any:
         """
         调用大模型对Prompt进行推理
@@ -245,13 +246,14 @@ class BasePrompt:
             enable_thinking: 是否开启思考
             force_json: 强制Json
             long_response: 是否启用长响应模式（自动续写）
+            system_prompt: 系统提示词
         Returns:
         """
 
         if not self.llm:
             raise ValueError("LLM not initialized")
 
-        system_prompt = None
+        system_prompt = system_prompt
 
         if force_json:
             system_prompt = "必须输出Json格式"
@@ -393,7 +395,8 @@ class BasePrompt:
                                        Callable[[BaseGenerator], BaseGenerator]] | None = None,
                     enable_thinking: bool = False,
                     force_json: bool = False,
-                    long_response: bool = False
+                    long_response: bool = False,
+                    system_prompt: str = None
                     ) -> BaseGenerator | str | Any:
         """
         调用大模型对Prompt进行推理
@@ -407,6 +410,7 @@ class BasePrompt:
             enable_thinking: 是否开启思考
             force_json: 强制Json
             long_response: 是否启用长响应模式（自动续写）
+            system_prompt: 系统提示词
         Returns:
         """
 
@@ -416,7 +420,7 @@ class BasePrompt:
         if not content_type:
             content_type = self.content_type or 'char'
 
-        system_prompt = None
+        system_prompt = system_prompt
 
         if force_json:
             system_prompt = "必须输出Json格式"
