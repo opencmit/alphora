@@ -4,7 +4,7 @@ from typing import Type, Dict, Any, Optional
 
 from fastapi import FastAPI
 
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 
 from alphora.server.quick_api.config import APIPublisherConfig
 from alphora.server.quick_api.memory_pool import MemoryPool

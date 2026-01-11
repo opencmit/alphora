@@ -38,7 +38,7 @@ pip install alphora
 ### 1. Create a Simple Agent
 
 ```python
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.models.llms.openai_like import OpenAILike
 
 # Configure LLM
@@ -54,44 +54,48 @@ agent = BaseAgent(llm=llm, verbose=True)
 # Create prompt
 prompt = agent.create_prompt(prompt="You are an assistant. Please answer the user's question: {{query}}")
 
+
 # Call agent
 async def main():
     response = await prompt.acall(query="What is artificial intelligence?", is_stream=False)
     print(response)
 
+
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())
 ```
 
 ### 2. Create a Custom Agent
 
 ```python
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.models.llms.openai_like import OpenAILike
 from alphora.server.openai_request_body import OpenAIRequest
+
 
 class TeacherAgent(BaseAgent):
     async def teacher(self, query):
         # Build conversation history
         history = self.memory.build_history()
-        
+
         # Create prompt
         prompt = self.create_prompt(
             prompt="You are a university mathematics teacher currently answering student questions. Please provide accurate responses.\n\nConversation History:\n{{history}}\n\nStudent says: {{query}}"
         )
-        
+
         prompt.update_placeholder(history=history)
-        
+
         # Call LLM
         response = await prompt.acall(query=query, is_stream=False)
-        
+
         # Save conversation to memory
         self.memory.add_memory(role='student', content=query)
         self.memory.add_memory(role='teacher', content=response)
-        
+
         return response
-    
+
     async def api_logic(self, request: OpenAIRequest):
         query = request.get_user_query()
         response = await self.teacher(query)
@@ -436,7 +440,7 @@ The project includes several detailed examples demonstrating various framework c
 Demonstrates creating and using a simple agent with basic conversation capabilities.
 
 ```python
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.models.llms.openai_like import OpenAILike
 
 # Configure LLM
@@ -445,13 +449,16 @@ llm = OpenAILike(api_key="your-api-key", base_url="https://api.example.com/v1", 
 # Create agent
 agent = BaseAgent(llm=llm, verbose=True)
 
+
 # Call agent
 async def main():
     response = await agent.chat(query="What is artificial intelligence?")
     print(response)
 
+
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())
 ```
 

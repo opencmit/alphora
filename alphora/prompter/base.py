@@ -2,8 +2,9 @@ import json
 import logging
 import os
 import re
+import uuid
 from pathlib import Path
-from typing import Optional, List, Callable, Any, Union
+from typing import Optional, List, Callable, Any, Union, Dict, Literal, TYPE_CHECKING
 
 from jinja2 import Environment, Template, BaseLoader, meta
 
@@ -16,11 +17,15 @@ from json_repair import repair_json
 from alphora.models.llms.base import BaseLLM
 from alphora.models.llms.stream_helper import BaseGenerator
 
+if TYPE_CHECKING:
+    from alphora.memory import MemoryManager
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
 class PrompterOutput(str):
+    """原有类，完全不变"""
     def __new__(cls, content: str, reasoning: str = "", finish_reason: str = "",
                 continuation_count: int = 0):
         instance = super().__new__(cls, content)
@@ -55,12 +60,27 @@ class BasePrompt:
                  verbose: bool = False,
                  callback: Optional[DataStreamer] = None,
                  content_type: Optional[str] = None,
+                 system_prompt: Optional[str] = None,
+                 enable_memory: bool = False,
+                 memory: Optional['MemoryManager'] = None,
+                 memory_id: Optional[str] = None,
+                 max_history_rounds: int = 10,
+                 auto_save_memory: bool = True,
                  **kwargs):
 
         """
         Args:
+            template_path: 模板文件路径（传统模式）
+            template_desc: 模板描述
             verbose: 是否打印大模型的中间过程
-            memory: 记忆棒
+            callback: 流式回调
+            content_type: 内容类型
+            system_prompt: 系统提示词（新模式，支持占位符）
+            enable_memory: 是否启用记忆（仅新模式可用）
+            memory: MemoryManager 实例
+            memory_id: 记忆ID，用于区分不同会话
+            max_history_rounds: 最大历史轮数
+            auto_save_memory: 是否自动保存对话到记忆
             **kwargs: 占位符
         """
 
@@ -88,9 +108,272 @@ class BasePrompt:
         if self.prompt:
             self.env = self.prompt.environment
             self.placeholders = self._get_template_variables()
-
         else:
             self.placeholders = []
+
+        self._system_prompt_raw = system_prompt  # 原始 system_prompt（可能含占位符）
+        self._system_prompt_template: Optional[Template] = None
+        self.enable_memory = enable_memory
+        self._memory = memory
+        self._memory_id = memory_id or f"prompt_{uuid.uuid4().hex[:8]}"
+        self.max_history_rounds = max_history_rounds
+        self.auto_save_memory = auto_save_memory
+
+        # 判断使用哪种模式
+        self._use_new_mode = system_prompt is not None
+        self._use_legacy_mode = self.prompt is not None or self.content
+
+        # 互斥检查
+        self._validate_mode()
+
+        # 如果有 system_prompt，初始化其模板
+        if self._system_prompt_raw:
+            if self.env is None:
+                self.env = Environment(loader=BaseLoader())
+            self._system_prompt_template = self.env.from_string(self._system_prompt_raw)
+            # 解析 system_prompt 中的占位符
+            self._update_placeholders_from_system_prompt()
+
+        # 如果启用记忆但没有传入 memory，自动创建内存存储的
+        if self.enable_memory and self._memory is None:
+            raise RuntimeError("启用记忆但没有传入 memory")
+
+    def _validate_mode(self):
+        """验证模式互斥性"""
+        # 情况1：prompt + enable_memory
+        if self._use_legacy_mode and self.enable_memory:
+            raise ValueError(
+                "\n" + "=" * 60 + "\n"
+                                  "❌ 配置错误：传统模式不支持 Memory 功能\n"
+                                  "=" * 60 + "\n\n"
+                                             "您同时使用了 `prompt`/`template_path` 和 `enable_memory=True`，\n"
+                                             "这两种模式不能混用。\n\n"
+                                             "【传统模式】使用 prompt 参数：\n"
+                                             "  - 所有内容（包括历史记录）渲染后放入 role='user' 的 content\n"
+                                             "  - 不支持自动记忆管理\n"
+                                             "  - 适合需要完全自定义提示词结构的场景\n\n"
+                                             "  示例：\n"
+                                             "    prompt = create_prompt(\n"
+                                             "        prompt='历史记录：{{history}}\\n请回答：{{query}}'\n"
+                                             "    )\n"
+                                             "    history = memory.build_history(max_round=5)\n"
+                                             "    prompt.update_placeholder(history=history)\n"
+                                             "    await prompt.acall(query='你好')\n\n"
+                                             "【新模式】使用 system_prompt 参数：\n"
+                                             "  - 支持规范的 messages 结构（system/user/assistant 分离）\n"
+                                             "  - 支持自动记忆管理\n"
+                                             "  - 适合需要多轮对话记忆的场景\n\n"
+                                             "  示例：\n"
+                                             "    prompt = create_prompt(\n"
+                                             "        system_prompt='你是一个{{personality}}的助手',\n"
+                                             "        enable_memory=True,\n"
+                                             "        memory=memory\n"
+                                             "    )\n"
+                                             "    prompt.update_placeholder(personality='友好')\n"
+                                             "    await prompt.acall(query='你好')  # 自动管理历史\n\n"
+                                             "请选择其中一种模式使用。"
+                                             "\n" + "=" * 60
+            )
+
+        # 情况2：prompt + system_prompt
+        if self._use_legacy_mode and self._use_new_mode:
+            raise ValueError(
+                "\n" + "=" * 60 + "\n"
+                                  "❌ 配置错误：不能同时使用 prompt 和 system_prompt\n"
+                                  "=" * 60 + "\n\n"
+                                             "您同时使用了 `prompt`/`template_path` 和 `system_prompt`，\n"
+                                             "这两种模式不能混用。\n\n"
+                                             "【传统模式】使用 prompt 参数：\n"
+                                             "  prompt = create_prompt(\n"
+                                             "      prompt='你是助手。历史：{{history}}\\n问题：{{query}}'\n"
+                                             "  )\n\n"
+                                             "【新模式】使用 system_prompt 参数：\n"
+                                             "  prompt = create_prompt(\n"
+                                             "      system_prompt='你是一个友好的助手',\n"
+                                             "      enable_memory=True\n"
+                                             "  )\n\n"
+                                             "请选择其中一种模式使用。"
+                                             "\n" + "=" * 60
+            )
+
+    def _update_placeholders_from_system_prompt(self):
+        """从 system_prompt 中提取占位符并合并"""
+        if self._system_prompt_raw and self.env:
+            parsed = self.env.parse(self._system_prompt_raw)
+            variables = meta.find_undeclared_variables(parsed)
+            new_vars = [var for var in variables if var != 'query']
+            # 合并到 placeholders
+            for var in new_vars:
+                if var not in self.placeholders:
+                    self.placeholders.append(var)
+
+    # ==================== 新增：system_prompt 渲染 ====================
+
+    def _render_system_prompt(self) -> Optional[str]:
+        """渲染 system_prompt（应用占位符）"""
+        if not self._system_prompt_template:
+            return None
+
+        try:
+            return self._system_prompt_template.render(self.context)
+        except Exception as e:
+            logger.error(f"渲染 system_prompt 错误: {e}")
+            return self._system_prompt_raw
+
+    # ==================== 新增：Memory 相关方法 ====================
+
+    @property
+    def memory(self) -> Optional['MemoryManager']:
+        """获取记忆管理器"""
+        return self._memory
+
+    @memory.setter
+    def memory(self, value: 'MemoryManager'):
+        """设置记忆管理器"""
+        self._memory = value
+        if value is not None:
+            self.enable_memory = True
+
+    @property
+    def memory_id(self) -> str:
+        """获取记忆ID"""
+        return self._memory_id
+
+    @memory_id.setter
+    def memory_id(self, value: str):
+        """设置记忆ID"""
+        self._memory_id = value
+
+    def get_memory(self) -> Optional['MemoryManager']:
+        """
+        获取记忆管理器实例
+        
+        可用于：
+        - 共享给其他 Prompt
+        - 手动操作记忆（添加、搜索等）
+        - 获取历史记录
+        
+        Returns:
+            MemoryManager 实例
+        """
+        return self._memory
+
+    def set_memory(
+            self,
+            memory: 'MemoryManager',
+            memory_id: Optional[str] = None
+    ) -> 'BasePrompt':
+        """
+        设置记忆管理器
+        
+        Args:
+            memory: MemoryManager 实例
+            memory_id: 记忆ID（可选）
+            
+        Returns:
+            self（支持链式调用）
+        """
+        self._memory = memory
+        if memory_id:
+            self._memory_id = memory_id
+        self.enable_memory = True
+        return self
+
+    def clear_memory(self) -> 'BasePrompt':
+        """
+        清空当前 memory_id 的记忆
+        
+        Returns:
+            self（支持链式调用）
+        """
+        if self._memory:
+            self._memory.clear_memory(self._memory_id)
+        return self
+
+    def get_history(
+            self,
+            format: Literal["text", "messages"] = "messages",
+            max_round: Optional[int] = None
+    ) -> Union[str, List[Dict[str, str]]]:
+        """
+        获取对话历史
+        
+        Args:
+            format: 输出格式
+                - "messages": List[Dict]，可直接用于 LLM
+                - "text": 字符串格式
+            max_round: 最大轮数（不传则使用 max_history_rounds）
+            
+        Returns:
+            对话历史
+        """
+        if not self._memory:
+            return [] if format == "messages" else ""
+
+        return self._memory.build_history(
+            memory_id=self._memory_id,
+            max_round=max_round or self.max_history_rounds,
+            format=format,
+            include_timestamp=False
+        )
+
+    def _build_messages_for_new_mode(
+            self,
+            query: str,
+            force_json: bool = False
+    ) -> List[Dict[str, str]]:
+        """
+        构建新模式下的 messages 列表
+        
+        结构：
+        1. [可选] force_json 的 system message
+        2. system_prompt（渲染后）
+        3. 历史对话（从 memory 获取）
+        4. 当前用户输入（query 原文）
+        """
+        messages = []
+
+        # 1. force_json 提示
+        if force_json:
+            messages.append({
+                "role": "system",
+                "content": "请严格使用 JSON 格式输出"
+            })
+
+        # 2. system_prompt
+        rendered_system = self._render_system_prompt()
+        if rendered_system:
+            messages.append({
+                "role": "system",
+                "content": rendered_system
+            })
+
+        # 3. 历史对话
+        if self.enable_memory and self._memory:
+            history = self._memory.build_history(
+                memory_id=self._memory_id,
+                max_round=self.max_history_rounds,
+                format="messages",
+                include_timestamp=False
+            )
+            if history:
+                messages.extend(history)
+
+        # 4. 当前用户输入
+        messages.append({
+            "role": "user",
+            "content": query
+        })
+
+        return messages
+
+    def _save_to_memory(self, query: str, response: str):
+        """保存对话到记忆（query 原文 + LLM 响应原文）"""
+        if self.enable_memory and self._memory and self.auto_save_memory:
+            self._memory.add_memory("user", query, memory_id=self._memory_id)
+            self._memory.add_memory("assistant", response, memory_id=self._memory_id)
+
+    # ==================== 原有方法，完全不变 ====================
 
     @staticmethod
     def _get_base_path():
@@ -205,7 +488,12 @@ class BasePrompt:
 
         self.placeholders = self._get_template_variables()  # 更新占位符列表
 
-        pass
+        # ========== 新增：标记为传统模式 ==========
+        self._use_legacy_mode = True
+        # 重新验证模式
+        if self.enable_memory or self._system_prompt_raw:
+            self._validate_mode()
+        # ========== 新增结束 ==========
 
     def add_llm(self, model=None) -> "BasePrompt":
         """
@@ -221,6 +509,8 @@ class BasePrompt:
         self.llm = model
         return self
 
+    # ==================== call 方法 - 支持新模式 ====================
+
     def call(self,
              query: str = None,
              is_stream: bool = False,
@@ -232,13 +522,16 @@ class BasePrompt:
              enable_thinking: bool = False,
              force_json: bool = False,
              long_response: bool = False,
-             system_prompt: str = None
+             system_prompt: str = None,
+             # ========== 新增参数 ==========
+             save_to_memory: Optional[bool] = None,
+             # ========== 新增结束 ==========
              ) -> BaseGenerator | str | Any:
         """
         调用大模型对Prompt进行推理
         Args:
             content_type:
-            query: 用户问题（Prompt中的query占位符）
+            query: 用户问题（传统模式下是 Prompt 中的 query 占位符，新模式下是用户输入原文）
             is_stream: 是否输出流式
             multimodal_message: # 包含图片、视频、语音等多模态数据
             return_generator: 是否返回生成器，默认返回字符串，并做流式输出，如果此项为True，则仅返回生成器
@@ -246,27 +539,38 @@ class BasePrompt:
             enable_thinking: 是否开启思考
             force_json: 强制Json
             long_response: 是否启用长响应模式（自动续写）
-            system_prompt: 系统提示词
+            system_prompt: 系统提示词（传统模式下使用）
+            save_to_memory: 是否保存到记忆（新模式下有效，默认使用 auto_save_memory）
         Returns:
         """
 
         if not self.llm:
             raise ValueError("LLM not initialized")
 
-        system_prompt = system_prompt
+        # ========== 新增：判断使用哪种模式 ==========
+        use_new_mode = self._use_new_mode and not multimodal_message  # 新模式，但多模态暂不支持
 
-        if force_json:
-            system_prompt = "必须输出Json格式"
+        if use_new_mode:
+            # 新模式：构建规范的 messages 列表
+            messages = self._build_messages_for_new_mode(query=query, force_json=force_json)
+            msg = None  # 不使用 Message 对象
+            instruction = None
+        else:
+            # 传统模式：原有逻辑
+            messages = None
+            system_prompt = system_prompt
+            if force_json:
+                system_prompt = "必须输出Json格式"
 
-        instruction = self.render()
+            instruction = self.render()
+            msg = multimodal_message or Message()
 
-        msg = multimodal_message or Message()
+            if query:
+                instruction = Template(instruction)
+                instruction = instruction.render(query=query)
 
-        if query:
-            instruction = Template(instruction)
-            instruction = instruction.render(query=query)
-
-        msg.add_text(content=instruction)
+            msg.add_text(content=instruction)
+        # ========== 新增结束 ==========
 
         if is_stream:
             logger.warning(
@@ -288,12 +592,21 @@ class BasePrompt:
                         enable_thinking=enable_thinking
                     )
                 else:
-                    generator_with_content_type: BaseGenerator = self.llm.get_streaming_response(
-                        message=msg,
-                        content_type=content_type,
-                        enable_thinking=enable_thinking,
-                        system_prompt=system_prompt
-                    )
+                    # ========== 修改：根据模式选择调用方式 ==========
+                    if use_new_mode:
+                        generator_with_content_type: BaseGenerator = self.llm.get_streaming_response(
+                            message=messages,
+                            content_type=content_type,
+                            enable_thinking=enable_thinking,
+                        )
+                    else:
+                        generator_with_content_type: BaseGenerator = self.llm.get_streaming_response(
+                            message=msg,
+                            content_type=content_type,
+                            enable_thinking=enable_thinking,
+                            system_prompt=system_prompt
+                        )
+                    # ========== 修改结束 ==========
 
                 # 后处理咯
                 if postprocessor:
@@ -359,7 +672,16 @@ class BasePrompt:
                     continuation_count = generator_with_content_type.continuation_count
 
                 if self.verbose:
-                    logger.info(msg=f'\n\nInstruction:\n{instruction}\n\n\nResponse:\n{output_str}')
+                    if use_new_mode:
+                        logger.info(msg=f'\n\nMessages:\n{messages}\n\n\nResponse:\n{output_str}')
+                    else:
+                        logger.info(msg=f'\n\nInstruction:\n{instruction}\n\n\nResponse:\n{output_str}')
+
+                # ========== 新增：保存到记忆 ==========
+                should_save = save_to_memory if save_to_memory is not None else self.auto_save_memory
+                if should_save and use_new_mode:
+                    self._save_to_memory(query, output_str)
+                # ========== 新增结束 ==========
 
                 if enable_thinking:
                     return PrompterOutput(content=output_str, reasoning=reasoning_content,
@@ -377,12 +699,25 @@ class BasePrompt:
             """
 
             try:
-                resp = self.llm.invoke(message=msg)
+                # ========== 修改：根据模式选择调用方式 ==========
+                if use_new_mode:
+                    resp = self.llm.invoke(message=messages)
+                else:
+                    resp = self.llm.invoke(message=msg)
+                # ========== 修改结束 ==========
+
+                # ========== 新增：保存到记忆 ==========
+                should_save = save_to_memory if save_to_memory is not None else self.auto_save_memory
+                if should_save and use_new_mode:
+                    self._save_to_memory(query, resp)
+                # ========== 新增结束 ==========
 
                 return PrompterOutput(content=resp, reasoning="", finish_reason="")
 
             except Exception as e:
                 raise RuntimeError(f"非流式响应时发生错误: {e}")
+
+    # ==================== acall 方法 - 支持新模式 ====================
 
     async def acall(self,
                     query: str = None,
@@ -396,13 +731,16 @@ class BasePrompt:
                     enable_thinking: bool = False,
                     force_json: bool = False,
                     long_response: bool = False,
-                    system_prompt: str = None
+                    system_prompt: str = None,
+                    # ========== 新增参数 ==========
+                    save_to_memory: Optional[bool] = None,
+                    # ========== 新增结束 ==========
                     ) -> BaseGenerator | str | Any:
         """
         调用大模型对Prompt进行推理
         Args:
             content_type:
-            query: 用户问题（Prompt中的query占位符）
+            query: 用户问题（传统模式下是 Prompt 中的 query 占位符，新模式下是用户输入原文）
             is_stream: 是否输出流式
             multimodal_message: # 包含图片、视频、语音等多模态数据
             return_generator: 是否返回生成器，默认返回字符串，并做流式输出，如果此项为True，则仅返回生成器
@@ -410,7 +748,8 @@ class BasePrompt:
             enable_thinking: 是否开启思考
             force_json: 强制Json
             long_response: 是否启用长响应模式（自动续写）
-            system_prompt: 系统提示词
+            system_prompt: 系统提示词（传统模式下使用）
+            save_to_memory: 是否保存到记忆（新模式下有效）
         Returns:
         """
 
@@ -420,20 +759,30 @@ class BasePrompt:
         if not content_type:
             content_type = self.content_type or 'char'
 
-        system_prompt = system_prompt
+        # ========== 新增：判断使用哪种模式 ==========
+        use_new_mode = self._use_new_mode and not multimodal_message
 
-        if force_json:
-            system_prompt = "必须输出Json格式"
+        if use_new_mode:
+            # 新模式
+            messages = self._build_messages_for_new_mode(query=query, force_json=force_json)
+            msg = None
+            instruction = None
+        else:
+            # 传统模式
+            messages = None
+            system_prompt = system_prompt
+            if force_json:
+                system_prompt = "必须输出Json格式"
 
-        instruction = self.render()
+            instruction = self.render()
+            msg = multimodal_message or Message()
 
-        msg = multimodal_message or Message()
+            if query:
+                instruction = Template(instruction)
+                instruction = instruction.render(query=query)
 
-        if query:
-            instruction = Template(instruction)
-            instruction = instruction.render(query=query)
-
-        msg.add_text(content=instruction)
+            msg.add_text(content=instruction)
+        # ========== 新增结束 ==========
 
         if is_stream:
             try:
@@ -449,12 +798,21 @@ class BasePrompt:
                         enable_thinking=enable_thinking
                     )
                 else:
-                    generator_with_content_type: BaseGenerator = await self.llm.aget_streaming_response(
-                        message=msg,
-                        content_type=content_type,
-                        enable_thinking=enable_thinking,
-                        system_prompt=system_prompt
-                    )
+                    # ========== 修改：根据模式选择调用方式 ==========
+                    if use_new_mode:
+                        generator_with_content_type: BaseGenerator = await self.llm.aget_streaming_response(
+                            message=messages,
+                            content_type=content_type,
+                            enable_thinking=enable_thinking,
+                        )
+                    else:
+                        generator_with_content_type: BaseGenerator = await self.llm.aget_streaming_response(
+                            message=msg,
+                            content_type=content_type,
+                            enable_thinking=enable_thinking,
+                            system_prompt=system_prompt
+                        )
+                    # ========== 修改结束 ==========
 
                 # 后处理
                 if postprocessor:
@@ -547,7 +905,16 @@ class BasePrompt:
                     continuation_count = generator_with_content_type.continuation_count
 
                 if self.verbose:
-                    logger.info(msg=f'\n\nInstruction:\n{instruction}\n\n\nResponse:\n{output_str}')
+                    if use_new_mode:
+                        logger.info(msg=f'\n\nMessages:\n{messages}\n\n\nResponse:\n{output_str}')
+                    else:
+                        logger.info(msg=f'\n\nInstruction:\n{instruction}\n\n\nResponse:\n{output_str}')
+
+                # ========== 新增：保存到记忆 ==========
+                should_save = save_to_memory if save_to_memory is not None else self.auto_save_memory
+                if should_save and use_new_mode:
+                    self._save_to_memory(query, output_str)
+                # ========== 新增结束 ==========
 
                 if enable_thinking:
                     return PrompterOutput(content=output_str, reasoning=reasoning_content,
@@ -567,15 +934,28 @@ class BasePrompt:
             """
 
             try:
-                resp = await self.llm.ainvoke(message=msg)
+                # ========== 修改：根据模式选择调用方式 ==========
+                if use_new_mode:
+                    resp = await self.llm.ainvoke(message=messages)
+                else:
+                    resp = await self.llm.ainvoke(message=msg)
+                # ========== 修改结束 ==========
+
+                # ========== 新增：保存到记忆 ==========
+                should_save = save_to_memory if save_to_memory is not None else self.auto_save_memory
+                if should_save and use_new_mode:
+                    self._save_to_memory(query, resp)
+                # ========== 新增结束 ==========
 
                 return PrompterOutput(content=resp, reasoning="", finish_reason="")
 
             except Exception as e:
                 raise RuntimeError(f"非流式响应时发生错误: {e}")
 
+    # ==================== 原有方法，完全不变 ====================
+
     def update_placeholder(self, **kwargs):
-        """更新占位符值"""
+        """更新占位符值（同时支持 prompt 和 system_prompt 中的占位符）"""
         invalid_placeholders = [k for k in kwargs if k not in self.placeholders]
         missing_placeholders = [p for p in self.placeholders if p not in kwargs and p not in self.context]
 
@@ -602,6 +982,14 @@ class BasePrompt:
 
     def __str__(self) -> str:
         try:
+            # ========== 新增：新模式下显示 system_prompt ==========
+            if self._use_new_mode:
+                rendered = self._render_system_prompt()
+                if rendered:
+                    return f"[新模式] system_prompt: {rendered}"
+                return "BasePrompt - system_prompt 未渲染或内容为空"
+            # ========== 新增结束 ==========
+
             rendered = self.render()
             if not rendered.strip():
                 return f"BasePrompt - 模板未渲染或内容为空"

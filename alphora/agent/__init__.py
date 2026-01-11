@@ -1,2 +1,2 @@
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 

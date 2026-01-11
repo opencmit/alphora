@@ -1,7 +1,7 @@
 import inspect
 from typing import Type, Dict, Any
 
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.server.openai_request_body import OpenAIRequest
 
 

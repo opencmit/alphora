@@ -1,13 +1,13 @@
 from uuid import uuid4
-from typing import TypeVar, List, Dict, Optional, Any, Type, Union
+from typing import TypeVar, List, Dict, Optional, Any, Type, Union, TYPE_CHECKING
 import logging
 from alphora.models.llms.openai_like import OpenAILike
 from alphora.server.stream_responser import DataStreamer
 from alphora.prompter import BasePrompt
-from alphora.memory.base import BaseMemory
-from alphora.memory.memories.short_term_memory import ShortTermMemory
 from alphora.agent.stream import Stream
 from pydantic import BaseModel
+
+from alphora.memory import MemoryManager
 
 
 logging.basicConfig(
@@ -23,7 +23,7 @@ T = TypeVar('T', bound='BaseAgent')
 
 class MemoryPoolItem(BaseModel):
     """记忆池项模型，包含记忆实例和元数据"""
-    memory: BaseMemory
+    memory: MemoryManager
     create_time: float
     last_access_time: float
     agent_id: str
@@ -40,7 +40,7 @@ class BaseAgent(object):
     def __init__(self,
                  llm: Optional[OpenAILike] = None,
                  verbose: bool = False,
-                 memory: Optional[BaseMemory] = None,
+                 memory: Optional[MemoryManager] = None,
                  agent_id: Optional[str] = None,
                  callback: Optional[DataStreamer] = None,
                  **kwargs):
@@ -54,7 +54,7 @@ class BaseAgent(object):
         self.agent_id = agent_id or str(uuid4())
 
         self.verbose = verbose
-        self.memory = memory if memory is not None else ShortTermMemory()
+        self.memory = memory if memory is not None else MemoryManager(llm=llm)
 
         self.llm = llm
 
@@ -161,26 +161,86 @@ class BaseAgent(object):
             prompt: str = None,
             template_path: str = None,
             template_desc: str = "",
-            content_type: Optional[str] = None) -> BasePrompt:
+            content_type: Optional[str] = None,
+
+            system_prompt: Optional[str] = None,
+            enable_memory: bool = False,
+            memory: Optional['MemoryManager'] = None,
+            memory_id: Optional[str] = None,
+            max_history_rounds: int = 10,
+            auto_save_memory: bool = True,
+
+    ) -> BasePrompt:
         """
         快速创建提示词模板
+
+        支持两种模式：
+
+        【传统模式】使用 prompt/template_path 参数：
+            - 所有内容渲染后放入 role='user' 的 content
+            - 不支持自动记忆管理
+            - 适合需要完全自定义提示词结构的场景
+
+            示例：
+                prompt = self.create_prompt(
+                    prompt='历史记录：{{history}}\\n请回答：{{query}}'
+                )
+                prompt.update_placeholder(history=history)
+                await prompt.acall(query='你好')
+
+        【新模式】使用 system_prompt 参数：
+            - 支持规范的 messages 结构（system/user/assistant 分离）
+            - 支持自动记忆管理
+            - 适合需要多轮对话记忆的场景
+
+            示例：
+                prompt = self.create_prompt(
+                    system_prompt='你是一个{{personality}}的助手',
+                    enable_memory=True,
+                    memory=memory
+                )
+                prompt.update_placeholder(personality='友好')
+                await prompt.acall(query='你好')  # 自动管理历史
+
+        注意：两种模式不能混用！
+
         Args:
-            template_path: 提示词路径
+            prompt: 提示词字符串（传统模式）
+            template_path: 提示词模板文件路径（传统模式）
             template_desc: 提示词描述
             content_type: 当调用 acall 方法时，输出的流的 content_type
-            prompt: Optional
+            system_prompt: 系统提示词（新模式，支持占位符）
+            enable_memory: 是否启用记忆（仅新模式）
+            memory_id: 记忆ID，用于区分不同会话（新模式）
+            max_history_rounds: 最大历史轮数（新模式）
+            auto_save_memory: 是否自动保存对话到记忆（新模式）
 
-        Returns: BasePrompt实例
+        Returns:
+            BasePrompt 实例
         """
 
         if not self.llm:
             raise ValueError("LLM model is not configured")
 
+        if memory is None:
+            memory = self.memory
+
+        if memory_id is None:
+            memory_id = "default"
+
         prompt_instance = BasePrompt(
             template_path=template_path,
             template_desc=template_desc,
             callback=self.callback,
-            content_type=content_type
+            content_type=content_type,
+
+            system_prompt=system_prompt,
+            enable_memory=enable_memory,
+            memory=memory,
+            memory_id=memory_id,
+            max_history_rounds=max_history_rounds,
+            auto_save_memory=auto_save_memory,
+
         )
 
         try:
@@ -198,9 +258,56 @@ class BaseAgent(object):
             logging.error(error_msg)
             raise ValueError(error_msg)
 
+    def create_memory(
+            self,
+            storage_path: Optional[str] = None,
+            storage_type: str = "memory",
+            **kwargs
+    ) -> 'MemoryManager':
+        """
+        创建 MemoryManager 实例（用于 Prompt 级别的记忆）
+
+        Args:
+            storage_path: 存储路径（如果需要持久化）
+            storage_type: 存储类型
+                - "memory": 内存存储（默认，程序结束后丢失）
+                - "json": JSON 文件存储
+                - "sqlite": SQLite 数据库存储（推荐用于生产）
+            **kwargs: 传递给 MemoryManager 的其他参数
+
+        Returns:
+            MemoryManager 实例
+
+        使用示例：
+            # 内存存储
+            memory = agent.create_memory()
+
+            # SQLite 持久化
+            memory = agent.create_memory(
+                storage_path="./data/chat.db",
+                storage_type="sqlite"
+            )
+
+            # JSON 持久化
+            memory = agent.create_memory(
+                storage_path="./data/chat.json",
+                storage_type="json"
+            )
+
+            # 使用
+            prompt = agent.create_prompt(
+                system_prompt="你是助手",
+                enable_memory=True,
+                memory=memory
+            )
+        """
+        from alphora.memory import MemoryManager
+        return MemoryManager(
+            storage_path=storage_path,
+            storage_type=storage_type,
+            **kwargs
+        )
+
     def __or__(self, other):
         # TODO
         pass
-
-
-

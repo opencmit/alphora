@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, Type, Optional, TypeVar
 from uuid import uuid4
 
-from alphora.memory.base import BaseMemory
-from alphora.memory.memories.short_term_memory import ShortTermMemory
+from alphora.memory import MemoryManager
 
 T = TypeVar('T', bound='BaseMemory')
 
@@ -15,7 +14,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MemoryPoolItem:
     """记忆池项模型"""
-    memory: BaseMemory
+    memory: MemoryManager
     create_time: float
     last_access_time: float
     session_id: str
@@ -32,8 +31,8 @@ class MemoryPool:
     def get_or_create(
             self,
             session_id: Optional[str],
-            memory_cls: Type[BaseMemory] = ShortTermMemory
-    ) -> tuple[str, BaseMemory]:
+            memory_cls: Type[MemoryManager] = MemoryManager
+    ) -> tuple[str, MemoryManager]:
         """
         获取或创建会话记忆
         :param session_id: 会话ID

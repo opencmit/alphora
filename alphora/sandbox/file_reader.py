@@ -3,7 +3,7 @@ import pandas as pd
 from typing import List, Dict, Any, Optional, Tuple, Union, Callable, Type
 from pathlib import Path
 from alphora.models import OpenAILike
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.sandbox.prompts.excel_prompt import excel_prompt
 from alphora.sandbox.prompts.image_prompt import image_prompt
 

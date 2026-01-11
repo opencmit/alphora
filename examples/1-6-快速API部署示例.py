@@ -1,7 +1,7 @@
 from typing import List
 import json
 from functools import reduce
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.models.llms.openai_like import OpenAILike
 from alphora.server.openai_request_body import OpenAIRequest
 from alphora.postprocess.json_key_extractor import JsonKeyExtractorPP

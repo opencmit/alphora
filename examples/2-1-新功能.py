@@ -189,7 +189,7 @@ async def demo_tracing():
 # 综合示例：使用新功能构建Agent
 # ============================================================
 
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.tools.executor import ToolAgentMixin
 
 

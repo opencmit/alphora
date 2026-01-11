@@ -1,8 +1,5 @@
 """
 记忆管理器
-
-统一的记忆管理入口，协调各类记忆，提供简洁的API。
-保持与原有 add_memory / build_history 接口兼容。
 """
 
 from typing import List, Optional, Dict, Any, Union, Literal
@@ -81,11 +78,11 @@ class MemoryManager:
         memory_id="chat_001",
         max_round=5
     )
-    
-    # 新功能：搜索记忆
+
+    # 搜索记忆
     results = memory.search("Python", memory_id="chat_001")
     
-    # 新功能：获取反思
+    # 获取反思
     reflection = await memory.reflect(memory_id="chat_001")
     ```
     """
@@ -116,15 +113,14 @@ class MemoryManager:
             auto_save: 是否自动保存
             auto_extract_tags: 是否自动提取标签
         """
-        # 初始化存储
+
         if storage is not None:
             self._storage = storage
         elif storage_path:
             self._storage = create_storage(storage_type, storage_path)
         else:
             self._storage = InMemoryStorage()
-        
-        # 初始化策略
+
         if isinstance(decay_strategy, str):
             self._decay_strategy = get_decay_strategy(decay_strategy)
         else:
@@ -153,8 +149,10 @@ class MemoryManager:
         
         # 从存储加载
         self._load_from_storage()
+
+        self.agent = None
     
-    # ==================== 存储操作 ====================
+    # ==================== 存储 ====================
     
     def _get_storage_key(self, memory_id: str) -> str:
         """获取存储键"""
@@ -211,7 +209,7 @@ class MemoryManager:
         if self._auto_save:
             self._storage.save()
     
-    # ==================== 核心接口（兼容旧版本）====================
+    # ==================== 核心接口 ====================
     
     def add_memory(
         self,
@@ -396,8 +394,6 @@ class MemoryManager:
         """构建消息列表格式"""
         return [memory.to_message_format() for memory in memories]
     
-    # ==================== 新增功能 ====================
-    
     def get_memories(self, memory_id: str) -> List[MemoryUnit]:
         """获取指定ID的所有记忆"""
         return self._cache.get(memory_id, [])
@@ -523,7 +519,7 @@ class MemoryManager:
         """判断记忆是否为空"""
         return len(self.get_memories(memory_id)) == 0
     
-    # ==================== 反思功能 ====================
+    # ==================== 反思、总结 ====================
     
     async def reflect(
         self,
@@ -655,6 +651,11 @@ class MemoryManager:
     def __repr__(self) -> str:
         total = sum(len(m) for m in self._cache.values())
         return f"MemoryManager(memories={total}, ids={len(self._cache)})"
+
+    def __del__(self):
+        """实例被销毁时调用"""
+        total_memories = sum(len(m) for m in self._cache.values())
+        logger.info(f"[MemoryManager销毁] 总记忆数:{total_memories} 对话ID数:{len(self._cache)}")
 
 
 # ==================== 兼容旧接口 ====================

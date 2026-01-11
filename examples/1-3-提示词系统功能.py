@@ -1,4 +1,4 @@
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.models.llms.openai_like import OpenAILike
 
 # 配置LLM

@@ -33,7 +33,7 @@ class BaseLLM(ABC):
 
     @abstractmethod
     def get_non_stream_response(self,
-                                message: Union[str, Message],
+                                message: Union[str, Message, List[Dict[str, Any]]],
                                 enable_thinking: bool = False,
                                 system_prompt: Optional[str] = None) -> str:
         """Synchronous non-streaming response."""
@@ -41,7 +41,7 @@ class BaseLLM(ABC):
 
     @abstractmethod
     async def aget_non_stream_response(self,
-                                       message: Union[str, Message],
+                                       message: Union[str, Message, List[Dict[str, Any]]],
                                        enable_thinking: bool = False,
                                        system_prompt: Optional[str] = None) -> str:
         """Asynchronous non-streaming response."""
@@ -50,7 +50,7 @@ class BaseLLM(ABC):
     @abstractmethod
     def get_streaming_response(
             self,
-            message: Union[str, Message],
+            message: Union[str, Message, List[Dict[str, Any]]],
             content_type: str = "char",
             enable_thinking: bool = False,
             system_prompt: Optional[str] = None
@@ -61,7 +61,7 @@ class BaseLLM(ABC):
     @abstractmethod
     async def aget_streaming_response(
             self,
-            message: Union[str, Message],
+            message: Union[str, Message, List[Dict[str, Any]]],
             content_type: str = "char",
             enable_thinking: bool = False,
             system_prompt: Optional[str] = None
@@ -69,10 +69,10 @@ class BaseLLM(ABC):
         """Asynchronous streaming response (placeholder; actual impl may use async generator)."""
         raise NotImplementedError
 
-    def invoke(self, message: Union[str, Message]) -> str:
+    def invoke(self, message: Union[str, Message, List[Dict[str, Any]]]) -> str:
         return self.get_non_stream_response(message)
 
-    async def ainvoke(self, message: Union[str, Message]) -> str:
+    async def ainvoke(self, message: Union[str, Message, List[Dict[str, Any]]]) -> str:
         return await self.aget_non_stream_response(message)
 
     def stream(self, *args, **kwargs) -> BaseGenerator:

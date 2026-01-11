@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="alphora",
-    version="1.0.1",
+    version="1.0.2",
     description="AI Agent Development Toolkit",
     author="Tian tian",
     author_email="tiantianit@chinamobile.com",

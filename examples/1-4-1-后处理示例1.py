@@ -9,7 +9,7 @@ JsonKeyExtractorPP 使用示例
 """
 
 import asyncio
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.models.llms import OpenAILike
 from alphora.postprocess import JsonKeyExtractorPP
 

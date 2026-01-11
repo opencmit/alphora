@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 
 from copy import copy
 
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.server.openai_request_body import OpenAIRequest
 from alphora.server.stream_responser import DataStreamer
 from alphora.agent.stream import Stream

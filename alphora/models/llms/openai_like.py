@@ -69,18 +69,29 @@ class OpenAILike(BaseLLM):
                                   is_multimodal=self.is_multimodal)
 
     def _prepare_messages(self,
-                          message: Union[str, Message],
+                          message: Union[str, Message, List[Dict[str, Any]]],  # ← 新增 List[Dict[str, Any]]
                           system_prompt: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         快速将字符串输出组装成传入oai模型的消息体
+        
+        支持三种输入：
+        - str: 纯文本，自动包装为 Message
+        - Message: 多模态消息对象
+        - List[Dict]: 已组装好的 messages 列表（新增，用于带记忆的规范调用）
+        
         :param message:
         :param system_prompt:
         :return:
         """
+        # ========== 新增：支持直接传入 messages 列表 ==========
+        if isinstance(message, list):
+            return message
+        # ========== 新增结束 ==========
+
         if isinstance(message, str):
             message = Message().add_text(message)
         elif not isinstance(message, Message):
-            raise TypeError("message must be str or Message")
+            raise TypeError("message must be str or Message or List[Dict]")
 
         messages = []
         sys_prompt = system_prompt or self.system_prompt
@@ -90,7 +101,7 @@ class OpenAILike(BaseLLM):
         return messages
 
     def get_non_stream_response(self,
-                                message: Union[str, Message],
+                                message: Union[str, Message, List[Dict[str, Any]]],  # ← 新增类型
                                 enable_thinking: bool = False,
                                 system_prompt: Optional[str] = None,) -> str:
         """
@@ -141,7 +152,7 @@ class OpenAILike(BaseLLM):
 
     def get_streaming_response(
             self,
-            message: Union[str, Message],
+            message: Union[str, Message, List[Dict[str, Any]]],
             content_type: str = "char",
             enable_thinking: bool = False,
             system_prompt: Optional[str] = None,
@@ -200,7 +211,7 @@ class OpenAILike(BaseLLM):
         return gen
 
     async def aget_non_stream_response(self,
-                                       message: Union[str, Message],
+                                       message: Union[str, Message, List[Dict[str, Any]]],  # ← 新增类型
                                        enable_thinking: bool = False,
                                        system_prompt: Optional[str] = None,) -> str:
         """
@@ -245,7 +256,7 @@ class OpenAILike(BaseLLM):
 
     async def aget_streaming_response(
             self,
-            message: Union[str, Message],
+            message: Union[str, Message, List[Dict[str, Any]]],  # ← 新增类型
             content_type: str = "char",
             enable_thinking: bool = False,
             system_prompt: Optional[str] = None,
@@ -367,5 +378,3 @@ class OpenAILike(BaseLLM):
                                   completion_params=other.completion_params)
 
         return self
-
-

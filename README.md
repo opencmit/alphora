@@ -72,14 +72,14 @@ pip install -e .
 ### 1. 创建一个简单的智能体
 
 ```python
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.models.llms.openai_like import OpenAILike
 
 # 配置 LLM
 llm = OpenAILike(
-    api_key="your-api-key",
-    base_url="https://api.example.com/v1",
-    model_name="your-model-name"
+  api_key="your-api-key",
+  base_url="https://api.example.com/v1",
+  model_name="your-model-name"
 )
 
 # 创建智能体
@@ -88,48 +88,52 @@ agent = BaseAgent(llm=llm, verbose=True)
 # 创建提示词
 prompt = agent.create_prompt(prompt="你是一个助手，请回答用户的问题：{{query}}")
 
+
 # 调用智能体
 async def main():
-    response = await prompt.acall(query="什么是人工智能？", is_stream=False)
-    print(response)
+  response = await prompt.acall(query="什么是人工智能？", is_stream=False)
+  print(response)
+
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+  import asyncio
+
+  asyncio.run(main())
 ```
 
 ### 2. 创建自定义智能体
 
 ```python
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.models.llms.openai_like import OpenAILike
 from alphora.server.openai_request_body import OpenAIRequest
 
+
 class TeacherAgent(BaseAgent):
-    async def teacher(self, query):
-        # 构建历史对话
-        history = self.memory.build_history()
-        
-        # 创建提示词
-        prompt = self.create_prompt(
-            prompt="你是一个大学数学老师，目前正在回复学生的问题，请你准确的回复学生的问题。\n\n历史对话: \n{{history}} \n\n学生说:{{query}}"
-        )
-        
-        prompt.update_placeholder(history=history)
-        
-        # 调用 LLM
-        response = await prompt.acall(query=query, is_stream=False)
-        
-        # 保存对话记忆
-        self.memory.add_memory(role='学生', content=query)
-        self.memory.add_memory(role='老师', content=response)
-        
-        return response
-    
-    async def api_logic(self, request: OpenAIRequest):
-        query = request.get_user_query()
-        response = await self.teacher(query)
-        return response
+  async def teacher(self, query):
+    # 构建历史对话
+    history = self.memory.build_history()
+
+    # 创建提示词
+    prompt = self.create_prompt(
+      prompt="你是一个大学数学老师，目前正在回复学生的问题，请你准确的回复学生的问题。\n\n历史对话: \n{{history}} \n\n学生说:{{query}}"
+    )
+
+    prompt.update_placeholder(history=history)
+
+    # 调用 LLM
+    response = await prompt.acall(query=query, is_stream=False)
+
+    # 保存对话记忆
+    self.memory.add_memory(role='学生', content=query)
+    self.memory.add_memory(role='老师', content=response)
+
+    return response
+
+  async def api_logic(self, request: OpenAIRequest):
+    query = request.get_user_query()
+    response = await self.teacher(query)
+    return response
 ```
 
 ### 3. 部署为 API 服务
@@ -470,7 +474,7 @@ response = await prompt.acall(query=query, postprocessor=MyCustomPostprocess())
 展示如何创建和使用一个简单的智能体，包括基本的对话功能。
 
 ```python
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.models.llms.openai_like import OpenAILike
 
 # 配置LLM
@@ -479,14 +483,17 @@ llm = OpenAILike(api_key="your-api-key", base_url="https://api.example.com/v1", 
 # 创建智能体
 agent = BaseAgent(llm=llm, verbose=True)
 
+
 # 调用智能体
 async def main():
-    response = await agent.chat(query="什么是人工智能？")
-    print(response)
+  response = await agent.chat(query="什么是人工智能？")
+  print(response)
+
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+  import asyncio
+
+  asyncio.run(main())
 ```
 
 ### 2. 记忆管理功能 (`examples/1-2-记忆管理功能.py`)

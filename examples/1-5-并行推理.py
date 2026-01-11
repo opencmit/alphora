@@ -1,6 +1,6 @@
 import asyncio
 from typing import List
-from alphora.agent.base import BaseAgent
+from alphora.agent.base_agent import BaseAgent
 from alphora.models.llms import OpenAILike
 from alphora.postprocess import JsonKeyExtractorPP, ReplacePP
 from alphora.memory import BaseMemory
