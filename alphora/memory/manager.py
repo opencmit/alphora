@@ -40,6 +40,8 @@ from alphora.storage import (
     create_storage
 )
 
+from alphora.debugger import tracer
+
 logger = logging.getLogger(__name__)
 
 
@@ -283,6 +285,10 @@ class MemoryManager:
                     memory_id
                 )
             )
+
+        # 加入跟踪
+        if tracer.enabled:
+            tracer.track_memory_add(memory_id=memory_id, role=role, content=content)
 
         return new_memory.unique_id
 

@@ -1,7 +1,5 @@
 """
 Alphora Debugger 使用示例
-
-本文件展示了调试系统的各种使用方式。
 """
 
 import asyncio
@@ -12,7 +10,7 @@ from alphora.agent import BaseAgent
 class TransAgent(BaseAgent):
     async def run(self, query: str):
         prompt = self.create_prompt(
-            system_prompt="你是一个翻译专家，负责把用户问题翻译为{{target_lang}}"
+            prompt="你是一个翻译专家，负责把用户问题翻译为{{target_lang}}"
         )
 
         prompt.update_placeholder(target_lang="en")
@@ -22,9 +20,12 @@ class TransAgent(BaseAgent):
 class MyAgent(BaseAgent):
     async def run(self, query: str):
         prompt = self.create_prompt(
-            system_prompt="你是一个助手",
+            system_prompt="你是一个{{personality}}助手",
             enable_memory=True
         )
+
+        prompt.update_placeholder(personality="友善的")
+
         resp = await prompt.acall(query=query, is_stream=True)
 
         trans_agent = self.derive(TransAgent)

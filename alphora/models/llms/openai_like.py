@@ -1,6 +1,17 @@
+"""
+OpenAI-Like LLM 客户端
+
+集成 Debugger 追踪功能：
+- 完整的请求/响应追踪
+- Token 统计
+- 流式输出追踪
+- 性能指标（TTFT、TPS）
+"""
+
 import os
 import time
 import json
+import traceback
 from typing import (
     List, Dict, Union, Optional, Iterator, Mapping, Any, AsyncIterator
 )
@@ -53,6 +64,7 @@ class OpenAILike(BaseLLM):
         self.max_tokens = max_tokens
         self.top_p = top_p
 
+        # Agent ID（由 Agent 设置，用于追踪）
         self.agent_id: str = "default"
 
         if not self.api_key:
@@ -73,15 +85,11 @@ class OpenAILike(BaseLLM):
                           system_prompt: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         快速将字符串输出组装成传入oai模型的消息体
-        
+
         支持三种输入：
         - str: 纯文本，自动包装为 Message
         - Message: 多模态消息对象
         - List[Dict]: 已组装好的 messages 列表（新增，用于带记忆的规范调用）
-        
-        :param message:
-        :param system_prompt:
-        :return:
         """
 
         if isinstance(message, list):
@@ -99,55 +107,102 @@ class OpenAILike(BaseLLM):
         messages.append(message.to_openai_format(role="user"))
         return messages
 
+    def _get_tracer(self):
+        """获取 tracer 实例（懒加载避免循环导入）"""
+        try:
+            from alphora.debugger import tracer
+            return tracer
+        except ImportError:
+            return None
+
     def get_non_stream_response(self,
                                 message: Union[str, Message, List[Dict[str, Any]]],
                                 enable_thinking: bool = False,
                                 system_prompt: Optional[str] = None,) -> str:
         """
         同步-非流式
-        :param message:
-        :param enable_thinking:
-        :param system_prompt:
-        :return:
         """
-        multi_model_msg = False
+        tracer = self._get_tracer()
+        call_id = None
 
+        multi_model_msg = False
         if isinstance(message, Message):
             if message.has_images() or message.has_audios() or message.has_videos():
                 multi_model_msg = True
 
         messages = self._prepare_messages(message=message, system_prompt=system_prompt)
 
+        # 开始追踪
+        if tracer and tracer.enabled:
+            call_id = tracer.track_llm_start(
+                agent_id=self.agent_id,
+                model_name=self.model_name,
+                messages=messages,
+                is_streaming=False,
+                request_params={
+                    'temperature': self.temperature,
+                    'max_tokens': self.max_tokens,
+                    'top_p': self.top_p
+                },
+                system_prompt=system_prompt
+            )
+
         start = time.time()
 
         try:
             client, params = self._balancer.get_next_sync_backend(need_multimodal=multi_model_msg)
         except Exception as e:
+            if tracer and call_id:
+                tracer.track_llm_error(call_id, str(e), traceback.format_exc())
             raise RuntimeError(f"llm error: {e}")
 
-        completion = client.chat.completions.create(
-            **params,
-            messages=messages,
-            timeout=9999,
-            stream=False,
-            extra_body=self._get_extra_body(enable_thinking=enable_thinking),
-        )
+        try:
+            completion = client.chat.completions.create(
+                **params,
+                messages=messages,
+                timeout=9999,
+                stream=False,
+                extra_body=self._get_extra_body(enable_thinking=enable_thinking),
+            )
 
-        elapsed = round(time.time() - start, 2)
+            elapsed = round(time.time() - start, 2)
 
-        if not completion.choices:
-            raise RuntimeError("No choices returned from LLM.")
+            if not completion.choices:
+                raise RuntimeError("No choices returned from LLM.")
 
-        content = completion.choices[0].message.content or ""
+            content = completion.choices[0].message.content or ""
 
-        self._response_info = {
-            "usage": dict(completion.usage) if completion.usage else {},
-            "model_name": self.model_name,
-            "time_taken": elapsed,
-            "response": content,
-        }
+            # Token 统计
+            token_usage = None
+            if completion.usage:
+                token_usage = {
+                    'prompt_tokens': completion.usage.prompt_tokens or 0,
+                    'completion_tokens': completion.usage.completion_tokens or 0,
+                    'total_tokens': completion.usage.total_tokens or 0
+                }
 
-        return content.strip()
+            self._response_info = {
+                "usage": dict(completion.usage) if completion.usage else {},
+                "model_name": self.model_name,
+                "time_taken": elapsed,
+                "response": content,
+            }
+
+            # 结束追踪
+            if tracer and call_id:
+                tracer.track_llm_end(
+                    call_id=call_id,
+                    output_text=content.strip(),
+                    finish_reason=completion.choices[0].finish_reason or 'stop',
+                    token_usage=token_usage
+                )
+
+            return content.strip()
+
+        except Exception as e:
+            if tracer and call_id:
+                tracer.track_llm_error(call_id, str(e), traceback.format_exc())
+            raise
 
     def get_streaming_response(
             self,
@@ -156,57 +211,107 @@ class OpenAILike(BaseLLM):
             enable_thinking: bool = False,
             system_prompt: Optional[str] = None,
     ) -> BaseGenerator:
-
         """
         同步-流式输出
-        :param message:
-        :param content_type:
-        :param enable_thinking:
-        :param system_prompt:
-        :return:
         """
-        multi_model_msg = False
+        tracer = self._get_tracer()
+        call_id = None
 
+        multi_model_msg = False
         if isinstance(message, Message):
             if message.has_images() or message.has_audios() or message.has_videos():
                 multi_model_msg = True
 
         messages = self._prepare_messages(message=message, system_prompt=system_prompt)
 
+        # 开始追踪
+        if tracer and tracer.enabled:
+            call_id = tracer.track_llm_start(
+                agent_id=self.agent_id,
+                model_name=self.model_name,
+                messages=messages,
+                is_streaming=True,
+                request_params={
+                    'temperature': self.temperature,
+                    'max_tokens': self.max_tokens,
+                    'top_p': self.top_p
+                },
+                system_prompt=system_prompt
+            )
+
         try:
             sync_client, params = self._balancer.get_next_sync_backend(need_multimodal=multi_model_msg)
         except Exception as e:
+            if tracer and call_id:
+                tracer.track_llm_error(call_id, str(e), traceback.format_exc())
             raise RuntimeError(f"llm error: {e}")
 
-        stream = sync_client.chat.completions.create(
-            **params,
-            messages=messages,
-            stream=True,
-            extra_body=self._get_extra_body(enable_thinking=enable_thinking),
-        )
+        try:
+            stream = sync_client.chat.completions.create(
+                **params,
+                messages=messages,
+                stream=True,
+                extra_body=self._get_extra_body(enable_thinking=enable_thinking),
+            )
+        except Exception as e:
+            if tracer and call_id:
+                tracer.track_llm_error(call_id, str(e), traceback.format_exc())
+            raise
 
+        # 创建带追踪的生成器
         class SyncStreamGenerator(BaseGenerator[GeneratorOutput]):
-            def __init__(self, stream_iter, content_type: str):
+            def __init__(self, stream_iter, content_type: str, tracer_ref, call_id_ref, agent_id_ref):
                 super().__init__(content_type=content_type)
                 self._stream = stream_iter
+                self._tracer = tracer_ref
+                self._call_id = call_id_ref
+                self._agent_id = agent_id_ref
+                self._full_content = ""
+                self._full_reasoning = ""
 
             def generate(self) -> Iterator[GeneratorOutput]:
-                for chunk in self._stream:
-                    delta = chunk.choices[0].delta
-                    finish_reason = chunk.choices[0].finish_reason
-                    if finish_reason:
-                        self.finish_reason = finish_reason
+                try:
+                    for chunk in self._stream:
+                        delta = chunk.choices[0].delta
+                        finish_reason = chunk.choices[0].finish_reason
+                        if finish_reason:
+                            self.finish_reason = finish_reason
 
-                    content = getattr(delta, 'content', '') or ''
-                    reasoning = getattr(delta, 'reasoning_content', '') or ''
+                        content = getattr(delta, 'content', '') or ''
+                        reasoning = getattr(delta, 'reasoning_content', '') or ''
 
-                    if reasoning:
-                        yield GeneratorOutput(content=reasoning, content_type='think')
-                    elif content:
-                        yield GeneratorOutput(content=content, content_type=content_type)
+                        if reasoning:
+                            self._full_reasoning += reasoning
+                            # 追踪流式块
+                            if self._tracer and self._call_id:
+                                self._tracer.track_llm_stream_chunk(
+                                    self._call_id, reasoning, 'think', is_reasoning=True
+                                )
+                            yield GeneratorOutput(content=reasoning, content_type='think')
+                        elif content:
+                            self._full_content += content
+                            # 追踪流式块
+                            if self._tracer and self._call_id:
+                                self._tracer.track_llm_stream_chunk(
+                                    self._call_id, content, self.content_type, is_reasoning=False
+                                )
+                            yield GeneratorOutput(content=content, content_type=self.content_type)
 
-        gen = SyncStreamGenerator(stream, content_type)
+                    # 结束追踪
+                    if self._tracer and self._call_id:
+                        self._tracer.track_llm_end(
+                            call_id=self._call_id,
+                            output_text=self._full_content,
+                            reasoning_text=self._full_reasoning,
+                            finish_reason=self.finish_reason or 'stop'
+                        )
 
+                except Exception as e:
+                    if self._tracer and self._call_id:
+                        self._tracer.track_llm_error(self._call_id, str(e), traceback.format_exc())
+                    raise
+
+        gen = SyncStreamGenerator(stream, content_type, tracer, call_id, self.agent_id)
         return gen
 
     async def aget_non_stream_response(self,
@@ -215,43 +320,85 @@ class OpenAILike(BaseLLM):
                                        system_prompt: Optional[str] = None,) -> str:
         """
         异步-非流式输出
-        :param message:
-        :param enable_thinking:
-        :param system_prompt:
-        :return:
         """
-        multi_model_msg = False
+        tracer = self._get_tracer()
+        call_id = None
 
+        multi_model_msg = False
         if isinstance(message, Message):
             if message.has_images() or message.has_audios() or message.has_videos():
                 multi_model_msg = True
 
         messages = self._prepare_messages(message=message, system_prompt=system_prompt)
+
+        # 开始追踪
+        if tracer and tracer.enabled:
+            call_id = tracer.track_llm_start(
+                agent_id=self.agent_id,
+                model_name=self.model_name,
+                messages=messages,
+                is_streaming=False,
+                request_params={
+                    'temperature': self.temperature,
+                    'max_tokens': self.max_tokens,
+                    'top_p': self.top_p
+                },
+                system_prompt=system_prompt
+            )
+
         start = time.time()
 
         try:
             async_client, params = self._balancer.get_next_async_backend(need_multimodal=multi_model_msg)
         except Exception as e:
+            if tracer and call_id:
+                tracer.track_llm_error(call_id, str(e), traceback.format_exc())
             raise RuntimeError(f"llm error: {e}")
 
-        completion = await async_client.chat.completions.create(
-            **params,
-            messages=messages,
-            timeout=9999,
-            extra_body=self._get_extra_body(),
-        )
-        elapsed = round(time.time() - start, 2)
-        if not completion.choices:
-            raise RuntimeError("No choices returned from LLM.")
+        try:
+            completion = await async_client.chat.completions.create(
+                **params,
+                messages=messages,
+                timeout=9999,
+                extra_body=self._get_extra_body(),
+            )
+            elapsed = round(time.time() - start, 2)
 
-        content = completion.choices[0].message.content or ""
+            if not completion.choices:
+                raise RuntimeError("No choices returned from LLM.")
 
-        self._response_info = {
-            "usage": dict(completion.usage) if completion.usage else {},
-            "model_name": self.model_name,
-            "time_taken": elapsed,
-        }
-        return content.strip()
+            content = completion.choices[0].message.content or ""
+
+            # Token 统计
+            token_usage = None
+            if completion.usage:
+                token_usage = {
+                    'prompt_tokens': completion.usage.prompt_tokens or 0,
+                    'completion_tokens': completion.usage.completion_tokens or 0,
+                    'total_tokens': completion.usage.total_tokens or 0
+                }
+
+            self._response_info = {
+                "usage": dict(completion.usage) if completion.usage else {},
+                "model_name": self.model_name,
+                "time_taken": elapsed,
+            }
+
+            # 结束追踪
+            if tracer and call_id:
+                tracer.track_llm_end(
+                    call_id=call_id,
+                    output_text=content.strip(),
+                    finish_reason=completion.choices[0].finish_reason or 'stop',
+                    token_usage=token_usage
+                )
+
+            return content.strip()
+
+        except Exception as e:
+            if tracer and call_id:
+                tracer.track_llm_error(call_id, str(e), traceback.format_exc())
+            raise
 
     async def aget_streaming_response(
             self,
@@ -260,59 +407,108 @@ class OpenAILike(BaseLLM):
             enable_thinking: bool = False,
             system_prompt: Optional[str] = None,
     ) -> BaseGenerator:
-
         """
         异步 - 流式输出 (核心方法)
-        :param message:
-        :param content_type: 流式输出的content-type
-        :param enable_thinking:
-        :param system_prompt:
-        :return:
         """
+        tracer = self._get_tracer()
+        call_id = None
 
         multi_model_msg = False
-
         if isinstance(message, Message):
             if message.has_images() or message.has_audios() or message.has_videos():
                 multi_model_msg = True
 
         messages = self._prepare_messages(message=message, system_prompt=system_prompt)
 
+        # 开始追踪
+        if tracer and tracer.enabled:
+            call_id = tracer.track_llm_start(
+                agent_id=self.agent_id,
+                model_name=self.model_name,
+                messages=messages,
+                is_streaming=True,
+                request_params={
+                    'temperature': self.temperature,
+                    'max_tokens': self.max_tokens,
+                    'top_p': self.top_p
+                },
+                system_prompt=system_prompt
+            )
+
         try:
             async_client, params = self._balancer.get_next_async_backend(need_multimodal=multi_model_msg)
         except Exception as e:
+            if tracer and call_id:
+                tracer.track_llm_error(call_id, str(e), traceback.format_exc())
             raise RuntimeError(f"llm error: {e}")
 
-        stream = await async_client.chat.completions.create(
-            **params,
-            messages=messages,
-            stream=True,
-            extra_body=self._get_extra_body(enable_thinking),
-        )
+        try:
+            stream = await async_client.chat.completions.create(
+                **params,
+                messages=messages,
+                stream=True,
+                extra_body=self._get_extra_body(enable_thinking),
+            )
+        except Exception as e:
+            if tracer and call_id:
+                tracer.track_llm_error(call_id, str(e), traceback.format_exc())
+            raise
 
+        # 创建带追踪的异步生成器
         class AsyncStreamGenerator(BaseGenerator[GeneratorOutput]):
-            def __init__(self, async_stream, content_type: str):
+            def __init__(self, async_stream, content_type: str, tracer_ref, call_id_ref, agent_id_ref):
                 super().__init__(content_type=content_type)
                 self._stream = async_stream
+                self._tracer = tracer_ref
+                self._call_id = call_id_ref
+                self._agent_id = agent_id_ref
+                self._full_content = ""
+                self._full_reasoning = ""
 
             async def agenerate(self) -> AsyncIterator[GeneratorOutput]:
-                async for chunk in self._stream:
-                    delta = chunk.choices[0].delta
-                    finish_reason = chunk.choices[0].finish_reason
+                try:
+                    async for chunk in self._stream:
+                        delta = chunk.choices[0].delta
+                        finish_reason = chunk.choices[0].finish_reason
 
-                    if finish_reason:
-                        self.finish_reason = finish_reason
+                        if finish_reason:
+                            self.finish_reason = finish_reason
 
-                    content = getattr(delta, 'content', '') or ''
-                    reasoning = getattr(delta, 'reasoning_content', '') or ''
+                        content = getattr(delta, 'content', '') or ''
+                        reasoning = getattr(delta, 'reasoning_content', '') or ''
 
-                    if reasoning:
-                        yield GeneratorOutput(content=reasoning, content_type='think')
-                    elif content:
-                        yield GeneratorOutput(content=content, content_type=content_type)
+                        if reasoning:
+                            self._full_reasoning += reasoning
+                            # 追踪流式块
+                            if self._tracer and self._call_id:
+                                self._tracer.track_llm_stream_chunk(
+                                    self._call_id, reasoning, 'think', is_reasoning=True
+                                )
+                            yield GeneratorOutput(content=reasoning, content_type='think')
+                        elif content:
+                            self._full_content += content
+                            # 追踪流式块
+                            if self._tracer and self._call_id:
+                                self._tracer.track_llm_stream_chunk(
+                                    self._call_id, content, self.content_type, is_reasoning=False
+                                )
+                            yield GeneratorOutput(content=content, content_type=self.content_type)
 
-        gen = AsyncStreamGenerator(stream, content_type)
+                    # 结束追踪
+                    if self._tracer and self._call_id:
+                        self._tracer.track_llm_end(
+                            call_id=self._call_id,
+                            output_text=self._full_content,
+                            reasoning_text=self._full_reasoning,
+                            finish_reason=self.finish_reason or 'stop'
+                        )
 
+                except Exception as e:
+                    if self._tracer and self._call_id:
+                        self._tracer.track_llm_error(self._call_id, str(e), traceback.format_exc())
+                    raise
+
+        gen = AsyncStreamGenerator(stream, content_type, tracer, call_id, self.agent_id)
         return gen
 
     def _get_extra_body(self, *args, **kwargs) -> dict:
@@ -323,19 +519,23 @@ class OpenAILike(BaseLLM):
         if not (0.0 <= temp <= 1.0):
             raise RuntimeError("temperature must be between 0.0 and 1.0")
         self.temperature = temp
+        self.completion_params['temperature'] = temp
 
     def set_max_tokens(self, tokens: int):
         if tokens <= 0:
             raise RuntimeError("max_tokens must be > 0")
         self.max_tokens = tokens
+        self.completion_params['max_tokens'] = tokens
 
     def set_top_p(self, p: float):
         if not (0.0 <= p <= 1.0):
             raise RuntimeError("top_p must be between 0.0 and 1.0")
         self.top_p = p
+        self.completion_params['top_p'] = p
 
     def set_model_name(self, name: str):
         self.model_name = name
+        self.completion_params['model'] = name
 
     def ping(self) -> bool:
         try:
@@ -377,4 +577,3 @@ class OpenAILike(BaseLLM):
                                   completion_params=other.completion_params)
 
         return self
-

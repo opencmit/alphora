@@ -68,6 +68,7 @@ class BasePrompt:
                  memory_id: Optional[str] = None,
                  max_history_rounds: int = 10,
                  auto_save_memory: bool = True,
+                 agent_id: str | None = None,
                  **kwargs):
 
         """
@@ -85,6 +86,9 @@ class BasePrompt:
             auto_save_memory: 是否自动保存对话到记忆
             **kwargs: 占位符
         """
+
+        self.agent_id = agent_id
+        self.prompt_id = str(uuid.uuid4())[:8]
 
         self.template_path = template_path
         self.template_desc = template_desc
@@ -737,11 +741,11 @@ class BasePrompt:
 
         _debug_agent_id = getattr(self, '_debug_agent_id', 'unknown')
 
-        _debug_call_id = tracer.track_llm_start(
-            agent_id=_debug_agent_id,
-            model_name=getattr(self.llm, 'model_name', 'unknown') if self.llm else 'unknown',
-            input_text=str(query)
-        )
+        # _debug_call_id = tracer.track_llm_start(
+        #     agent_id=_debug_agent_id,
+        #     model_name=getattr(self.llm, 'model_name', 'unknown') if self.llm else 'unknown',
+        #     input_text=str(query)
+        # )
 
         use_new_mode = self._use_new_mode and not multimodal_message
 
@@ -896,11 +900,11 @@ class BasePrompt:
                 if should_save and use_new_mode:
                     self._save_to_memory(query, output_str)
 
-                tracer.track_llm_end(
-                    call_id=_debug_call_id,
-                    output_text=output_str,
-                    reasoning_text=reasoning_content
-                )
+                # tracer.track_llm_end(
+                #     call_id=_debug_call_id,
+                #     output_text=output_str,
+                #     reasoning_text=reasoning_content
+                # )
 
                 if enable_thinking:
                     return PrompterOutput(content=output_str, reasoning=reasoning_content,
@@ -910,7 +914,7 @@ class BasePrompt:
                                           finish_reason=finish_reason, continuation_count=continuation_count)
 
             except Exception as e:
-                tracer.track_llm_error(_debug_call_id, str(e))
+                # tracer.track_llm_error(_debug_call_id, str(e))
                 if self.callback:
                     await self.callback.stop(stop_reason=str(e))
                 raise RuntimeError(f"流式响应时发生错误: {e}")
@@ -930,10 +934,10 @@ class BasePrompt:
                 if should_save and use_new_mode:
                     self._save_to_memory(query, resp)
 
-                tracer.track_llm_end(
-                    call_id=_debug_call_id,
-                    output_text=resp
-                )
+                # tracer.track_llm_end(
+                #     call_id=_debug_call_id,
+                #     output_text=resp
+                # )
 
                 return PrompterOutput(content=resp, reasoning="", finish_reason="")
 
@@ -962,8 +966,13 @@ class BasePrompt:
 
         # 更新上下文，仅使用有效的占位符
         valid_kwargs = {k: v for k, v in kwargs.items() if k in self.placeholders}
+
         self.context.update(valid_kwargs)
 
+        if self._use_new_mode:
+            tracer.track_prompt_render(agent_id=self.agent_id, prompt_id=self.prompt_id, rendered_prompt=self._render_system_prompt(), placeholders=valid_kwargs)
+        else:
+            tracer.track_prompt_render(agent_id=self.agent_id, prompt_id=self.prompt_id, rendered_prompt=self.render(), placeholders=valid_kwargs)
         return self
 
     def __str__(self) -> str:

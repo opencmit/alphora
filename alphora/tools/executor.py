@@ -5,14 +5,18 @@
 1. 自动解析LLM返回的工具调用
 2. 执行工具并返回结果
 3. 多轮工具调用循环
+4. 完整的调试追踪
 """
 
 import json
+import time
 import logging
+import traceback
 from typing import Any, Callable, Dict, List, Optional, Union
 from dataclasses import dataclass
 
 from alphora.tools.base_tools import Tool, ToolResult, ToolRegistry
+from alphora.debugger import tracer
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +35,7 @@ class ToolCallResult:
     call_id: str
     tool_name: str
     result: ToolResult
+    duration_ms: float = 0
 
     def to_message(self) -> Dict[str, Any]:
         """转换为消息格式"""
@@ -44,9 +49,9 @@ class ToolCallResult:
 
 class ToolExecutor:
     """
-    工具执行器
+    工具执行器（增强版）
 
-    用于解析和执行工具调用
+    用于解析和执行工具调用，集成调试追踪
 
     使用方式：
     ```python
@@ -55,7 +60,7 @@ class ToolExecutor:
     registry.register(search_tool)
     registry.register(calculator_tool)
 
-    executor = ToolExecutor(registry)
+    executor = ToolExecutor(registry, agent_id="my_agent")
 
     # 解析LLM返回的工具调用
     tool_calls = executor.parse_tool_calls(llm_response)
@@ -71,10 +76,12 @@ class ToolExecutor:
     def __init__(
             self,
             registry: ToolRegistry,
+            agent_id: Optional[str] = None,
             on_tool_start: Optional[Callable[[ToolCall], None]] = None,
             on_tool_end: Optional[Callable[[ToolCallResult], None]] = None
     ):
         self.registry = registry
+        self.agent_id = agent_id
         self.on_tool_start = on_tool_start
         self.on_tool_end = on_tool_end
 
@@ -134,6 +141,15 @@ class ToolExecutor:
 
     async def execute(self, tool_call: ToolCall) -> ToolCallResult:
         """执行单个工具调用"""
+        start_time = time.time()
+
+        # 追踪开始
+        debug_call_id = tracer.track_tool_start(
+            tool_name=tool_call.name,
+            args=tool_call.arguments,
+            agent_id=self.agent_id
+        )
+
         if self.on_tool_start:
             self.on_tool_start(tool_call)
 
@@ -141,17 +157,42 @@ class ToolExecutor:
 
         if tool is None:
             result = ToolResult.fail(f"Tool '{tool_call.name}' not found")
+            tracer.track_tool_error(
+                call_id=debug_call_id,
+                tool_name=tool_call.name,
+                error=f"Tool '{tool_call.name}' not found",
+                agent_id=self.agent_id
+            )
         else:
             try:
                 result = await tool(**tool_call.arguments)
             except Exception as e:
                 logger.exception(f"Tool execution failed: {tool_call.name}")
                 result = ToolResult.fail(str(e))
+                tracer.track_tool_error(
+                    call_id=debug_call_id,
+                    tool_name=tool_call.name,
+                    error=str(e),
+                    agent_id=self.agent_id
+                )
+
+        duration_ms = (time.time() - start_time) * 1000
+
+        # 追踪结束（成功情况）
+        if result.success:
+            tracer.track_tool_end(
+                call_id=debug_call_id,
+                tool_name=tool_call.name,
+                result=result.data,
+                duration_ms=duration_ms,
+                agent_id=self.agent_id
+            )
 
         call_result = ToolCallResult(
             call_id=tool_call.id,
             tool_name=tool_call.name,
-            result=result
+            result=result,
+            duration_ms=duration_ms
         )
 
         if self.on_tool_end:
@@ -205,8 +246,13 @@ class ToolAgentMixin:
     def setup_tools(self):
         """初始化工具系统"""
         self._tool_registry = ToolRegistry()
+
+        # 获取agent_id
+        agent_id = getattr(self, 'agent_id', None)
+
         self._tool_executor = ToolExecutor(
             self._tool_registry,
+            agent_id=agent_id,
             on_tool_start=self._on_tool_start,
             on_tool_end=self._on_tool_end
         )
@@ -218,7 +264,7 @@ class ToolAgentMixin:
     def _on_tool_end(self, result: ToolCallResult):
         """工具执行完成回调"""
         status = "success" if result.result.success else "failed"
-        logger.info(f"Tool {result.tool_name} {status}")
+        logger.info(f"Tool {result.tool_name} {status} ({result.duration_ms:.0f}ms)")
 
     def register_tool(self, tool: Tool):
         """注册工具"""
@@ -285,8 +331,6 @@ class ToolAgentMixin:
 
         for iteration in range(max_iterations):
             # 调用LLM
-            # 这里需要根据具体LLM实现来调整
-            # 暂时返回简单实现
             response = await self.llm.aget_non_stream_response(
                 message=query,
                 system_prompt=system_prompt
@@ -314,3 +358,4 @@ class ToolAgentMixin:
             query = f"工具调用结果:\n{tool_results_str}\n\n请基于以上结果回答用户问题。"
 
         return "达到最大迭代次数，无法完成任务"
+

@@ -1,54 +1,102 @@
 """
 Alphora Debugger
 
+功能：
+1. 完整的LLM调用追踪（输入/输出/Token/流式）
+2. 调用链追踪（trace_id关联）
+3. 工具调用追踪
+4. 记忆操作追踪
+5. 性能统计
+
 用法：
-    agent = BaseAgent(llm=llm, debugger=True)  # 自动启动调试面板
+    agent = BaseAgent(llm=llm, debugger=True)
+    # 访问 http://localhost:9527/
 """
 
 import os
 import time
 import threading
 import json
+import copy
 from uuid import uuid4
 from enum import Enum
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 from dataclasses import dataclass, field, asdict
+from contextlib import contextmanager
+import traceback
 
 
 class EventType(str, Enum):
+    """事件类型枚举"""
+    # Agent 生命周期
     AGENT_CREATED = "agent_created"
     AGENT_DERIVED = "agent_derived"
+    AGENT_DESTROYED = "agent_destroyed"
+
+    # LLM 调用
     LLM_CALL_START = "llm_call_start"
     LLM_CALL_END = "llm_call_end"
     LLM_CALL_ERROR = "llm_call_error"
+
+    # 流式输出
+    LLM_STREAM_START = "llm_stream_start"
+    LLM_STREAM_CHUNK = "llm_stream_chunk"
+    LLM_STREAM_END = "llm_stream_end"
+
+    # Prompt 相关
     PROMPT_CREATED = "prompt_created"
+    PROMPT_RENDER = "prompt_render"
+    PROMPT_CALL_START = "prompt_call_start"
+    PROMPT_CALL_END = "prompt_call_end"
+
+    # 记忆操作
     MEMORY_ADD = "memory_add"
     MEMORY_RETRIEVE = "memory_retrieve"
+    MEMORY_SEARCH = "memory_search"
     MEMORY_CLEAR = "memory_clear"
-    TOOL_CALL = "tool_call"
+
+    # 工具调用
+    TOOL_CALL_START = "tool_call_start"
+    TOOL_CALL_END = "tool_call_end"
+    TOOL_CALL_ERROR = "tool_call_error"
+
+    # 后处理
+    POSTPROCESS_START = "postprocess_start"
+    POSTPROCESS_END = "postprocess_end"
+
+    # 自定义
     CUSTOM = "custom"
+    ERROR = "error"
 
 
 @dataclass
 class DebugEvent:
+    """调试事件"""
     event_id: str
     event_type: EventType
     timestamp: float
     agent_id: Optional[str] = None
+    trace_id: Optional[str] = None  # 调用链ID
+    parent_event_id: Optional[str] = None  # 父事件ID
     data: Dict[str, Any] = field(default_factory=dict)
+    duration_ms: Optional[float] = None
 
     def to_dict(self) -> dict:
         return {
             "event_id": self.event_id,
-            "event_type": self.event_type.value,
+            "event_type": self.event_type.value if isinstance(self.event_type, EventType) else self.event_type,
             "timestamp": self.timestamp,
             "agent_id": self.agent_id,
-            "data": self.data
+            "trace_id": self.trace_id,
+            "parent_event_id": self.parent_event_id,
+            "data": self.data,
+            "duration_ms": self.duration_ms
         }
 
 
 @dataclass
 class AgentInfo:
+    """Agent信息"""
     agent_id: str
     agent_type: str
     created_at: float
@@ -56,6 +104,7 @@ class AgentInfo:
     config: Dict[str, Any] = field(default_factory=dict)
     llm_info: Dict[str, Any] = field(default_factory=dict)
     children_ids: List[str] = field(default_factory=list)
+    status: str = "active"  # active, idle, destroyed
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -63,17 +112,38 @@ class AgentInfo:
 
 @dataclass
 class LLMCallInfo:
+    """LLM调用详细信息"""
     call_id: str
     agent_id: str
-    model_name: str
-    start_time: float
-    input_messages: List[Dict] = field(default_factory=list)
-    input_text: str = ""
-    output_text: str = ""
-    reasoning_text: str = ""
+    trace_id: Optional[str] = None
+    model_name: str = ""
+    start_time: float = 0.0
     end_time: Optional[float] = None
-    token_usage: Dict[str, int] = field(default_factory=dict)
+
+    # 请求信息
+    request_messages: List[Dict] = field(default_factory=list)
+    request_params: Dict[str, Any] = field(default_factory=dict)  # temperature, max_tokens等
+    system_prompt: Optional[str] = None
+
+    # 响应信息
+    response_text: str = ""
+    reasoning_text: str = ""
+    finish_reason: Optional[str] = None
+
+    # Token统计
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+    # 流式输出
+    is_streaming: bool = False
+    stream_chunks: List[Dict] = field(default_factory=list)
+    chunk_count: int = 0
+    first_token_time: Optional[float] = None  # 首Token时间
+
+    # 错误信息
     error: Optional[str] = None
+    error_traceback: Optional[str] = None
 
     @property
     def duration_ms(self) -> float:
@@ -81,14 +151,55 @@ class LLMCallInfo:
             return (self.end_time - self.start_time) * 1000
         return 0
 
+    @property
+    def time_to_first_token_ms(self) -> Optional[float]:
+        """首Token延迟"""
+        if self.first_token_time and self.start_time:
+            return (self.first_token_time - self.start_time) * 1000
+        return None
+
+    @property
+    def tokens_per_second(self) -> float:
+        """Token生成速度"""
+        if self.duration_ms > 0 and self.completion_tokens > 0:
+            return self.completion_tokens / (self.duration_ms / 1000)
+        return 0
+
     def to_dict(self) -> dict:
         d = asdict(self)
         d['duration_ms'] = self.duration_ms
+        d['time_to_first_token_ms'] = self.time_to_first_token_ms
+        d['tokens_per_second'] = round(self.tokens_per_second, 2)
         return d
 
 
+@dataclass
+class TraceContext:
+    """调用链上下文"""
+    trace_id: str
+    start_time: float
+    agent_id: str
+    events: List[str] = field(default_factory=list)  # event_ids
+    llm_calls: List[str] = field(default_factory=list)  # call_ids
+    tool_calls: List[str] = field(default_factory=list)
+    total_tokens: int = 0
+    total_duration_ms: float = 0
+    status: str = "running"  # running, completed, error
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
 class DebugTracer:
-    """调试追踪器（单例）"""
+    """
+    调试追踪器（增强版）
+
+    功能：
+    - 完整的LLM调用追踪
+    - 调用链追踪
+    - 流式输出追踪
+    - 性能统计
+    """
 
     _instance = None
     _lock = threading.Lock()
@@ -114,26 +225,37 @@ class DebugTracer:
         self._events: List[DebugEvent] = []
         self._agents: Dict[str, AgentInfo] = {}
         self._llm_calls: Dict[str, LLMCallInfo] = {}
-        self._call_graph: Dict[str, List[str]] = {}
+        self._traces: Dict[str, TraceContext] = {}  # 调用链
+        self._active_streams: Dict[str, Dict] = {}  # 活跃的流式输出
 
+        # 统计
         self._stats = {
             'total_events': 0,
             'total_llm_calls': 0,
             'total_tokens': 0,
+            'prompt_tokens': 0,
+            'completion_tokens': 0,
             'total_duration_ms': 0.0,
-            'errors': 0
+            'errors': 0,
+            'active_streams': 0,
+            'avg_tokens_per_second': 0.0,
+            'avg_time_to_first_token_ms': 0.0
         }
 
         self._max_events = 10000
+        self._max_stream_chunks = 100  # 每个流最多保存的chunk数
         self._data_lock = threading.RLock()
         self._event_seq = 0
 
-    # ==================== 控制 ====================
+        # 当前上下文（线程本地）
+        self._local = threading.local()
+
+    # ==================== 控制方法 ====================
 
     def enable(self, start_server: bool = True, port: int = 9527):
         """启用调试"""
         if self._enabled and self._server_started:
-            return  # 已启用
+            return
 
         self._enabled = True
         self._server_port = port
@@ -142,7 +264,7 @@ class DebugTracer:
             self._start_server(port)
 
     def disable(self):
-        """禁用调试（服务器保持运行以便查看历史数据）"""
+        """禁用调试"""
         self._enabled = False
 
     @property
@@ -161,7 +283,7 @@ class DebugTracer:
             self._server_started = True
         except ImportError:
             import logging
-            logging.warning(f"[Debugger] 需要安装: pip install fastapi uvicorn")
+            logging.warning("[Debugger] 需要安装: pip install fastapi uvicorn")
         except Exception as e:
             import logging
             logging.warning(f"[Debugger] 启动失败: {e}")
@@ -172,209 +294,847 @@ class DebugTracer:
             self._events.clear()
             self._agents.clear()
             self._llm_calls.clear()
-            self._call_graph.clear()
-            self._stats = {'total_events': 0, 'total_llm_calls': 0, 'total_tokens': 0, 'total_duration_ms': 0.0, 'errors': 0}
+            self._traces.clear()
+            self._active_streams.clear()
+            self._stats = {
+                'total_events': 0,
+                'total_llm_calls': 0,
+                'total_tokens': 0,
+                'prompt_tokens': 0,
+                'completion_tokens': 0,
+                'total_duration_ms': 0.0,
+                'errors': 0,
+                'active_streams': 0,
+                'avg_tokens_per_second': 0.0,
+                'avg_time_to_first_token_ms': 0.0
+            }
             self._event_seq = 0
 
-    def _add_event(self, event: DebugEvent):
+    # ==================== 内部方法 ====================
+
+    def _add_event(self, event: DebugEvent) -> str:
+        """添加事件"""
         if not self._enabled:
-            return
+            return event.event_id
+
         with self._data_lock:
             self._event_seq += 1
             self._events.append(event)
             self._stats['total_events'] += 1
+
+            # 关联到trace
+            if event.trace_id and event.trace_id in self._traces:
+                self._traces[event.trace_id].events.append(event.event_id)
+
+            # 限制事件数量
             if len(self._events) > self._max_events:
                 self._events = self._events[-self._max_events:]
 
-    # ==================== Agent ====================
+        return event.event_id
+
+    def _truncate_content(self, content: Any, max_length: int = 2000) -> str:
+        """截断内容"""
+        if content is None:
+            return ""
+        s = str(content)
+        if len(s) > max_length:
+            return s[:max_length] + f"... [truncated, total {len(s)} chars]"
+        return s
+
+    def _safe_serialize(self, obj: Any, max_depth: int = 3) -> Any:
+        """安全序列化对象"""
+        if max_depth <= 0:
+            return str(obj)[:100]
+
+        if obj is None or isinstance(obj, (bool, int, float, str)):
+            return obj
+
+        if isinstance(obj, dict):
+            return {k: self._safe_serialize(v, max_depth - 1) for k, v in list(obj.items())[:50]}
+
+        if isinstance(obj, (list, tuple)):
+            return [self._safe_serialize(v, max_depth - 1) for v in list(obj)[:50]]
+
+        return str(obj)[:500]
+
+    # ==================== Trace上下文管理 ====================
+
+    @contextmanager
+    def trace(self, agent_id: str, name: str = ""):
+        """
+        创建调用链上下文
+
+        使用:
+            with tracer.trace(agent_id, "chat") as trace_id:
+                # 在此范围内的所有调用都会关联到这个trace
+                pass
+        """
+        trace_id = str(uuid4())
+
+        if self._enabled:
+            with self._data_lock:
+                self._traces[trace_id] = TraceContext(
+                    trace_id=trace_id,
+                    start_time=time.time(),
+                    agent_id=agent_id
+                )
+
+        # 设置当前trace
+        old_trace = getattr(self._local, 'current_trace_id', None)
+        self._local.current_trace_id = trace_id
+
+        try:
+            yield trace_id
+        finally:
+            # 恢复旧trace
+            self._local.current_trace_id = old_trace
+
+            # 完成trace
+            if self._enabled and trace_id in self._traces:
+                with self._data_lock:
+                    trace = self._traces[trace_id]
+                    trace.status = "completed"
+                    trace.total_duration_ms = (time.time() - trace.start_time) * 1000
+
+    def get_current_trace_id(self) -> Optional[str]:
+        """获取当前trace_id"""
+        return getattr(self._local, 'current_trace_id', None)
+
+    # ==================== Agent追踪 ====================
 
     def track_agent_created(self, agent, parent_id: Optional[str] = None):
+        """追踪Agent创建"""
         if not self._enabled:
             return
 
         agent_id = getattr(agent, 'agent_id', str(uuid4()))
-        # agent_type = getattr(agent, 'agent_type', agent.__class__.__name__)
         agent_type = agent.__class__.__name__
 
         llm_info = {}
         llm = getattr(agent, 'llm', None)
         if llm:
-            llm_info = {'model_name': getattr(llm, 'model_name', 'unknown'), 'base_url': getattr(llm, 'base_url', '')}
+            llm_info = {
+                'model_name': getattr(llm, 'model_name', 'unknown'),
+                'base_url': getattr(llm, 'base_url', ''),
+                'temperature': getattr(llm, 'temperature', None),
+                'max_tokens': getattr(llm, 'max_tokens', None),
+                'is_multimodal': getattr(llm, 'is_multimodal', False)
+            }
 
-        info = AgentInfo(agent_id=agent_id, agent_type=agent_type, created_at=time.time(),
-                         parent_id=parent_id, config=dict(getattr(agent, 'config', {})), llm_info=llm_info)
+        info = AgentInfo(
+            agent_id=agent_id,
+            agent_type=agent_type,
+            created_at=time.time(),
+            parent_id=parent_id,
+            config=dict(getattr(agent, 'config', {})),
+            llm_info=llm_info
+        )
 
         with self._data_lock:
             self._agents[agent_id] = info
             if parent_id and parent_id in self._agents:
                 self._agents[parent_id].children_ids.append(agent_id)
 
-        self._add_event(DebugEvent(str(uuid4()), EventType.AGENT_CREATED, time.time(), agent_id,
-                                   {'agent_type': agent_type, 'parent_id': parent_id, 'llm_info': llm_info}))
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.AGENT_CREATED,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'agent_type': agent_type,
+                'parent_id': parent_id,
+                'llm_info': llm_info,
+                'has_memory': hasattr(agent, 'memory') and agent.memory is not None,
+                'has_callback': hasattr(agent, 'callback') and agent.callback is not None
+            }
+        ))
 
     def track_agent_derived(self, parent_agent, child_agent):
+        """追踪Agent派生"""
         if not self._enabled:
             return
-        self._add_event(DebugEvent(str(uuid4()), EventType.AGENT_DERIVED, time.time(),
-                                   getattr(parent_agent, 'agent_id', 'unknown'),
-                                   {'child_id': getattr(child_agent, 'agent_id', ''),
-                                    'child_type': getattr(child_agent, 'agent_type', '')}))
 
-    # ==================== LLM ====================
+        parent_id = getattr(parent_agent, 'agent_id', 'unknown')
+        child_id = getattr(child_agent, 'agent_id', '')
+        child_type = child_agent.__class__.__name__
 
-    def track_llm_start(self,
-                        agent_id: str,
-                        model_name: str,
-                        messages: Optional[List[Dict]] = None,
-                        input_text: str = "") -> str:
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.AGENT_DERIVED,
+            timestamp=time.time(),
+            agent_id=parent_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'child_id': child_id,
+                'child_type': child_type
+            }
+        ))
 
+    # ==================== LLM调用追踪 ====================
+
+    def track_llm_start(
+            self,
+            agent_id: str,
+            model_name: str,
+            messages: Optional[List[Dict]] = None,
+            input_text: str = "",
+            is_streaming: bool = False,
+            request_params: Optional[Dict] = None,
+            system_prompt: Optional[str] = None
+    ) -> str:
+        """追踪LLM调用开始"""
         call_id = str(uuid4())
 
         if not self._enabled:
             return call_id
 
+        trace_id = self.get_current_trace_id()
+
+        # 深拷贝messages避免后续修改
+        messages_copy = []
+        if messages:
+            for msg in messages:
+                msg_copy = {
+                    'role': msg.get('role', ''),
+                    'content': self._truncate_content(msg.get('content', ''), 5000)
+                }
+                messages_copy.append(msg_copy)
+
         with self._data_lock:
             self._llm_calls[call_id] = LLMCallInfo(
-                call_id=call_id, agent_id=agent_id, model_name=model_name,
-                start_time=time.time(), input_messages=messages or [], input_text=input_text[:2000]
+                call_id=call_id,
+                agent_id=agent_id,
+                trace_id=trace_id,
+                model_name=model_name,
+                start_time=time.time(),
+                request_messages=messages_copy,
+                request_params=request_params or {},
+                system_prompt=self._truncate_content(system_prompt, 2000),
+                is_streaming=is_streaming
             )
             self._stats['total_llm_calls'] += 1
 
-        preview = input_text[:500] if input_text else (messages[-1].get('content', '')[:500] if messages else '')
-        self._add_event(DebugEvent(str(uuid4()), EventType.LLM_CALL_START, time.time(), agent_id,
-                                   {'call_id': call_id, 'model_name': model_name, 'input_preview': preview}))
+            if trace_id and trace_id in self._traces:
+                self._traces[trace_id].llm_calls.append(call_id)
+
+        # 计算输入预览
+        if input_text:
+            preview = self._truncate_content(input_text, 500)
+        elif messages_copy:
+            last_msg = messages_copy[-1] if messages_copy else {}
+            preview = self._truncate_content(last_msg.get('content', ''), 500)
+        else:
+            preview = ""
+
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.LLM_CALL_START,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=trace_id,
+            data={
+                'call_id': call_id,
+                'model_name': model_name,
+                'is_streaming': is_streaming,
+                'input_preview': preview,
+                'message_count': len(messages_copy),
+                'has_system_prompt': bool(system_prompt),
+                'request_params': request_params or {}
+            }
+        ))
+
         return call_id
 
-    def track_llm_end(self, call_id: str, output_text: str = "",
-                      reasoning_text: str = "", token_usage: Optional[Dict[str, int]] = None):
+    def track_llm_stream_chunk(
+            self,
+            call_id: str,
+            content: str = "",
+            content_type: str = "char",
+            is_reasoning: bool = False
+    ):
+        """追踪流式输出块"""
+        if not self._enabled or call_id not in self._llm_calls:
+            return
+
+        with self._data_lock:
+            call = self._llm_calls[call_id]
+
+            # 记录首Token时间
+            if call.chunk_count == 0:
+                call.first_token_time = time.time()
+
+            call.chunk_count += 1
+
+            # 累积内容
+            if is_reasoning:
+                call.reasoning_text += content
+            else:
+                call.response_text += content
+
+            # 保存chunk（限制数量）
+            if len(call.stream_chunks) < self._max_stream_chunks:
+                call.stream_chunks.append({
+                    'index': call.chunk_count,
+                    'content': content,
+                    'content_type': content_type,
+                    'is_reasoning': is_reasoning,
+                    'timestamp': time.time()
+                })
+
+    def track_llm_end(
+            self,
+            call_id: str,
+            output_text: str = "",
+            reasoning_text: str = "",
+            finish_reason: str = "stop",
+            token_usage: Optional[Dict[str, int]] = None
+    ):
+        """追踪LLM调用结束"""
         if not self._enabled or call_id not in self._llm_calls:
             return
 
         with self._data_lock:
             call = self._llm_calls[call_id]
             call.end_time = time.time()
-            call.output_text = output_text[:5000]
-            call.reasoning_text = reasoning_text[:2000]
-            call.token_usage = token_usage or {}
+
+            # 如果不是流式，直接设置输出
+            if not call.is_streaming:
+                call.response_text = output_text[:10000]
+                call.reasoning_text = reasoning_text[:5000]
+
+            call.finish_reason = finish_reason
+
+            # Token统计
             if token_usage:
-                self._stats['total_tokens'] += token_usage.get('total_tokens', 0)
+                call.prompt_tokens = token_usage.get('prompt_tokens', 0)
+                call.completion_tokens = token_usage.get('completion_tokens', 0)
+                call.total_tokens = token_usage.get('total_tokens',
+                                                    call.prompt_tokens + call.completion_tokens)
+
+                self._stats['total_tokens'] += call.total_tokens
+                self._stats['prompt_tokens'] += call.prompt_tokens
+                self._stats['completion_tokens'] += call.completion_tokens
+
             self._stats['total_duration_ms'] += call.duration_ms
-            agent_id, duration = call.agent_id, call.duration_ms
 
-        self._add_event(DebugEvent(str(uuid4()), EventType.LLM_CALL_END, time.time(), agent_id,
-                                   {'call_id': call_id, 'duration_ms': duration, 'token_usage': token_usage,
-                                    'output_preview': output_text[:500]}))
+            # 更新平均值
+            completed_calls = [c for c in self._llm_calls.values() if c.end_time]
+            if completed_calls:
+                tps_values = [c.tokens_per_second for c in completed_calls if c.tokens_per_second > 0]
+                if tps_values:
+                    self._stats['avg_tokens_per_second'] = sum(tps_values) / len(tps_values)
 
-    def track_llm_error(self, call_id: str, error: str):
+                ttft_values = [c.time_to_first_token_ms for c in completed_calls if c.time_to_first_token_ms]
+                if ttft_values:
+                    self._stats['avg_time_to_first_token_ms'] = sum(ttft_values) / len(ttft_values)
+
+            # 更新trace
+            if call.trace_id and call.trace_id in self._traces:
+                self._traces[call.trace_id].total_tokens += call.total_tokens
+
+            agent_id = call.agent_id
+            duration = call.duration_ms
+
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.LLM_CALL_END,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=call.trace_id,
+            duration_ms=duration,
+            data={
+                'call_id': call_id,
+                'duration_ms': duration,
+                'finish_reason': finish_reason,
+                'token_usage': token_usage,
+                'output_preview': self._truncate_content(output_text or call.response_text, 500),
+                'has_reasoning': bool(reasoning_text or call.reasoning_text),
+                'chunk_count': call.chunk_count if call.is_streaming else 0,
+                'time_to_first_token_ms': call.time_to_first_token_ms,
+                'tokens_per_second': round(call.tokens_per_second, 2)
+            }
+        ))
+
+    def track_llm_error(self, call_id: str, error: str, traceback_str: str = ""):
+        """追踪LLM调用错误"""
         if not self._enabled:
             return
+
         agent_id = 'unknown'
+        trace_id = None
+
         with self._data_lock:
             if call_id in self._llm_calls:
-                self._llm_calls[call_id].error = error
-                self._llm_calls[call_id].end_time = time.time()
-                agent_id = self._llm_calls[call_id].agent_id
+                call = self._llm_calls[call_id]
+                call.error = error
+                call.error_traceback = traceback_str
+                call.end_time = time.time()
+                agent_id = call.agent_id
+                trace_id = call.trace_id
             self._stats['errors'] += 1
-        self._add_event(DebugEvent(str(uuid4()), EventType.LLM_CALL_ERROR, time.time(), agent_id,
-                                   {'call_id': call_id, 'error': error[:1000]}))
 
-    # ==================== Prompt ====================
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.LLM_CALL_ERROR,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=trace_id,
+            data={
+                'call_id': call_id,
+                'error': error[:1000],
+                'traceback': traceback_str[:2000] if traceback_str else None
+            }
+        ))
 
-    def track_prompt_created(self, agent_id: str, system_prompt: Optional[str] = None,
-                             enable_memory: bool = False, memory_id: Optional[str] = None):
+    # ==================== Prompt追踪 ====================
+
+    def track_prompt_created(
+            self,
+            agent_id: str,
+            prompt_id: str,
+            system_prompt: Optional[str] = None,   # 没有被更新过的prompt
+            prompt: Optional[str] = None,   # 没有被更新过的prompt
+            placeholders: Optional[List[str]] = None,   # 占位符
+            enable_memory: bool = False,
+            memory_id: Optional[str] = None,
+            template_path: Optional[str] = None
+    ):
+        """追踪Prompt创建"""
         if not self._enabled:
             return
-        self._add_event(DebugEvent(str(uuid4()), EventType.PROMPT_CREATED, time.time(), agent_id,
-                                   {'system_prompt_preview': system_prompt[:200] if system_prompt else None,
-                                    'enable_memory': enable_memory, 'memory_id': memory_id}))
 
-    # ==================== Memory ====================
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.PROMPT_CREATED,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'prompt_id': prompt_id,
+                'system_prompt': system_prompt,
+                'prompt': prompt,
+                'placeholders': placeholders,
+                'enable_memory': enable_memory,
+                'memory_id': memory_id,
+                'template_path': template_path
+            }
+        ))
 
-    def track_memory_add(self, memory_id: str, role: str, content: str, agent_id: Optional[str] = None):
+    def track_prompt_render(
+            self,
+            agent_id: str,
+            prompt_id: str,
+            rendered_prompt: str,
+            placeholders: Dict[str, Any] = None
+    ):
+        """追踪Prompt渲染"""
         if not self._enabled:
             return
-        self._add_event(DebugEvent(str(uuid4()), EventType.MEMORY_ADD, time.time(), agent_id,
-                                   {'memory_id': memory_id, 'role': role, 'content_preview': content[:200]}))
 
-    def track_memory_retrieve(self, memory_id: str, rounds: int, message_count: int, agent_id: Optional[str] = None):
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.PROMPT_RENDER,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'prompt_id': prompt_id,
+                'rendered_preview': self._truncate_content(rendered_prompt, 1000),
+                'placeholder_count': len(placeholders) if placeholders else 0,
+                'placeholders': list(placeholders.keys()) if placeholders else []
+            }
+        ))
+
+    # ==================== Memory追踪 ====================
+
+    def track_memory_add(
+            self,
+            memory_id: str,
+            role: str,
+            content: str,
+            agent_id: Optional[str] = None
+    ):
+        """追踪记忆添加"""
         if not self._enabled:
             return
-        self._add_event(DebugEvent(str(uuid4()), EventType.MEMORY_RETRIEVE, time.time(), agent_id,
-                                   {'memory_id': memory_id, 'rounds': rounds, 'message_count': message_count}))
+
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.MEMORY_ADD,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'memory_id': memory_id,
+                'role': role,
+                'content_preview': self._truncate_content(content, 300),
+                'content_length': len(content)
+            }
+        ))
+
+    def track_memory_retrieve(
+            self,
+            memory_id: str,
+            rounds: int,
+            message_count: int,
+            agent_id: Optional[str] = None
+    ):
+        """追踪记忆检索"""
+        if not self._enabled:
+            return
+
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.MEMORY_RETRIEVE,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'memory_id': memory_id,
+                'rounds': rounds,
+                'message_count': message_count
+            }
+        ))
+
+    def track_memory_search(
+            self,
+            memory_id: str,
+            query: str,
+            result_count: int,
+            agent_id: Optional[str] = None
+    ):
+        """追踪记忆搜索"""
+        if not self._enabled:
+            return
+
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.MEMORY_SEARCH,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'memory_id': memory_id,
+                'query_preview': self._truncate_content(query, 200),
+                'result_count': result_count
+            }
+        ))
 
     def track_memory_clear(self, memory_id: str, agent_id: Optional[str] = None):
-        if not self._enabled:
-            return
-        self._add_event(DebugEvent(str(uuid4()), EventType.MEMORY_CLEAR, time.time(), agent_id,
-                                   {'memory_id': memory_id}))
-
-    # ==================== 其他 ====================
-
-    def track_tool_call(self,
-                        tool_name: str,
-                        args: Dict,
-                        result: Any = None,
-                        duration_ms: float = 0,
-                        error: Optional[str] = None,
-                        agent_id: Optional[str] = None):
+        """追踪记忆清空"""
         if not self._enabled:
             return
 
-        self._add_event(DebugEvent(str(uuid4()),
-                                   EventType.TOOL_CALL,
-                                   time.time(),
-                                   agent_id,
-                                   {'tool_name': tool_name, 'args': args, 'result_preview': str(result)[:500] if result else None,
-                                    'duration_ms': duration_ms, 'error': error}))
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.MEMORY_CLEAR,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=self.get_current_trace_id(),
+            data={'memory_id': memory_id}
+        ))
 
-    def track_custom(self, name: str, data: Dict = None, agent_id: Optional[str] = None):
+    # ==================== Tool追踪 ====================
+
+    def track_tool_start(
+            self,
+            tool_name: str,
+            args: Dict,
+            agent_id: Optional[str] = None
+    ) -> str:
+        """追踪工具调用开始"""
+        call_id = str(uuid4())
+
+        if not self._enabled:
+            return call_id
+
+        self._add_event(DebugEvent(
+            event_id=call_id,
+            event_type=EventType.TOOL_CALL_START,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'tool_name': tool_name,
+                'args': self._safe_serialize(args)
+            }
+        ))
+
+        return call_id
+
+    def track_tool_end(
+            self,
+            call_id: str,
+            tool_name: str,
+            result: Any = None,
+            duration_ms: float = 0,
+            agent_id: Optional[str] = None
+    ):
+        """追踪工具调用结束"""
         if not self._enabled:
             return
-        self._add_event(DebugEvent(str(uuid4()), EventType.CUSTOM, time.time(), agent_id,
-                                   {'name': name, **(data or {})}))
 
-    # ==================== 查询 ====================
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.TOOL_CALL_END,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=self.get_current_trace_id(),
+            duration_ms=duration_ms,
+            data={
+                'call_id': call_id,
+                'tool_name': tool_name,
+                'result_preview': self._truncate_content(str(result), 500),
+                'duration_ms': duration_ms
+            }
+        ))
 
-    def get_events(self, event_type: Optional[str] = None, agent_id: Optional[str] = None,
-                   since_seq: int = 0, limit: int = 100) -> List[Dict]:
+    def track_tool_error(
+            self,
+            call_id: str,
+            tool_name: str,
+            error: str,
+            agent_id: Optional[str] = None
+    ):
+        """追踪工具调用错误"""
+        if not self._enabled:
+            return
+
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.TOOL_CALL_ERROR,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'call_id': call_id,
+                'tool_name': tool_name,
+                'error': error[:1000]
+            }
+        ))
+
+    # ==================== 自定义追踪 ====================
+
+    def track_custom(
+            self,
+            name: str,
+            data: Dict = None,
+            agent_id: Optional[str] = None
+    ):
+        """追踪自定义事件"""
+        if not self._enabled:
+            return
+
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.CUSTOM,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=self.get_current_trace_id(),
+            data={'name': name, **(data or {})}
+        ))
+
+    def track_error(
+            self,
+            error: str,
+            traceback_str: str = "",
+            agent_id: Optional[str] = None
+    ):
+        """追踪错误"""
+        if not self._enabled:
+            return
+
+        with self._data_lock:
+            self._stats['errors'] += 1
+
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.ERROR,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'error': error[:1000],
+                'traceback': traceback_str[:2000] if traceback_str else None
+            }
+        ))
+
+    # ==================== 查询方法 ====================
+
+    def get_events(
+            self,
+            event_type: Optional[str] = None,
+            agent_id: Optional[str] = None,
+            trace_id: Optional[str] = None,
+            since_seq: int = 0,
+            limit: int = 100
+    ) -> List[Dict]:
+        """获取事件列表"""
         with self._data_lock:
             events = self._events[since_seq:] if since_seq > 0 else self._events
+
             if event_type:
                 events = [e for e in events if e.event_type.value == event_type]
             if agent_id:
                 events = [e for e in events if e.agent_id == agent_id]
+            if trace_id:
+                events = [e for e in events if e.trace_id == trace_id]
+
             return [e.to_dict() for e in events[-limit:]]
 
     def get_agents(self) -> List[Dict]:
+        """获取所有Agent"""
         with self._data_lock:
             return [a.to_dict() for a in self._agents.values()]
 
     def get_agent(self, agent_id: str) -> Optional[Dict]:
+        """获取指定Agent"""
         with self._data_lock:
             return self._agents[agent_id].to_dict() if agent_id in self._agents else None
 
-    def get_llm_calls(self, agent_id: Optional[str] = None, limit: int = 100) -> List[Dict]:
+    def get_llm_calls(
+            self,
+            agent_id: Optional[str] = None,
+            trace_id: Optional[str] = None,
+            limit: int = 100
+    ) -> List[Dict]:
+        """获取LLM调用列表"""
         with self._data_lock:
             calls = list(self._llm_calls.values())
+
             if agent_id:
                 calls = [c for c in calls if c.agent_id == agent_id]
+            if trace_id:
+                calls = [c for c in calls if c.trace_id == trace_id]
+
             calls.sort(key=lambda x: x.start_time, reverse=True)
             return [c.to_dict() for c in calls[:limit]]
 
     def get_llm_call(self, call_id: str) -> Optional[Dict]:
+        """获取指定LLM调用详情"""
         with self._data_lock:
             return self._llm_calls[call_id].to_dict() if call_id in self._llm_calls else None
 
-    def get_call_graph(self) -> Dict:
+    def get_traces(self, limit: int = 50) -> List[Dict]:
+        """获取调用链列表"""
         with self._data_lock:
-            nodes = [{'id': a.agent_id, 'label': f"{a.agent_type}\\n{a.agent_id[:8]}", 'type': a.agent_type}
-                     for a in self._agents.values()]
-            edges = [{'source': a.parent_id, 'target': a.agent_id} for a in self._agents.values() if a.parent_id]
+            traces = list(self._traces.values())
+            traces.sort(key=lambda x: x.start_time, reverse=True)
+            return [t.to_dict() for t in traces[:limit]]
+
+    def get_trace(self, trace_id: str) -> Optional[Dict]:
+        """获取指定调用链"""
+        with self._data_lock:
+            if trace_id not in self._traces:
+                return None
+
+            trace = self._traces[trace_id]
+            result = trace.to_dict()
+
+            # 附加详细信息
+            result['events_detail'] = [
+                e.to_dict() for e in self._events
+                if e.trace_id == trace_id
+            ]
+            result['llm_calls_detail'] = [
+                self._llm_calls[cid].to_dict()
+                for cid in trace.llm_calls
+                if cid in self._llm_calls
+            ]
+
+            return result
+
+    def get_call_graph(self) -> Dict:
+        """获取调用图数据"""
+        with self._data_lock:
+            nodes = []
+            edges = []
+
+            # Agent节点
+            for agent in self._agents.values():
+                # 计算Agent的统计数据
+                agent_events = [e for e in self._events if e.agent_id == agent.agent_id]
+                llm_calls = [c for c in self._llm_calls.values() if c.agent_id == agent.agent_id]
+
+                nodes.append({
+                    'id': agent.agent_id,
+                    'type': 'agent',
+                    'label': agent.agent_type,
+                    'data': {
+                        'agent_type': agent.agent_type,
+                        'status': agent.status,
+                        'llm_model': agent.llm_info.get('model_name', ''),
+                        'event_count': len(agent_events),
+                        'llm_call_count': len(llm_calls),
+                        'total_tokens': sum(c.total_tokens for c in llm_calls),
+                        'created_at': agent.created_at
+                    }
+                })
+
+                # Agent派生边
+                if agent.parent_id:
+                    edges.append({
+                        'source': agent.parent_id,
+                        'target': agent.agent_id,
+                        'type': 'derive'
+                    })
+
+            # LLM调用节点（可选，按需展示）
+            # for call in list(self._llm_calls.values())[-20:]:  # 只显示最近20个
+            #     nodes.append({
+            #         'id': call.call_id,
+            #         'type': 'llm_call',
+            #         'label': call.model_name,
+            #         'data': call.to_dict()
+            #     })
+            #     edges.append({
+            #         'source': call.agent_id,
+            #         'target': call.call_id,
+            #         'type': 'llm_call'
+            #     })
+
             return {'nodes': nodes, 'edges': edges}
 
     def get_stats(self) -> Dict:
+        """获取统计信息"""
         with self._data_lock:
-            return {**self._stats, 'active_agents': len(self._agents), 'event_seq': self._event_seq}
+            stats = {**self._stats}
+            stats['active_agents'] = len([a for a in self._agents.values() if a.status == 'active'])
+            stats['total_agents'] = len(self._agents)
+            stats['event_seq'] = self._event_seq
+            stats['active_traces'] = len([t for t in self._traces.values() if t.status == 'running'])
+            return stats
+
+    def get_timeline(
+            self,
+            agent_id: Optional[str] = None,
+            trace_id: Optional[str] = None,
+            limit: int = 200
+    ) -> List[Dict]:
+        """获取时间线数据"""
+        with self._data_lock:
+            events = list(self._events)
+
+            if agent_id:
+                events = [e for e in events if e.agent_id == agent_id]
+            if trace_id:
+                events = [e for e in events if e.trace_id == trace_id]
+
+            events.sort(key=lambda x: x.timestamp)
+
+            timeline = []
+            for e in events[-limit:]:
+                item = {
+                    'timestamp': e.timestamp,
+                    'event_type': e.event_type.value if isinstance(e.event_type, EventType) else e.event_type,
+                    'agent_id': e.agent_id,
+                    'duration_ms': e.duration_ms,
+                    'data': e.data
+                }
+                timeline.append(item)
+
+            return timeline
 
     @property
     def event_seq(self) -> int:
@@ -383,4 +1143,3 @@ class DebugTracer:
 
 # 全局实例
 tracer = DebugTracer()
-

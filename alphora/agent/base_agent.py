@@ -257,6 +257,7 @@ class BaseAgent(object):
             memory_id=memory_id,
             max_history_rounds=max_history_rounds,
             auto_save_memory=auto_save_memory,
+            agent_id=self.agent_id,
         )
 
         try:
@@ -269,7 +270,10 @@ class BaseAgent(object):
 
             tracer.track_prompt_created(
                 agent_id=self.agent_id,
+                prompt_id=prompt_instance.prompt_id,
                 system_prompt=system_prompt,
+                prompt=prompt_instance.prompt,
+                placeholders=prompt_instance.content,
                 enable_memory=enable_memory,
                 memory_id=memory_id
             )
