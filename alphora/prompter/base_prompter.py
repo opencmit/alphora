@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 import os
 import re
 import uuid
@@ -741,11 +742,15 @@ class BasePrompt:
 
         _debug_agent_id = getattr(self, '_debug_agent_id', 'unknown')
 
-        # _debug_call_id = tracer.track_llm_start(
-        #     agent_id=_debug_agent_id,
-        #     model_name=getattr(self.llm, 'model_name', 'unknown') if self.llm else 'unknown',
-        #     input_text=str(query)
-        # )
+        # 追踪Prompt调用开始
+        _prompt_call_id = tracer.track_prompt_call_start(
+            agent_id=_debug_agent_id,
+            prompt_id=self.prompt_id,
+            query=query or "",
+            is_stream=is_stream
+        )
+
+        start_time = time.time()
 
         use_new_mode = self._use_new_mode and not multimodal_message
 
@@ -771,6 +776,15 @@ class BasePrompt:
             msg.add_text(content=instruction)
 
         if is_stream:
+            # 追踪LLM调用开始
+            _debug_call_id = tracer.track_llm_start(
+                agent_id=_debug_agent_id,
+                model_name=getattr(self.llm, 'model_name', 'unknown'),
+                messages=messages if use_new_mode else None,
+                input_text=str(query) if not use_new_mode else "",
+                is_streaming=True,
+                prompt_id=self.prompt_id
+            )
             try:
                 # 根据是否启用长响应模式选择不同的生成器
                 if long_response:
@@ -824,6 +838,14 @@ class BasePrompt:
 
                     content = ck.content
                     content_type = ck.content_type
+
+                    # 追踪每个流式chunk
+                    tracer.track_llm_stream_chunk(
+                        call_id=_debug_call_id,
+                        content=content,
+                        content_type=content_type,
+                        is_reasoning=(content_type == 'think')
+                    )
 
                     if self.callback:
 
@@ -899,12 +921,6 @@ class BasePrompt:
                 should_save = save_to_memory if save_to_memory is not None else self.auto_save_memory
                 if should_save and use_new_mode:
                     self._save_to_memory(query, output_str)
-
-                # tracer.track_llm_end(
-                #     call_id=_debug_call_id,
-                #     output_text=output_str,
-                #     reasoning_text=reasoning_content
-                # )
 
                 if enable_thinking:
                     return PrompterOutput(content=output_str, reasoning=reasoning_content,

@@ -10,7 +10,7 @@ from alphora.agent import BaseAgent
 class TransAgent(BaseAgent):
     async def run(self, query: str):
         prompt = self.create_prompt(
-            prompt="你是一个翻译专家，负责把用户问题翻译为{{target_lang}}"
+            prompt="你是一个翻译专家，负责把用户问题翻译为{{target_lang}}，用户:{{query}}"
         )
 
         prompt.update_placeholder(target_lang="en")
@@ -29,6 +29,7 @@ class MyAgent(BaseAgent):
         resp = await prompt.acall(query=query, is_stream=True)
 
         trans_agent = self.derive(TransAgent)
+        trans_agent2 = self.derive(TransAgent)
         await trans_agent.run(query=resp)
         pass
 
@@ -53,6 +54,7 @@ async def main(query: str):
     # 初始化智能体
     bot = MyAgent(llm=llm, verbose=True, debugger=True)
     await bot.run(query)
+    print('111')
 
 
 if __name__ == '__main__':

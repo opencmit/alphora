@@ -1,12 +1,34 @@
 """
 Alphora Debugger
 
-用法：
+用法:
     agent = BaseAgent(llm=llm, debugger=True)
     # 访问 http://localhost:9527/
 """
 
-from .tracer import tracer, DebugTracer, DebugEvent, EventType
+from .tracer import (
+    tracer,
+    DebugTracer,
+    EventType,
+    DebugEvent,
+    SessionInfo,
+    AgentInfo,
+    PromptInfo,
+    LLMCallInfo,
+    TraceContext
+)
 
-__version__ = "1.0.0"
-__all__ = ["tracer", "DebugTracer", "DebugEvent", "EventType"]
+from .server import start_server_background
+
+__all__ = [
+    'tracer',
+    'DebugTracer',
+    'EventType',
+    'DebugEvent',
+    'SessionInfo',
+    'AgentInfo',
+    'PromptInfo',
+    'LLMCallInfo',
+    'TraceContext',
+    'start_server_background'
+]
