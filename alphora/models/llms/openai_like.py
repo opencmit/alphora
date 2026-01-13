@@ -262,7 +262,6 @@ class OpenAILike(BaseLLM):
                 tracer.track_llm_error(call_id, str(e), traceback.format_exc())
             raise
 
-        # 创建带追踪的生成器
         class SyncStreamGenerator(BaseGenerator[GeneratorOutput]):
             def __init__(self, stream_iter, content_type: str, tracer_ref, call_id_ref, agent_id_ref):
                 super().__init__(content_type=content_type)
@@ -272,10 +271,20 @@ class OpenAILike(BaseLLM):
                 self._agent_id = agent_id_ref
                 self._full_content = ""
                 self._full_reasoning = ""
+                self.token_usage = None
 
             def generate(self) -> Iterator[GeneratorOutput]:
                 try:
                     for chunk in self._stream:
+                        if not chunk.choices:
+                            if chunk.usage:
+                                self.token_usage = {
+                                    'prompt_tokens': chunk.usage.prompt_tokens or 0,
+                                    'completion_tokens': chunk.usage.completion_tokens or 0,
+                                    'total_tokens': chunk.usage.total_tokens or 0
+                                }
+
+                            continue
                         delta = chunk.choices[0].delta
                         finish_reason = chunk.choices[0].finish_reason
                         if finish_reason:
@@ -307,7 +316,8 @@ class OpenAILike(BaseLLM):
                             call_id=self._call_id,
                             output_text=self._full_content,
                             reasoning_text=self._full_reasoning,
-                            finish_reason=self.finish_reason or 'stop'
+                            finish_reason=self.finish_reason or 'stop',
+                            token_usage=self.token_usage
                         )
 
                 except Exception as e:
@@ -456,13 +466,13 @@ class OpenAILike(BaseLLM):
                 messages=messages,
                 stream=True,
                 extra_body=self._get_extra_body(enable_thinking),
+                stream_options={"include_usage": True}
             )
         except Exception as e:
             if tracer and call_id:
                 tracer.track_llm_error(call_id, str(e), traceback.format_exc())
             raise
 
-        # 创建带追踪的异步生成器
         class AsyncStreamGenerator(BaseGenerator[GeneratorOutput]):
             def __init__(self, async_stream, content_type: str, tracer_ref, call_id_ref, agent_id_ref):
                 super().__init__(content_type=content_type)
@@ -473,9 +483,21 @@ class OpenAILike(BaseLLM):
                 self._full_content = ""
                 self._full_reasoning = ""
 
+                self.token_usage = None
+
             async def agenerate(self) -> AsyncIterator[GeneratorOutput]:
                 try:
                     async for chunk in self._stream:
+                        if not chunk.choices:
+                            if chunk.usage:
+                                self.token_usage = {
+                                    'prompt_tokens': chunk.usage.prompt_tokens or 0,
+                                    'completion_tokens': chunk.usage.completion_tokens or 0,
+                                    'total_tokens': chunk.usage.total_tokens or 0
+                                }
+
+                            continue
+
                         delta = chunk.choices[0].delta
                         finish_reason = chunk.choices[0].finish_reason
 
@@ -493,13 +515,15 @@ class OpenAILike(BaseLLM):
                                     self._call_id, reasoning, 'think', is_reasoning=True
                                 )
                             yield GeneratorOutput(content=reasoning, content_type='think')
+
                         elif content:
                             self._full_content += content
+
                             # 追踪流式块
                             if self._tracer and self._call_id:
                                 self._tracer.track_llm_stream_chunk(
-                                    self._call_id, content, self.content_type, is_reasoning=False
-                                )
+                                    self._call_id, content, self.content_type, is_reasoning=False)
+
                             yield GeneratorOutput(content=content, content_type=self.content_type)
 
                     # 结束追踪
@@ -509,7 +533,8 @@ class OpenAILike(BaseLLM):
                             call_id=self._call_id,
                             output_text=self._full_content,
                             reasoning_text=self._full_reasoning,
-                            finish_reason=self.finish_reason or 'stop'
+                            finish_reason=self.finish_reason or 'stop',
+                            token_usage=self.token_usage
                         )
 
                 except Exception as e:

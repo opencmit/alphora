@@ -1,5 +1,3 @@
-<img src="asset/image/logo.png" alt="Alphora Logo" width="300" height="120">
-
 # Alphora: 一个轻量的智能体开发框架
 
 <div align="center">
