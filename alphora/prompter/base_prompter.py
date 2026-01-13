@@ -491,6 +491,7 @@ class BasePrompt:
         self.placeholders = self._get_template_variables()  # 更新占位符列表
 
         self._use_legacy_mode = True
+
         # 重新验证模式
         if self.enable_memory or self._system_prompt_raw:
             self._validate_mode()
@@ -669,6 +670,7 @@ class BasePrompt:
                         logger.info(msg=f'\n\nInstruction:\n{instruction}\n\n\nResponse:\n{output_str}')
 
                 should_save = save_to_memory if save_to_memory is not None else self.auto_save_memory
+
                 if should_save and use_new_mode:
                     self._save_to_memory(query, output_str)
 
@@ -742,13 +744,13 @@ class BasePrompt:
 
         _debug_agent_id = getattr(self, '_debug_agent_id', 'unknown')
 
-        # 追踪Prompt调用开始
-        _prompt_call_id = tracer.track_prompt_call_start(
-            agent_id=_debug_agent_id,
-            prompt_id=self.prompt_id,
-            query=query or "",
-            is_stream=is_stream
-        )
+        # # 追踪Prompt调用开始
+        # _prompt_call_id = tracer.track_prompt_call_start(
+        #     agent_id=_debug_agent_id,
+        #     prompt_id=self.prompt_id,
+        #     query=query or "",
+        #     is_stream=is_stream
+        # )
 
         start_time = time.time()
 
@@ -777,14 +779,14 @@ class BasePrompt:
 
         if is_stream:
             # 追踪LLM调用开始
-            _debug_call_id = tracer.track_llm_start(
-                agent_id=_debug_agent_id,
-                model_name=getattr(self.llm, 'model_name', 'unknown'),
-                messages=messages if use_new_mode else None,
-                input_text=str(query) if not use_new_mode else "",
-                is_streaming=True,
-                prompt_id=self.prompt_id
-            )
+            # _debug_call_id = tracer.track_llm_start(
+            #     agent_id=_debug_agent_id,
+            #     model_name=getattr(self.llm, 'model_name', 'unknown'),
+            #     messages=messages if use_new_mode else None,
+            #     input_text=str(query) if not use_new_mode else "",
+            #     is_streaming=True,
+            #     prompt_id=self.prompt_id
+            # )
             try:
                 # 根据是否启用长响应模式选择不同的生成器
                 if long_response:
@@ -840,12 +842,12 @@ class BasePrompt:
                     content_type = ck.content_type
 
                     # 追踪每个流式chunk
-                    tracer.track_llm_stream_chunk(
-                        call_id=_debug_call_id,
-                        content=content,
-                        content_type=content_type,
-                        is_reasoning=(content_type == 'think')
-                    )
+                    # tracer.track_llm_stream_chunk(
+                    #     call_id=_debug_call_id,
+                    #     content=content,
+                    #     content_type=content_type,
+                    #     is_reasoning=(content_type == 'think')
+                    # )
 
                     if self.callback:
 
@@ -947,6 +949,7 @@ class BasePrompt:
                     resp = await self.llm.ainvoke(message=msg)
 
                 should_save = save_to_memory if save_to_memory is not None else self.auto_save_memory
+
                 if should_save and use_new_mode:
                     self._save_to_memory(query, resp)
 

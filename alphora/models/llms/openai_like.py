@@ -495,6 +495,7 @@ class OpenAILike(BaseLLM):
                             yield GeneratorOutput(content=content, content_type=self.content_type)
 
                     # 结束追踪
+
                     if self._tracer and self._call_id:
                         self._tracer.track_llm_end(
                             call_id=self._call_id,

@@ -5,6 +5,7 @@ Alphora Debugger 使用示例
 import asyncio
 import os
 from alphora.agent import BaseAgent
+from alphora.debugger import tracer
 
 
 class TransAgent(BaseAgent):

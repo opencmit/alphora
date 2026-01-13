@@ -1,6 +1,5 @@
 """
-Alphora Debugger - JavaScript逻辑
-修复：添加llmCalls独立数据源
+Alphora Debugger - JavaScript逻辑 (Fixed & Restore All Features)
 """
 
 SCRIPTS = '''
@@ -8,16 +7,15 @@ SCRIPTS = '''
 let ws = null;
 let events = [];
 let agents = {};
-let llmCalls = [];  // 新增：独立的LLM调用数组
+let llmCalls = [];
 let graphData = { nodes: [], edges: [] };
 let selectedAgent = null;
+let selectedEventId = null;
 let currentView = 'graph';
 let currentFilter = 'all';
 
-// Professional Color Palette Mappings
+// Colors & Icons
 const agentColors = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899'];
-
-// ==================== Icons Helper ====================
 const ICONS = {
     agent: '<svg class="icon-svg"><use href="#icon-cpu"/></svg>',
     chat: '<svg class="icon-svg"><use href="#icon-message"/></svg>',
@@ -31,39 +29,87 @@ const ICONS = {
     clock: '<svg class="icon-svg"><use href="#icon-clock"/></svg>'
 };
 
-function getAgentIconHtml(type) {
-    if (!type) return ICONS.agent;
-    const lower = type.toLowerCase();
-    if (lower.includes('trans')) return ICONS.agent;
-    if (lower.includes('chat')) return ICONS.chat;
-    if (lower.includes('search')) return ICONS.search;
-    if (lower.includes('code')) return ICONS.code;
-    if (lower.includes('tool')) return ICONS.tool;
-    if (lower.includes('rag')) return ICONS.rag;
-    return ICONS.agent;
+// ==================== Utils ====================
+function formatNumber(n) {
+    if (n === undefined || n === null) return '0';
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    return n.toString();
 }
 
-// ==================== Init ====================
+function escapeHtml(text) {
+    if (!text) return '';
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Simple Markdown Formatter
+function simpleMarkdown(text) {
+    if (!text) return '';
+    let html = escapeHtml(text);
+    html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\\n/g, '<br>');
+    return `<div class="markdown-body">${html}</div>`;
+}
+
+// Interactive JSON Renderer
+function renderJsonTree(data) {
+    if (data === null) return '<span class="json-value null">null</span>';
+    if (typeof data === 'boolean') return `<span class="json-value boolean">${data}</span>`;
+    if (typeof data === 'number') return `<span class="json-value number">${data}</span>`;
+    if (typeof data === 'string') return `<span class="json-value string">"${escapeHtml(data)}"</span>`;
+    
+    if (Array.isArray(data)) {
+        if (data.length === 0) return '[]';
+        let html = '<span class="json-toggler" onclick="toggleJson(this)"></span>[';
+        html += `<div class="json-children">`;
+        data.forEach((item, index) => {
+            html += `<div class="json-item">${renderJsonTree(item)}${index < data.length - 1 ? ',' : ''}</div>`;
+        });
+        html += `</div>]`;
+        return html;
+    }
+    
+    if (typeof data === 'object') {
+        const keys = Object.keys(data);
+        if (keys.length === 0) return '{}';
+        let html = '<span class="json-toggler" onclick="toggleJson(this)"></span>{';
+        html += `<div class="json-children">`;
+        keys.forEach((key, index) => {
+            html += `<div class="json-item">
+                <span class="json-key">"${key}":</span>
+                ${renderJsonTree(data[key])}${index < keys.length - 1 ? ',' : ''}
+            </div>`;
+        });
+        html += `</div>}`;
+        return html;
+    }
+    return String(data);
+}
+
+window.toggleJson = function(elem) {
+    elem.classList.toggle('expanded');
+    const children = elem.parentNode.querySelector('.json-children');
+    if (children) children.classList.toggle('expanded');
+};
+
+// ==================== Init & Websocket ====================
 function init() {
     connectWS();
-    setupEventListeners();
-    window.addEventListener('resize', () => {
-        if (currentView === 'graph') renderGraph();
-    });
+    setupUI();
+    window.addEventListener('resize', () => { if (currentView === 'graph') renderGraph(); });
 }
 
-function setupEventListeners() {
+function setupUI() {
     document.querySelectorAll('.graph-tab').forEach(tab => {
         tab.onclick = () => {
             document.querySelectorAll('.graph-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             currentView = tab.dataset.view;
-            
             document.getElementById('graphView').style.display = currentView === 'graph' ? 'block' : 'none';
             document.getElementById('timelineView').classList.toggle('active', currentView === 'timeline');
-            
-            if (currentView === 'graph') renderGraph();
-            else renderTimeline();
+            if (currentView === 'graph') renderGraph(); else renderTimeline();
         };
     });
     
@@ -77,22 +123,18 @@ function setupEventListeners() {
     });
 }
 
-// ==================== WebSocket ====================
 function connectWS() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${proto}//${location.host}/ws`);
-    
     ws.onopen = () => {
         document.getElementById('statusDot').classList.remove('off');
         document.getElementById('statusText').textContent = 'Connected';
     };
-    
     ws.onclose = () => {
         document.getElementById('statusDot').classList.add('off');
         document.getElementById('statusText').textContent = 'Disconnected';
         setTimeout(connectWS, 2000);
     };
-    
     ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         if (msg.type === 'init' || msg.type === 'update') {
@@ -102,11 +144,13 @@ function connectWS() {
                  if(msg.type === 'init') events = msg.events;
                  else msg.events.forEach(ev => events.push(ev));
             }
-            if (msg.llm_calls) llmCalls = msg.llm_calls;  // 新增：接收llm_calls
+            if (msg.llm_calls) llmCalls = msg.llm_calls;
             if (msg.graph) graphData = msg.graph;
             renderAll();
         } else if (msg.type === 'llm_call_detail') {
             showLLMCallDetail(msg.data);
+        } else if (msg.type === 'pong') {
+            // keep alive
         }
     };
 }
@@ -115,7 +159,6 @@ function processAgents(agentList) {
     agentList.forEach(a => agents[a.agent_id] = a);
 }
 
-// ==================== Stats ====================
 function updateStats(s) {
     document.getElementById('statAgents').textContent = s.active_agents || 0;
     document.getElementById('statCalls').textContent = s.total_llm_calls || 0;
@@ -125,13 +168,7 @@ function updateStats(s) {
     document.getElementById('eventCount').textContent = s.total_events || 0;
 }
 
-function formatNumber(n) {
-    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-    return n.toString();
-}
-
-// ==================== Render ====================
+// ==================== Render Core ====================
 function renderAll() {
     renderAgentList();
     renderLLMCallList();
@@ -141,24 +178,18 @@ function renderAll() {
 
 function renderAgentList() {
     const container = document.getElementById('agentList');
-    const agentList = Object.values(agents);
-    
-    if (agentList.length === 0) {
-        container.innerHTML = '<div class="empty-state" style="height:100px; font-size:12px;">No Active Agents</div>';
+    const list = Object.values(agents);
+    if (list.length === 0) {
+        container.innerHTML = '<div class="empty-state" style="height:100px;">No Active Agents</div>';
         return;
     }
-    
-    container.innerHTML = agentList.map((agent, idx) => {
-        const callCount = events.filter(e => 
-            e.agent_id === agent.agent_id && e.event_type === 'llm_call_end'
-        ).length;
+    container.innerHTML = list.map(agent => {
+        const callCount = events.filter(e => e.agent_id === agent.agent_id && e.event_type === 'llm_call_end').length;
         
         return `
             <div class="agent-item ${selectedAgent === agent.agent_id ? 'selected' : ''}" 
                  onclick="selectAgent('${agent.agent_id}')">
-                <div class="agent-icon">
-                    ${getAgentIconHtml(agent.agent_type)}
-                </div>
+                <div class="agent-icon">${getAgentIconHtml(agent.agent_type)}</div>
                 <div class="agent-info">
                     <div class="agent-name">${agent.agent_type}</div>
                     <div class="agent-id">${agent.agent_id.slice(0, 8)}</div>
@@ -169,38 +200,48 @@ function renderAgentList() {
     }).join('');
 }
 
+function getAgentIconHtml(type) {
+    if (!type) return ICONS.agent;
+    const lower = type.toLowerCase();
+    if (lower.includes('chat')) return ICONS.chat;
+    if (lower.includes('search')) return ICONS.search;
+    if (lower.includes('code')) return ICONS.code;
+    if (lower.includes('tool')) return ICONS.tool;
+    if (lower.includes('rag')) return ICONS.rag;
+    return ICONS.agent;
+}
+
 function renderLLMCallList() {
     const container = document.getElementById('llmCallList');
-    
-    // 使用独立的llmCalls数组，如果为空则从events提取
-    let calls = llmCalls.length > 0 ? llmCalls.slice(-10).reverse() : 
-        events.filter(e => e.event_type === 'llm_call_end').slice(-10).reverse();
+    // 兼容逻辑：优先使用llmCalls数组，否则从events推导
+    let calls = llmCalls.length > 0 ? llmCalls : 
+        events.filter(e => e.event_type === 'llm_call_end').map(e => ({
+            call_id: e.data.call_id,
+            output_preview: e.data.output_preview,
+            duration_ms: e.duration_ms,
+            total_tokens: e.data.token_usage?.total_tokens || 0
+        }));
+        
+    calls = calls.slice(-15).reverse();
     
     if (calls.length === 0) {
-        container.innerHTML = '<div class="empty-state" style="height:100px; font-size:12px;">No Recent Calls</div>';
+        container.innerHTML = '<div class="empty-state" style="height:100px;">No Recent Calls</div>';
         return;
     }
     
-    container.innerHTML = calls.map(call => {
-        // 兼容两种数据格式：llmCalls数组 或 events中的llm_call_end
-        const isFromLLMCalls = call.call_id !== undefined;
-        const callId = isFromLLMCalls ? call.call_id : call.data?.call_id;
-        const outputPreview = isFromLLMCalls ? call.output_preview : call.data?.output_preview;
-        const durationMs = isFromLLMCalls ? call.duration_ms : call.data?.duration_ms;
-        const totalTokens = isFromLLMCalls ? call.total_tokens : (call.data?.token_usage?.total_tokens || 0);
-        
-        return `
-            <div class="agent-item" onclick="showLLMCallById('${callId}')">
-                <div class="agent-icon" style="color: var(--success); background: var(--success-light);">
-                    ${ICONS.chat}
-                </div>
-                <div class="agent-info">
-                    <div class="agent-name">${(outputPreview || 'LLM Call').slice(0, 30)}</div>
-                    <div class="agent-id">${(durationMs || 0).toFixed ? durationMs.toFixed(0) : durationMs}ms | ${totalTokens} toks</div>
+    container.innerHTML = calls.map(call => `
+        <div class="agent-item" onclick="showLLMCallById('${call.call_id}')">
+            <div class="agent-icon" style="color: var(--success); background: var(--success-light);">
+                ${ICONS.chat}
+            </div>
+            <div class="agent-info">
+                <div class="agent-name">${(call.output_preview || 'Thinking...').slice(0, 30)}</div>
+                <div class="agent-id">
+                    ${(call.duration_ms || 0).toFixed(0)}ms | ${call.total_tokens || 0} toks
                 </div>
             </div>
-        `;
-    }).join('');
+        </div>
+    `).join('');
 }
 
 // ==================== Graph ====================
@@ -223,7 +264,7 @@ function renderGraph() {
     const nodeHeight = 70;
     const padding = 60;
     
-    // Simple Level Layout Algorithm
+    // Level Layout
     const levels = {};
     const processed = new Set();
     const childIds = new Set(edges.filter(e => e.type === 'derive').map(e => e.target));
@@ -256,7 +297,7 @@ function renderGraph() {
         });
     });
     
-    // Draw Edges
+    // Edges
     edges.forEach(edge => {
         const from = positions[edge.source];
         const to = positions[edge.target];
@@ -273,7 +314,7 @@ function renderGraph() {
         edgesG.appendChild(path);
     });
     
-    // Draw Nodes
+    // Nodes
     Object.values(positions).forEach((pos, idx) => {
         const { x, y, node } = pos;
         const color = agentColors[idx % agentColors.length];
@@ -303,72 +344,120 @@ function renderGraph() {
     });
 }
 
-// ==================== Timeline ====================
-function renderTimeline() {
-    const container = document.getElementById('timelineView');
-    let filtered = [...events];
-    
-    if (selectedAgent) filtered = filtered.filter(e => e.agent_id === selectedAgent);
-    
-    if (currentFilter !== 'all') {
-        const filterMap = {
-            'llm': ['llm_call_start', 'llm_call_end', 'llm_call_error'],
-            'agent': ['agent_created', 'agent_derived', 'prompt_created'],
-            'memory': ['memory_add', 'memory_retrieve', 'memory_search', 'memory_clear'],
-            'tool': ['tool_call_start', 'tool_call_end', 'tool_call_error'],
-            'error': ['llm_call_error', 'tool_call_error', 'error']
-        };
-        const types = filterMap[currentFilter] || [];
-        filtered = filtered.filter(e => types.includes(e.event_type));
+// ==================== Detail Panels ====================
+
+function showLLMCallById(callId) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'get_llm_call', call_id: callId }));
     }
+}
+
+function showLLMCallDetail(call) {
+    if (!call) return;
+    document.getElementById('detailTitle').textContent = 'LLM Call Analysis';
     
-    if (filtered.length === 0) {
-        container.innerHTML = '<div class="empty-state"><div>No Events</div></div>';
-        return;
-    }
+    const duration = call.duration_ms || 0;
+    const ttft = call.time_to_first_token_ms || 0;
+    const ttftPct = duration > 0 ? (ttft / duration * 100) : 0;
     
-    container.innerHTML = filtered.slice(-100).map(ev => {
-        const info = getEventDisplayInfo(ev);
-        const time = new Date(ev.timestamp * 1000).toLocaleTimeString('zh-CN', { hour12: false });
+    document.getElementById('detailContent').innerHTML = `
+        <div class="detail-tabs">
+            <div class="detail-tab active" onclick="switchTab(this, 'tab-overview')">Overview</div>
+            <div class="detail-tab" onclick="switchTab(this, 'tab-chat')">Chat View</div>
+            <div class="detail-tab" onclick="switchTab(this, 'tab-raw')">Raw Data</div>
+        </div>
         
-        return `
-            <div class="timeline-item ${ev.event_type} fade-in" 
-                 onclick="showEventDetail('${ev.event_id}', ${JSON.stringify(ev).replace(/"/g, '&quot;')})">
-                <div class="timeline-time">${time}</div>
-                <div class="timeline-content">
-                    <div class="timeline-title">
-                        <span class="timeline-tag" style="background: ${info.color}15; color: ${info.color}">
-                            ${info.icon} ${info.type}
-                        </span>
-                        ${ev.duration_ms ? `<span class="timeline-tag">${ev.duration_ms.toFixed(0)}ms</span>` : ''}
+        <div id="tab-overview" class="detail-tab-content active">
+            <div class="detail-section">
+                <div class="detail-section-title">Performance Metrics</div>
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <div class="detail-label">Total Duration</div>
+                        <div class="detail-value large" style="color: var(--brand)">${duration.toFixed(0)}ms</div>
+                        <div class="latency-viz">
+                            <span>TTFT: ${ttft.toFixed(0)}ms</span>
+                            <div class="latency-bar-container">
+                                <div class="latency-bar-ttft" style="width: ${ttftPct}%"></div>
+                                <div class="latency-bar-gen" style="width: ${100 - ttftPct}%"></div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="timeline-detail">${info.detail}</div>
+                    <div class="detail-item">
+                        <div class="detail-label">Speed</div>
+                        <div class="detail-value large" style="color: var(--purple)">${(call.tokens_per_second || 0).toFixed(1)} T/s</div>
+                    </div>
                 </div>
             </div>
-        `;
-    }).join('');
+            
+            <div class="detail-section">
+                <div class="detail-section-title">Token Usage</div>
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <div class="detail-label">Prompt</div>
+                        <div class="detail-value">${formatNumber(call.prompt_tokens)}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Completion</div>
+                        <div class="detail-value">${formatNumber(call.completion_tokens)}</div>
+                    </div>
+                    <div class="detail-item full">
+                        <div class="detail-label">Model: ${call.model_name}</div>
+                        <div class="token-bar">
+                            <div class="token-bar-segment prompt" style="width: ${call.total_tokens > 0 ? (call.prompt_tokens/call.total_tokens*100) : 0}%"></div>
+                            <div class="token-bar-segment completion" style="width: ${call.total_tokens > 0 ? (call.completion_tokens/call.total_tokens*100) : 0}%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            ${call.error ? `
+            <div class="detail-section">
+                <div class="detail-section-title" style="color: var(--danger)">Error</div>
+                <div class="code-block" style="color: var(--danger); border-color: var(--danger-light);">${escapeHtml(call.error)}</div>
+            </div>` : ''}
+        </div>
+        
+        <div id="tab-chat" class="detail-tab-content">
+            <div class="chat-container">
+                ${(call.system_prompt) ? `
+                <div class="chat-message system">
+                    <div class="chat-avatar system">SYS</div>
+                    <div class="chat-bubble">${simpleMarkdown(call.system_prompt)}</div>
+                </div>` : ''}
+                
+                ${(call.request_messages || []).map(msg => `
+                <div class="chat-message ${msg.role}">
+                    <div class="chat-avatar ${msg.role}">${msg.role.slice(0,1).toUpperCase()}</div>
+                    <div class="chat-bubble">${simpleMarkdown(msg.content)}</div>
+                </div>`).join('')}
+                
+                <div class="chat-message assistant">
+                    <div class="chat-avatar assistant">AI</div>
+                    <div class="chat-bubble">
+                        ${simpleMarkdown(call.response_text)}
+                        ${call.finish_reason ? `<div style="margin-top:8px; font-size:10px; color:var(--text-muted)">Finish reason: ${call.finish_reason}</div>` : ''}
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="tab-raw" class="detail-tab-content">
+             <div class="json-tree code-block">
+                ${renderJsonTree(call)}
+             </div>
+        </div>
+    `;
 }
 
-function getEventDisplayInfo(ev) {
-    const d = ev.data || {};
-    const typeMap = {
-        'agent_created': { icon: ICONS.agent, type: 'Agent Created', color: 'var(--purple)', detail: d.agent_type || '' },
-        'agent_derived': { icon: ICONS.agent, type: 'Agent Forked', color: 'var(--orange)', detail: `→ ${d.child_type || ''}` },
-        'llm_call_start': { icon: ICONS.play, type: 'LLM Start', color: 'var(--brand)', detail: d.input_preview?.slice(0, 80) || d.model_name || '' },
-        'llm_call_end': { icon: ICONS.check, type: 'LLM Complete', color: 'var(--success)', detail: `${d.token_usage?.total_tokens || d.total_tokens || 0} tokens - ${(d.output_preview || '').slice(0, 60)}` },
-        'llm_call_error': { icon: ICONS.alert, type: 'LLM Error', color: 'var(--danger)', detail: (d.error || '').slice(0, 60) },
-        'prompt_created': { icon: ICONS.code, type: 'Prompt Built', color: 'var(--cyan)', detail: (d.system_prompt_preview || '').slice(0, 60) },
-        'memory_add': { icon: ICONS.rag, type: 'Memory Saved', color: 'var(--warning)', detail: `[${d.role || ''}] ${(d.content_preview || '').slice(0, 50)}` },
-        'memory_retrieve': { icon: ICONS.search, type: 'Retrieval', color: 'var(--warning)', detail: `${d.message_count || 0} messages` },
-        'tool_call_start': { icon: ICONS.tool, type: 'Tool Start', color: '#ec4899', detail: d.tool_name || '' },
-        'tool_call_end': { icon: ICONS.check, type: 'Tool Done', color: '#ec4899', detail: (d.result_preview || '').slice(0, 60) },
-        'error': { icon: ICONS.alert, type: 'System Error', color: 'var(--danger)', detail: (d.error || '').slice(0, 60) }
-    };
-    
-    return typeMap[ev.event_type] || { icon: ICONS.agent, type: ev.event_type, color: 'var(--text-secondary)', detail: JSON.stringify(d).slice(0, 50) };
-}
+window.switchTab = function(elem, tabId) {
+    const parent = elem.parentNode;
+    parent.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+    elem.classList.add('active');
+    const contentParent = document.getElementById('detailContent');
+    contentParent.querySelectorAll('.detail-tab-content').forEach(c => c.classList.remove('active'));
+    document.getElementById(tabId).classList.add('active');
+};
 
-// ==================== Detail Panel ====================
 function selectAgent(agentId) {
     selectedAgent = selectedAgent === agentId ? null : agentId;
     renderAll();
@@ -377,11 +466,12 @@ function selectAgent(agentId) {
 }
 
 function showAgentDetail(agent) {
-    document.getElementById('detailTitle').textContent = agent.agent_type;
+    document.getElementById('detailTitle').textContent = 'Agent Details';
     const agentEvents = events.filter(e => e.agent_id === agent.agent_id);
     const agentLLMCalls = agentEvents.filter(e => e.event_type === 'llm_call_end');
     const totalTokens = agentLLMCalls.reduce((sum, e) => sum + (e.data?.token_usage?.total_tokens || 0), 0);
     
+    // 恢复：Agent Metrics和Overview
     document.getElementById('detailContent').innerHTML = `
         <div class="detail-section">
             <div class="detail-section-title">Overview</div>
@@ -393,6 +483,10 @@ function showAgentDetail(agent) {
                 <div class="detail-item">
                     <div class="detail-label">Model</div>
                     <div class="detail-value">${agent.llm_info?.model_name || 'N/A'}</div>
+                </div>
+                 <div class="detail-item">
+                    <div class="detail-label">Status</div>
+                    <div class="detail-value" style="color:var(--success)">${agent.status}</div>
                 </div>
             </div>
         </div>
@@ -414,89 +508,25 @@ function showAgentDetail(agent) {
         ${agent.llm_info ? `
         <div class="detail-section">
             <div class="detail-section-title">Configuration</div>
-            <div class="code-block">${JSON.stringify(agent.llm_info, null, 2)}</div>
+            <div class="json-tree code-block" style="max-height: 400px;">
+                ${renderJsonTree(agent.llm_info)}
+            </div>
         </div>
         ` : ''}
     `;
 }
 
-function showLLMCallById(callId) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'get_llm_call', call_id: callId }));
-    }
-}
-
-function showLLMCallDetail(call) {
-    if (!call) return;
-    document.getElementById('detailTitle').textContent = 'LLM Call Details';
-    const promptRatio = call.total_tokens > 0 ? (call.prompt_tokens / call.total_tokens * 100) : 0;
-    
-    document.getElementById('detailContent').innerHTML = `
-        <div class="detail-section">
-            <div class="detail-section-title">Performance</div>
-            <div class="detail-grid">
-                <div class="detail-item">
-                    <div class="detail-label">Duration</div>
-                    <div class="detail-value large" style="color: var(--brand)">${call.duration_ms?.toFixed(0) || 0}ms</div>
-                </div>
-                <div class="detail-item">
-                    <div class="detail-label">Speed</div>
-                    <div class="detail-value large" style="color: var(--purple)">${call.tokens_per_second?.toFixed(1) || 0} TPS</div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="detail-section">
-            <div class="detail-section-title">Token Usage</div>
-            <div class="detail-grid">
-                <div class="detail-item">
-                    <div class="detail-label">Prompt</div>
-                    <div class="detail-value" style="color: var(--brand)">${formatNumber(call.prompt_tokens || 0)}</div>
-                </div>
-                <div class="detail-item">
-                    <div class="detail-label">Completion</div>
-                    <div class="detail-value" style="color: var(--success)">${formatNumber(call.completion_tokens || 0)}</div>
-                </div>
-                <div class="detail-item full">
-                    <div class="detail-label">Total: ${formatNumber(call.total_tokens || 0)}</div>
-                    <div class="token-bar">
-                        <div class="token-bar-segment prompt" style="width: ${promptRatio}%"></div>
-                        <div class="token-bar-segment completion" style="width: ${100 - promptRatio}%"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        ${call.request_messages?.length > 0 ? `
-        <div class="detail-section">
-            <div class="detail-section-title">Input Messages (${call.request_messages.length})</div>
-            <div class="code-block messages">${call.request_messages.map(msg => `<div class="message-item"><div class="message-role ${msg.role}">${msg.role}</div><div class="message-content">${escapeHtml(msg.content || '')}</div></div>`).join('')}</div>
-        </div>
-        ` : ''}
-        
-        <div class="detail-section">
-            <div class="detail-section-title">Output</div>
-            <div class="code-block" style="background: var(--bg-hover); border-left: 3px solid var(--success);">${escapeHtml(call.response_text || '')}</div>
-        </div>
-        
-        ${call.error ? `
-        <div class="detail-section">
-            <div class="detail-section-title" style="color: var(--danger)">Error</div>
-            <div class="code-block" style="color: var(--danger); border-color: var(--danger-light);">${escapeHtml(call.error)}</div>
-        </div>
-        ` : ''}
-    `;
-}
-
-function showEventDetail(eventId, event) {
+function showEventDetail(eventId, eventDataStr) {
+    selectedEventId = eventId;
+    renderTimeline();
+    const event = JSON.parse(decodeURIComponent(eventDataStr));
     document.getElementById('detailTitle').textContent = 'Event Details';
     const info = getEventDisplayInfo(event);
     
     document.getElementById('detailContent').innerHTML = `
         <div class="detail-section">
-            <div class="detail-section-title">Metadata</div>
             <div class="detail-grid">
-                <div class="detail-item">
+                <div class="detail-item full">
                     <div class="detail-label">Type</div>
                     <div class="detail-value" style="display:flex; gap:6px; align-items:center;">
                         <span style="color:${info.color}">${info.icon}</span> 
@@ -504,10 +534,10 @@ function showEventDetail(eventId, event) {
                     </div>
                 </div>
                 <div class="detail-item">
-                    <div class="detail-label">Time</div>
+                    <div class="detail-label">Timestamp</div>
                     <div class="detail-value">${new Date(event.timestamp * 1000).toLocaleString()}</div>
                 </div>
-                ${event.duration_ms ? `
+                 ${event.duration_ms ? `
                 <div class="detail-item">
                     <div class="detail-label">Latency</div>
                     <div class="detail-value">${event.duration_ms.toFixed(0)}ms</div>
@@ -515,47 +545,103 @@ function showEventDetail(eventId, event) {
                 ` : ''}
             </div>
         </div>
-        
         <div class="detail-section">
-            <div class="detail-section-title">Payload</div>
-            <div class="code-block">${JSON.stringify(event.data || {}, null, 2)}</div>
+            <div class="detail-section-title">Payload Data</div>
+            <div class="json-tree code-block">
+                ${renderJsonTree(event.data)}
+            </div>
         </div>
-        
         ${event.event_type === 'llm_call_end' && event.data?.call_id ? `
-        <button class="btn" style="width:100%; justify-content:center;" onclick="showLLMCallById('${event.data.call_id}')">
-            View Full Trace
-        </button>
+            <button class="btn" style="width:100%; justify-content:center; margin-top:20px;" 
+                    onclick="showLLMCallById('${event.data.call_id}')">
+                Analyze Full LLM Call
+            </button>
         ` : ''}
     `;
 }
 
 function closeDetail() {
-    document.getElementById('detailContent').innerHTML = `
-        <div class="empty-state">
-            <svg class="empty-state-svg" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" stroke-width="2"/><polyline points="14 2 14 8 20 8" fill="none" stroke="currentColor" stroke-width="2"/><line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" stroke-width="2"/><line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" stroke-width="2"/><polyline points="10 9 9 9 8 9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-            <div>Select an event or node</div>
-        </div>
-    `;
+    document.getElementById('detailContent').innerHTML = '<div class="empty-state">Select an item</div>';
     document.getElementById('detailTitle').textContent = 'Details';
+    selectedEventId = null;
+    renderTimeline();
 }
 
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+function clearData() {
+    if(confirm('Clear all data?')) {
+        fetch('/api/clear', {method:'POST'}).then(() => {
+            events=[]; agents={}; llmCalls=[]; graphData={nodes:[], edges:[]};
+            renderAll(); closeDetail();
+        });
+    }
 }
 
-async function clearData() {
-    if (!confirm('Clear all debug data?')) return;
-    await fetch('/api/clear', { method: 'POST' });
-    events = [];
-    agents = {};
-    llmCalls = [];
-    graphData = { nodes: [], edges: [] };
-    selectedAgent = null;
-    renderAll();
-    closeDetail();
+function renderTimeline() {
+    const container = document.getElementById('timelineView');
+    let filtered = [...events];
+    if (selectedAgent) filtered = filtered.filter(e => e.agent_id === selectedAgent);
+    if (currentFilter !== 'all') {
+        const filterMap = {
+            'llm': ['llm_call_start', 'llm_call_end', 'llm_call_error'],
+            'agent': ['agent_created', 'agent_derived', 'prompt_created'],
+            'memory': ['memory_add', 'memory_retrieve', 'memory_search', 'memory_clear'],
+            'tool': ['tool_call_start', 'tool_call_end', 'tool_call_error'],
+            'error': ['error', 'llm_call_error', 'tool_call_error']
+        };
+        const types = filterMap[currentFilter] || [];
+        filtered = filtered.filter(e => types.includes(e.event_type));
+    }
+    
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="empty-state">No Events</div>';
+        return;
+    }
+    
+    // 恢复：Timeline列表的渲染逻辑，确保样式正确
+    container.innerHTML = filtered.slice(-100).reverse().map(ev => {
+        const info = getEventDisplayInfo(ev);
+        const time = new Date(ev.timestamp * 1000).toLocaleTimeString('zh-CN', { hour12: false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+        const isActive = ev.event_id === selectedEventId;
+        const jsonStr = encodeURIComponent(JSON.stringify(ev));
+        
+        return `
+            <div class="timeline-item ${ev.event_type} ${isActive ? 'active-event' : ''} fade-in" 
+                 onclick="showEventDetail('${ev.event_id}', '${jsonStr}')">
+                <div class="timeline-time">${time}</div>
+                <div class="timeline-content">
+                    <div class="timeline-title">
+                        <span class="timeline-tag" style="background: ${info.color}15; color: ${info.color}">
+                            ${info.icon} ${info.type}
+                        </span>
+                        ${ev.duration_ms ? `<span class="timeline-tag">${ev.duration_ms.toFixed(0)}ms</span>` : ''}
+                    </div>
+                    <div class="timeline-detail" style="color:var(--text-secondary)">
+                        ${info.detail}
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// 恢复：完整的事件映射逻辑，不再丢失 prompt/memory 等事件
+function getEventDisplayInfo(ev) {
+    const d = ev.data || {};
+    const typeMap = {
+        'agent_created': { icon: ICONS.agent, type: 'Agent Created', color: 'var(--purple)', detail: d.agent_type || '' },
+        'agent_derived': { icon: ICONS.agent, type: 'Agent Forked', color: 'var(--orange)', detail: `→ ${d.child_type || ''}` },
+        'llm_call_start': { icon: ICONS.play, type: 'LLM Start', color: 'var(--brand)', detail: d.input_preview?.slice(0, 80) || d.model_name || '' },
+        'llm_call_end': { icon: ICONS.check, type: 'LLM Complete', color: 'var(--success)', detail: `${d.token_usage?.total_tokens || d.total_tokens || 0} tokens` },
+        'llm_call_error': { icon: ICONS.alert, type: 'LLM Error', color: 'var(--danger)', detail: (d.error || '').slice(0, 60) },
+        'prompt_created': { icon: ICONS.code, type: 'Prompt Built', color: 'var(--cyan)', detail: (d.system_prompt_preview || '').slice(0, 60) },
+        'memory_add': { icon: ICONS.rag, type: 'Memory Saved', color: 'var(--warning)', detail: `[${d.role || ''}]` },
+        'memory_retrieve': { icon: ICONS.search, type: 'Retrieval', color: 'var(--warning)', detail: `${d.message_count || 0} messages` },
+        'tool_call_start': { icon: ICONS.tool, type: 'Tool Start', color: '#ec4899', detail: d.tool_name || '' },
+        'tool_call_end': { icon: ICONS.check, type: 'Tool Done', color: '#ec4899', detail: (d.result_preview || '').slice(0, 60) },
+        'error': { icon: ICONS.alert, type: 'System Error', color: 'var(--danger)', detail: (d.error || '').slice(0, 60) }
+    };
+    
+    return typeMap[ev.event_type] || { icon: ICONS.clock, type: ev.event_type, color: 'var(--text-secondary)', detail: '' };
 }
 
 init();
