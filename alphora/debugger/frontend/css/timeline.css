@@ -1,0 +1,138 @@
+/**
+ * timeline.css - 时间线视图样式
+ */
+
+.timeline-container { 
+    flex: 1; 
+    overflow-y: auto; 
+    padding: 20px; 
+    display: none; 
+    background: var(--bg-body); 
+}
+
+.timeline-container.active { 
+    display: block; 
+}
+
+.timeline-item {
+    display: flex; 
+    gap: 16px; 
+    padding: 12px 0;
+    border-left: 2px solid var(--border); 
+    margin-left: 10px; 
+    padding-left: 20px;
+    position: relative; 
+    transition: background 0.1s; 
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.timeline-item:hover { 
+    background: var(--bg-hover); 
+}
+
+.timeline-item.active-event { 
+    background: var(--brand-light); 
+    border-left: 2px solid var(--brand); 
+}
+
+/* 时间线节点圆点 */
+.timeline-item::before {
+    content: ''; 
+    position: absolute; 
+    left: -6px; 
+    top: 16px;
+    width: 10px; 
+    height: 10px; 
+    border-radius: 50%; 
+    background: var(--bg-panel);
+    border: 2px solid var(--border); 
+    box-shadow: 0 0 0 4px var(--bg-body);
+}
+
+/* 不同事件类型的圆点颜色 */
+.timeline-item.llm_call_start::before { 
+    border-color: var(--brand); 
+    background: var(--brand); 
+}
+
+.timeline-item.llm_call_end::before { 
+    border-color: var(--success); 
+    background: var(--success); 
+}
+
+.timeline-item.agent_created::before { 
+    border-color: var(--purple); 
+    background: var(--purple); 
+}
+
+.timeline-item.agent_derived::before { 
+    border-color: var(--orange); 
+    background: var(--orange); 
+}
+
+.timeline-item.prompt_created::before, 
+.timeline-item.prompt_render::before { 
+    border-color: var(--cyan); 
+    background: var(--cyan); 
+}
+
+.timeline-item.memory_add::before { 
+    border-color: var(--warning); 
+    background: var(--warning); 
+}
+
+.timeline-item.error::before, 
+.timeline-item.llm_call_error::before { 
+    border-color: var(--danger); 
+    background: var(--danger); 
+}
+
+/* 时间线内容 */
+.timeline-time { 
+    font-size: 11px; 
+    color: var(--text-muted); 
+    font-family: 'JetBrains Mono', monospace; 
+    width: 60px; 
+    flex-shrink: 0; 
+    padding-top: 2px; 
+}
+
+.timeline-content { 
+    flex: 1; 
+    background: var(--bg-panel); 
+    padding: 12px; 
+    border-radius: 8px; 
+    border: 1px solid var(--border); 
+    box-shadow: var(--shadow-sm); 
+}
+
+.timeline-title { 
+    font-size: 13px; 
+    font-weight: 600; 
+    margin-bottom: 6px; 
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between; 
+    gap: 8px; 
+    flex-wrap: wrap; 
+}
+
+.timeline-tag { 
+    display: inline-flex; 
+    align-items: center; 
+    gap: 4px; 
+    font-size: 10px; 
+    padding: 2px 8px; 
+    font-weight: 600; 
+    border-radius: 4px; 
+    background: var(--bg-body); 
+    color: var(--text-secondary); 
+}
+
+.timeline-detail { 
+    font-size: 12px; 
+    color: var(--text-secondary); 
+    line-height: 1.5; 
+    word-break: break-word; 
+}

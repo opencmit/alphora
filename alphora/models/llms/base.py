@@ -35,7 +35,8 @@ class BaseLLM(ABC):
     def get_non_stream_response(self,
                                 message: Union[str, Message, List[Dict[str, Any]]],
                                 enable_thinking: bool = False,
-                                system_prompt: Optional[str] = None) -> str:
+                                system_prompt: Optional[str] = None,
+                                prompt_id: Optional[str] = None) -> str:
         """Synchronous non-streaming response."""
         raise NotImplementedError
 
@@ -43,7 +44,8 @@ class BaseLLM(ABC):
     async def aget_non_stream_response(self,
                                        message: Union[str, Message, List[Dict[str, Any]]],
                                        enable_thinking: bool = False,
-                                       system_prompt: Optional[str] = None) -> str:
+                                       system_prompt: Optional[str] = None,
+                                       prompt_id: Optional[str] = None) -> str:
         """Asynchronous non-streaming response."""
         raise NotImplementedError
 
@@ -53,7 +55,8 @@ class BaseLLM(ABC):
             message: Union[str, Message, List[Dict[str, Any]]],
             content_type: str = "char",
             enable_thinking: bool = False,
-            system_prompt: Optional[str] = None
+            system_prompt: Optional[str] = None,
+            prompt_id: Optional[str] = None
     ) -> BaseGenerator:
         """Synchronous streaming response."""
         raise NotImplementedError
@@ -64,7 +67,8 @@ class BaseLLM(ABC):
             message: Union[str, Message, List[Dict[str, Any]]],
             content_type: str = "char",
             enable_thinking: bool = False,
-            system_prompt: Optional[str] = None
+            system_prompt: Optional[str] = None,
+            prompt_id: Optional[str] = None
     ) -> BaseGenerator:
         """Asynchronous streaming response (placeholder; actual impl may use async generator)."""
         raise NotImplementedError

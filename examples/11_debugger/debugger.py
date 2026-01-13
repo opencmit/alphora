@@ -11,11 +11,12 @@ from alphora.debugger import tracer
 class TransAgent(BaseAgent):
     async def run(self, query: str):
         prompt = self.create_prompt(
-            prompt="你是一个翻译专家，负责把用户问题翻译为{{target_lang}}，用户:{{query}}"
+            system_prompt="你是一个翻译专家，负责把用户问题翻译为{{target_lang}}"
         )
 
         prompt.update_placeholder(target_lang="en")
-        return await prompt.acall(query=query, is_stream=True)
+
+        return await prompt.acall(query=query, is_stream=True, force_json=True)
 
 
 class MyAgent(BaseAgent):

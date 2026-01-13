@@ -1,0 +1,129 @@
+/**
+ * sidebar.css - 侧边栏样式
+ */
+
+.sidebar {
+    width: var(--sidebar-width); 
+    background: var(--bg-panel); 
+    border-right: 1px solid var(--border);
+    display: flex; 
+    flex-direction: column; 
+    flex-shrink: 0; 
+    z-index: 10;
+}
+
+.sidebar-section { 
+    padding: 16px; 
+    border-bottom: 1px solid var(--border); 
+}
+
+.sidebar-title { 
+    font-size: 11px; 
+    text-transform: uppercase; 
+    color: var(--text-muted); 
+    margin-bottom: 12px; 
+    font-weight: 700; 
+    letter-spacing: 0.5px; 
+}
+
+/* Agent List */
+.agent-list { 
+    max-height: 240px; 
+    overflow-y: auto; 
+}
+
+.agent-item {
+    display: flex; 
+    align-items: center; 
+    gap: 10px; 
+    padding: 10px 12px;
+    border-radius: 8px; 
+    cursor: pointer; 
+    margin-bottom: 4px;
+    transition: all 0.15s; 
+    border: 1px solid transparent;
+}
+
+.agent-item:hover { 
+    background: var(--bg-hover); 
+    border-color: var(--border); 
+}
+
+.agent-item.selected { 
+    background: var(--brand-light); 
+    border-color: var(--brand); 
+}
+
+.agent-icon { 
+    width: 32px; 
+    height: 32px; 
+    border-radius: 6px; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    background: var(--bg-body); 
+    color: var(--text-secondary); 
+}
+
+.agent-item.selected .agent-icon { 
+    background: white; 
+    color: var(--brand); 
+}
+
+.agent-info { 
+    flex: 1; 
+    min-width: 0; 
+}
+
+.agent-name { 
+    font-size: 13px; 
+    font-weight: 600; 
+    color: var(--text-main); 
+    white-space: nowrap; 
+    overflow: hidden; 
+    text-overflow: ellipsis; 
+}
+
+.agent-id { 
+    font-size: 11px; 
+    color: var(--text-secondary); 
+    font-family: 'JetBrains Mono', monospace; 
+}
+
+.agent-badge { 
+    font-size: 10px; 
+    padding: 2px 6px; 
+    border-radius: 10px; 
+    font-weight: 600; 
+    background: var(--success-light); 
+    color: var(--success); 
+    border: 1px solid rgba(16, 185, 129, 0.1); 
+}
+
+/* Filter Group */
+.filter-group { 
+    display: flex; 
+    flex-wrap: wrap; 
+    gap: 6px; 
+}
+
+.filter-btn {
+    padding: 5px 10px; 
+    border-radius: 6px; 
+    font-size: 11px; 
+    font-weight: 500;
+    background: var(--bg-body); 
+    border: 1px solid transparent; 
+    color: var(--text-secondary); 
+    cursor: pointer;
+}
+
+.filter-btn:hover { 
+    background: var(--bg-active); 
+}
+
+.filter-btn.active { 
+    background: var(--brand); 
+    color: white; 
+    box-shadow: var(--shadow-sm); 
+}

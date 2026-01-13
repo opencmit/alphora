@@ -1,0 +1,151 @@
+/**
+ * layout.css - 布局样式（头部、主容器）
+ */
+
+/* Header */
+header {
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center;
+    padding: 0 20px; 
+    background: var(--bg-panel); 
+    border-bottom: 1px solid var(--border);
+    position: fixed; 
+    top: 0; 
+    left: 0; 
+    right: 0; 
+    z-index: 100; 
+    height: var(--header-height);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Logo */
+.logo { 
+    display: flex; 
+    align-items: center; 
+    gap: 12px; 
+}
+
+.logo-icon { 
+    width: 32px; 
+    height: 32px; 
+    background: var(--brand); 
+    color: white; 
+    border-radius: 8px; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+}
+
+.logo h1 { 
+    font-size: 16px; 
+    font-weight: 700; 
+    letter-spacing: -0.5px; 
+    color: var(--text-main); 
+}
+
+.logo-version { 
+    font-size: 11px; 
+    color: var(--brand); 
+    background: var(--brand-light); 
+    padding: 2px 6px; 
+    border-radius: 4px; 
+    font-weight: 600; 
+    margin-left: 6px; 
+}
+
+/* Stats Bar */
+.stats-bar { 
+    display: flex; 
+    gap: 20px; 
+}
+
+.stat-item { 
+    display: flex; 
+    align-items: center; 
+    gap: 8px; 
+    font-size: 12px; 
+    color: var(--text-secondary); 
+    padding: 4px 0; 
+}
+
+.stat-item .value { 
+    font-weight: 600; 
+    font-family: 'JetBrains Mono', monospace; 
+    font-size: 13px; 
+    color: var(--text-main); 
+}
+
+/* Header Right */
+.header-right { 
+    display: flex; 
+    align-items: center; 
+    gap: 16px; 
+}
+
+.status { 
+    display: flex; 
+    align-items: center; 
+    gap: 6px; 
+    font-size: 12px; 
+    color: var(--text-secondary); 
+    font-weight: 500; 
+}
+
+.status-dot { 
+    width: 8px; 
+    height: 8px; 
+    border-radius: 50%; 
+    background: var(--success); 
+    box-shadow: 0 0 0 2px var(--success-light); 
+}
+
+.status-dot.off { 
+    background: var(--danger); 
+    box-shadow: 0 0 0 2px var(--danger-light); 
+}
+
+/* Button */
+.btn { 
+    padding: 8px 16px; 
+    border-radius: 6px; 
+    border: 1px solid var(--border); 
+    font-size: 12px; 
+    font-weight: 500; 
+    cursor: pointer; 
+    background: var(--bg-panel); 
+    color: var(--text-main);
+    transition: all 0.2s; 
+    display: inline-flex; 
+    align-items: center; 
+    gap: 6px;
+}
+
+.btn:hover { 
+    background: var(--bg-hover); 
+    border-color: var(--border-hover); 
+}
+
+.btn-danger { 
+    color: var(--danger); 
+    border-color: var(--danger-light); 
+    background: var(--danger-light); 
+}
+
+.btn-danger:hover { 
+    background: var(--danger); 
+    color: white; 
+}
+
+.btn-full {
+    width: 100%;
+    justify-content: center;
+    margin-top: 16px;
+}
+
+/* Main Layout */
+main { 
+    margin-top: var(--header-height); 
+    height: calc(100vh - var(--header-height)); 
+    display: flex; 
+}

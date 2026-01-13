@@ -50,10 +50,6 @@ class PrompterOutput(str):
         """返回续写次数（long_response 模式）"""
         return self._continuation_count
 
-    def __repr__(self):
-        return (f'PrompterOutput({super().__repr__()}, reasoning={self._reasoning!r}, '
-                f'finish_reason={self._finish_reason!r}, continuations={self._continuation_count})')
-
 
 class BasePrompt:
 
@@ -591,13 +587,15 @@ class BasePrompt:
                             message=messages,
                             content_type=content_type,
                             enable_thinking=enable_thinking,
+                            prompt_id=self.prompt_id
                         )
                     else:
                         generator_with_content_type: BaseGenerator = self.llm.get_streaming_response(
                             message=msg,
                             content_type=content_type,
                             enable_thinking=enable_thinking,
-                            system_prompt=system_prompt
+                            system_prompt=system_prompt,
+                            prompt_id=self.prompt_id
                         )
 
                 # 后处理咯
@@ -778,15 +776,7 @@ class BasePrompt:
             msg.add_text(content=instruction)
 
         if is_stream:
-            # 追踪LLM调用开始
-            # _debug_call_id = tracer.track_llm_start(
-            #     agent_id=_debug_agent_id,
-            #     model_name=getattr(self.llm, 'model_name', 'unknown'),
-            #     messages=messages if use_new_mode else None,
-            #     input_text=str(query) if not use_new_mode else "",
-            #     is_streaming=True,
-            #     prompt_id=self.prompt_id
-            # )
+
             try:
                 # 根据是否启用长响应模式选择不同的生成器
                 if long_response:
@@ -805,13 +795,15 @@ class BasePrompt:
                             message=messages,
                             content_type=content_type,
                             enable_thinking=enable_thinking,
+                            prompt_id=self.prompt_id
                         )
                     else:
                         generator_with_content_type: BaseGenerator = await self.llm.aget_streaming_response(
                             message=msg,
                             content_type=content_type,
                             enable_thinking=enable_thinking,
-                            system_prompt=system_prompt
+                            system_prompt=system_prompt,
+                            prompt_id=self.prompt_id
                         )
 
                 # 后处理

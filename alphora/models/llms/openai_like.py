@@ -118,7 +118,8 @@ class OpenAILike(BaseLLM):
     def get_non_stream_response(self,
                                 message: Union[str, Message, List[Dict[str, Any]]],
                                 enable_thinking: bool = False,
-                                system_prompt: Optional[str] = None,) -> str:
+                                system_prompt: Optional[str] = None,
+                                prompt_id: Optional[str] = None) -> str:
         """
         同步-非流式
         """
@@ -144,7 +145,8 @@ class OpenAILike(BaseLLM):
                     'max_tokens': self.max_tokens,
                     'top_p': self.top_p
                 },
-                system_prompt=system_prompt
+                system_prompt=system_prompt,
+                prompt_id=prompt_id
             )
 
         start = time.time()
@@ -210,6 +212,7 @@ class OpenAILike(BaseLLM):
             content_type: str = "char",
             enable_thinking: bool = False,
             system_prompt: Optional[str] = None,
+            prompt_id: Optional[str] = None
     ) -> BaseGenerator:
         """
         同步-流式输出
@@ -236,7 +239,8 @@ class OpenAILike(BaseLLM):
                     'max_tokens': self.max_tokens,
                     'top_p': self.top_p
                 },
-                system_prompt=system_prompt
+                system_prompt=system_prompt,
+                prompt_id=prompt_id
             )
 
         try:
@@ -317,7 +321,8 @@ class OpenAILike(BaseLLM):
     async def aget_non_stream_response(self,
                                        message: Union[str, Message, List[Dict[str, Any]]],
                                        enable_thinking: bool = False,
-                                       system_prompt: Optional[str] = None,) -> str:
+                                       system_prompt: Optional[str] = None,
+                                       prompt_id: Optional[str] = None) -> str:
         """
         异步-非流式输出
         """
@@ -343,7 +348,8 @@ class OpenAILike(BaseLLM):
                     'max_tokens': self.max_tokens,
                     'top_p': self.top_p
                 },
-                system_prompt=system_prompt
+                system_prompt=system_prompt,
+                prompt_id=prompt_id
             )
 
         start = time.time()
@@ -406,6 +412,7 @@ class OpenAILike(BaseLLM):
             content_type: str = "char",
             enable_thinking: bool = False,
             system_prompt: Optional[str] = None,
+            prompt_id: Optional[str] = None
     ) -> BaseGenerator:
         """
         异步 - 流式输出 (核心方法)
@@ -432,7 +439,8 @@ class OpenAILike(BaseLLM):
                     'max_tokens': self.max_tokens,
                     'top_p': self.top_p
                 },
-                system_prompt=system_prompt
+                # system_prompt=system_prompt,
+                prompt_id=prompt_id
             )
 
         try:

@@ -299,7 +299,7 @@ def create_memory(
     
     Args:
         role: 角色 (user/assistant/system)
-        content: 内容文本
+        content: 内容
         importance: 重要性
         tags: 标签列表
         metadata: 元数据
@@ -309,6 +309,11 @@ def create_memory(
     Returns:
         MemoryUnit实例
     """
+    try:
+        content = str(content)
+    except UnicodeEncodeError:
+        raise ValueError(f'记忆的内容无法变成文字')
+
     memory = MemoryUnit(
         content={"role": role, "content": content},
         importance=importance,

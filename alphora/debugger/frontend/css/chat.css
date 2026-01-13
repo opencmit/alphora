@@ -1,0 +1,120 @@
+/**
+ * chat.css - 聊天气泡和流式输出样式
+ */
+
+/* Chat Container */
+.chat-container { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 12px; 
+}
+
+.chat-message { 
+    display: flex; 
+    flex-direction: column;
+}
+
+.chat-bubble { 
+    padding: 12px 16px; 
+    border-radius: 8px; 
+    font-size: 13px; 
+    line-height: 1.6; 
+}
+
+.chat-role {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+.chat-content {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* 角色样式 */
+.chat-message.system .chat-bubble { 
+    background: var(--purple-light); 
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    border-left: 3px solid var(--purple);
+}
+
+.chat-message.system .chat-role { 
+    color: var(--purple); 
+}
+
+.chat-message.user .chat-bubble { 
+    background: var(--bg-panel); 
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--text-secondary);
+}
+
+.chat-message.user .chat-role { 
+    color: var(--text-secondary); 
+}
+
+.chat-message.assistant .chat-bubble { 
+    background: var(--brand-light); 
+    border: 1px solid rgba(37, 99, 235, 0.2);
+    border-left: 3px solid var(--brand);
+}
+
+.chat-message.assistant .chat-role { 
+    color: var(--brand); 
+}
+
+.chat-message.tool .chat-bubble { 
+    background: var(--warning-light); 
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    border-left: 3px solid var(--warning);
+}
+
+.chat-message.tool .chat-role { 
+    color: var(--warning); 
+}
+
+/* Stream Timeline */
+.stream-timeline {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.stream-chunk {
+    display: flex;
+    gap: 12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+}
+
+.stream-chunk:last-child {
+    border-bottom: none;
+}
+
+.stream-chunk.even {
+    background: var(--bg-hover);
+}
+
+.chunk-index {
+    color: var(--text-muted);
+    min-width: 30px;
+    font-weight: 600;
+}
+
+.chunk-time {
+    color: var(--brand);
+    min-width: 80px;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.chunk-content {
+    flex: 1;
+    font-family: 'JetBrains Mono', monospace;
+    word-break: break-all;
+    color: var(--text-main);
+}

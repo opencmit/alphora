@@ -216,7 +216,7 @@ class MemoryManager:
     def add_memory(
             self,
             role: str,
-            content: str,
+            content: Any,
             memory_id: str = 'default',
             decay_factor: float = 0.9,
             increment: float = 0.1,

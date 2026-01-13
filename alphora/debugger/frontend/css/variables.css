@@ -1,0 +1,87 @@
+/**
+ * variables.css - CSS变量定义
+ */
+
+:root {
+    /* 背景色 */
+    --bg-body: #f1f5f9;
+    --bg-panel: #ffffff;
+    --bg-hover: #f8fafc;
+    --bg-active: #e2e8f0;
+    
+    /* 边框 */
+    --border: #e2e8f0;
+    --border-hover: #cbd5e1;
+    
+    /* 文字 */
+    --text-main: #0f172a;
+    --text-secondary: #64748b;
+    --text-muted: #94a3b8;
+    
+    /* 主题色 */
+    --brand: #2563eb;
+    --brand-light: #eff6ff;
+    --success: #10b981;
+    --success-light: #ecfdf5;
+    --warning: #f59e0b;
+    --warning-light: #fffbeb;
+    --danger: #ef4444;
+    --danger-light: #fef2f2;
+    --purple: #8b5cf6;
+    --purple-light: #f5f3ff;
+    --cyan: #06b6d4;
+    --orange: #f97316;
+    
+    /* 阴影 */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    
+    /* 尺寸 */
+    --header-height: 56px;
+    --sidebar-width: 260px;
+    --detail-width: 450px;
+}
+
+* { 
+    margin: 0; 
+    padding: 0; 
+    box-sizing: border-box; 
+}
+
+body { 
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg-body); 
+    color: var(--text-main); 
+    overflow: hidden;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* 图标 */
+.icon-svg { 
+    width: 14px; 
+    height: 14px; 
+    fill: currentColor; 
+    vertical-align: middle; 
+}
+
+.icon-svg-lg { 
+    width: 18px; 
+    height: 18px; 
+}
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* 动画 */
+@keyframes fadeIn { 
+    from { opacity: 0; transform: translateY(5px); } 
+    to { opacity: 1; transform: translateY(0); } 
+}
+
+.fade-in { 
+    animation: fadeIn 0.2s ease-out; 
+}

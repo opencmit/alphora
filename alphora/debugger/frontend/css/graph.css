@@ -1,0 +1,127 @@
+/**
+ * graph.css - 图形拓扑视图样式
+ */
+
+.graph-panel { 
+    flex: 1; 
+    position: relative; 
+    background: var(--bg-body); 
+    display: flex; 
+    flex-direction: column; 
+    overflow: hidden; 
+}
+
+.graph-header { 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    padding: 12px 20px; 
+    background: var(--bg-panel); 
+    border-bottom: 1px solid var(--border); 
+}
+
+.graph-tabs { 
+    display: flex; 
+    gap: 4px; 
+    background: var(--bg-body); 
+    padding: 4px; 
+    border-radius: 8px; 
+}
+
+.graph-tab {
+    padding: 6px 16px; 
+    border-radius: 6px; 
+    font-size: 12px; 
+    font-weight: 600;
+    background: transparent; 
+    border: none; 
+    color: var(--text-secondary); 
+    cursor: pointer;
+}
+
+.graph-tab:hover { 
+    color: var(--text-main); 
+}
+
+.graph-tab.active { 
+    background: var(--bg-panel); 
+    color: var(--brand); 
+    box-shadow: var(--shadow-sm); 
+}
+
+.graph-content { 
+    flex: 1; 
+    overflow: hidden; 
+    position: relative; 
+    background-image: radial-gradient(#cbd5e1 1px, transparent 1px); 
+    background-size: 20px 20px; 
+}
+
+#graphSvg { 
+    width: 100%; 
+    height: 100%; 
+}
+
+/* Graph Nodes */
+.node-group { 
+    cursor: pointer; 
+}
+
+.node-group:hover .node-box { 
+    stroke: var(--brand); 
+    stroke-width: 2; 
+}
+
+.node-box { 
+    fill: var(--bg-panel); 
+    stroke: var(--border); 
+    stroke-width: 1.5; 
+    rx: 8; 
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.05)); 
+}
+
+.node-box.selected { 
+    stroke: var(--brand); 
+    stroke-width: 2; 
+    filter: drop-shadow(0 0 0 4px var(--brand-light)); 
+}
+
+.node-header { 
+    fill: var(--bg-body); 
+}
+
+.node-title { 
+    fill: var(--text-main); 
+    font-size: 12px; 
+    font-weight: 600; 
+    font-family: 'Inter', sans-serif; 
+}
+
+.node-sub { 
+    fill: var(--text-muted); 
+    font-size: 10px; 
+    font-family: 'JetBrains Mono', monospace; 
+}
+
+.node-stat { 
+    font-size: 10px; 
+    fill: var(--text-secondary); 
+    font-family: 'Inter', sans-serif; 
+}
+
+/* Edges */
+.edge-line { 
+    stroke: var(--border-hover); 
+    stroke-width: 2; 
+    fill: none; 
+}
+
+.edge-line.derive { 
+    stroke: var(--orange); 
+    stroke-dasharray: 4,4; 
+}
+
+.edge-line.call { 
+    stroke: var(--brand); 
+    stroke-width: 1.5; 
+}
