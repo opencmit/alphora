@@ -164,7 +164,7 @@ async def run_autonomous_trader():
     )
 
     # 模拟 7 个交易日
-    total_days = 7
+    total_days = 30
 
     print(f"\n🚀 [回测开始] 初始资金: $100,000 | 初始股价: $100.00")
 
@@ -202,6 +202,7 @@ async def run_autonomous_trader():
                     elif fname == "hold_position":
                         print(f"   🔵 [观望]: {args.get('reason')}")
             else:
+                print(f'选择结束当天--{response.content}')
                 break
 
         # --- 交易日结束，模拟器推进时间 ---
@@ -216,6 +217,8 @@ async def run_autonomous_trader():
     print(f"\n📊 [最终回测报告]")
     print(f"   最终资产: ${final_equity:,.2f}")
     print(f"   收益率:   {final_roi:+.2f}%")
+
+    mm.save_history(file_path='基金经理的记忆.txt')
 
     if final_roi > 0:
         print("   🏆 评价: 盈利！你是合格的交易员。")

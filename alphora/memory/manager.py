@@ -787,6 +787,102 @@ class MemoryManager:
                 "auto_reflect": self._auto_reflector is not None,
             }
 
+    def save_to_json(self, file_path: str, memory_id: Optional[str] = None):
+        """
+        将记忆导出为标准 JSON 文件 (Human Readable)
+
+        Args:
+            file_path: 保存路径 (例如: "./dump.json")
+            memory_id: 指定导出的记忆ID（可选）。
+                       如果不填，导出所有会话的记忆。
+                       如果填了，只导出该 ID 对应的列表。
+        """
+        import json
+
+        export_data = {}
+
+        # 1. 确定要导出的 ID 列表
+        if memory_id:
+            if memory_id in self._cache:
+                target_ids = [memory_id]
+            else:
+                logger.warning(f"Memory ID {memory_id} not found, nothing to save.")
+                return
+        else:
+            target_ids = list(self._cache.keys())
+
+        # 2. 遍历并序列化
+        for mid in target_ids:
+
+            export_data[mid] = [
+                mem.to_dict() for mem in self._cache[mid]
+            ]
+
+        final_output = {
+            "meta": {
+                "exported_at": time.time(),
+                "total_sessions": len(target_ids),
+                "stats": self.stats(memory_id) if memory_id else self.stats()
+            },
+            "memories": export_data
+        }
+
+        # 4. 写入文件
+        try:
+            Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+
+            with open(file_path, 'w', encoding='utf-8') as f:
+
+                json.dump(final_output, f, ensure_ascii=False, indent=4)
+
+            logger.info(f"Successfully saved memories to {file_path}")
+        except Exception as e:
+            logger.error(f"Failed to save JSON to {file_path}: {e}")
+
+    def save_history(
+            self,
+            file_path: str,
+            memory_id: str = "default",
+            format: Literal["text", "messages"] = "text",
+            max_round: int = 1000,  # 默认导出较多轮数
+            **kwargs
+    ):
+        """
+        保存对话历史（所见即所得格式）
+
+        将 build_history 生成的内容直接保存到文件。
+        这反映了 AI 在当前时刻看到的上下文状态。
+
+        Args:
+            file_path: 保存路径
+            memory_id: 记忆ID
+            format: 格式 ("text" 为纯文本对话流, "messages" 为 JSON 格式的消息列表)
+            max_round: 回溯轮数（默认 1000，通常意为导出全部）
+            **kwargs: 透传给 build_history 的其他参数 (如 include_timestamp 等)
+        """
+        # 调用 build_history 获取内容
+        content = self.build_history(
+            memory_id=memory_id,
+            max_round=max_round,
+            format=format,
+            **kwargs
+        )
+
+        # 确保目录存在
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+
+        # 根据格式写入文件
+        if format == "text":
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(str(content))
+        else:
+            import json
+            with open(file_path, "w", encoding="utf-8") as f:
+                # content 在 format="messages" 时已经是 list/dict
+                json.dump(content, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"History saved to {file_path} (format={format})")
+
     def __repr__(self) -> str:
         total = sum(len(m) for m in self._cache.values())
         return f"MemoryManager(memories={total}, ids={len(self._cache)})"
