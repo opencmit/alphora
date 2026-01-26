@@ -337,7 +337,7 @@ class BaseAgent(object):
         try:
             async with client.stream(method, url, json=payload, headers=req_headers) as response:
                 if response.status_code != 200:
-                    error_msg = f"API Error: {response.status_code} - {await response.read()}"
+                    error_msg = f"API Error: {response.status_code} - {await response.aread()}"
                     logger.error(error_msg)
                     return error_msg
 

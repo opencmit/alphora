@@ -154,6 +154,9 @@ class Stream:
                 if content:
                     if data_streamer:
                         await data_streamer.send_data(content_type=content_type, content=content)
+                    else:
+                        print(content, end='', flush=True)
+                        continue
 
             except Exception as e:
                 print(f"Streaming Parsing Error: {str(e)}")
