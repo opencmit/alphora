@@ -30,13 +30,13 @@ class ReActAgent(BaseAgent):
             llm: OpenAILike,
             tools: List[Union[Tool, Callable]],
             system_prompt: str = "",
-            enable_memory: bool = True,
             max_iterations: int = 10,
             **kwargs
     ):
         super().__init__(llm=llm, **kwargs)
 
         self._registry = ToolRegistry()
+
         for tool in tools:
             self._registry.register(tool)
 
@@ -48,7 +48,6 @@ class ReActAgent(BaseAgent):
         # 创建 prompt
         self._prompt = self.create_prompt(
             system_prompt=system_prompt,
-            enable_memory=enable_memory,
         )
 
         self._max_iterations = max_iterations
@@ -65,10 +64,7 @@ class ReActAgent(BaseAgent):
                 return response.content
 
             # 执行工具
-            await self._executor.execute(
-                response,
-                memory_manager=self._prompt.get_memory()
-            )
+            await self._executor.execute(response)
 
         return "达到最大迭代次数"
 

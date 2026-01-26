@@ -1,7 +1,5 @@
 """
-Alphora Memory Component (v2)
-
-简洁、开发者友好的对话历史管理组件。
+Alphora Memory Component 对话历史管理组件。
 
 核心特性:
 - 标准 OpenAI 消息格式 (user/assistant/tool/system)
@@ -48,33 +46,15 @@ messages = memory.build_messages(
 工具调用
 ================================================================================
 
-```python
-# 用户请求
-memory.add_user("帮我查一下北京天气")
+response = await prompt.acall(
+            tools=registry.get_openai_tools_schema(),
+            is_stream=True,
+            runtime_system_prompt='如果没完成，继续调用工具搜查；如果已完成，请调用xxx',
+            history=memory.build_history()
+        )
 
-# 助手决定调用工具
-memory.add_assistant(
-    content=None,  # 调用工具时 content 可以为空
-    tool_calls=[{
-        "id": "call_abc123",
-        "type": "function",
-        "function": {
-            "name": "get_weather",
-            "arguments": '{"city": "北京"}'
-        }
-    }]
-)
+memory.add_assistant(content=response)   # 添加大模型的返回（无需判断是否是工具调用）
 
-# 工具执行结果
-memory.add_tool_result(
-    tool_call_id="call_abc123",
-    name="get_weather",
-    content='{"weather": "晴", "temp": 25}'
-)
-
-# 助手最终回复
-memory.add_assistant("北京今天天气晴朗，温度25°C。")
-```
 
 ================================================================================
 历史管理
@@ -140,67 +120,15 @@ memory.save_to_file("./chat_history.md", format="markdown")
 memory.import_session(json_str, session_id="restored")
 ```
 
-================================================================================
-与 BasePrompt 集成
-================================================================================
 
-```python
-from alphora.memory import MemoryManager, HistoryBuilder
-
-memory = MemoryManager()
-builder = HistoryBuilder(memory)
-
-# 链式构建
-messages = (
-    builder
-    .with_system("你是一个助手")
-    .with_history(max_rounds=10)
-    .with_user("你好")
-    .build()
-)
-
-# 或者一行搞定
-messages = builder.quick_build(
-    system="你是助手",
-    user="帮我查天气",
-    max_rounds=10
-)
-```
-
-================================================================================
-对话上下文管理器
-================================================================================
-
-```python
-from alphora.memory import MemoryManager, ConversationContext
-
-memory = MemoryManager()
-
-# 使用上下文管理器自动管理消息
-with ConversationContext(memory, session_id="user_001") as ctx:
-    ctx.user("你好")
-
-    messages = ctx.build_messages(system="你是助手")
-    response = await llm.chat(messages)
-
-    ctx.assistant(response.content)
-# 退出时自动保存
-```
 """
 
 from alphora.memory.manager import MemoryManager
 from alphora.memory.message import Message, MessageRole, ToolCall
-from alphora.memory.history_builder import HistoryBuilder, ConversationContext
 
 __all__ = [
-    # 核心类
     "MemoryManager",
     "Message",
     "MessageRole",
-    "ToolCall",
-
-    # 辅助工具
-    "HistoryBuilder",
-    "ConversationContext",
+    "ToolCall"
 ]
-

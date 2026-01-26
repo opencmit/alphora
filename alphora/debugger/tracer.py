@@ -1,12 +1,15 @@
 """
-Alphora Debugger
+Alphora Debugger (v2.0)
 
-功能：
-1. 会话(Session)管理 - 区分每次对话
-2. 完整的流式输出追踪 - 记录每个chunk和最终输出
-3. Prompter追踪 - 记录每个Prompter的完整输入输出
-4. 调用链追踪 - 支持嵌套的Agent调用
-5. 性能分析 - Token统计、响应时间分析
+适配重构后的 base_prompter.py 和 openai_like.py
+
+新增功能：
+1. HistoryPayload 追踪 - 记录历史消息的使用情况
+2. Runtime System Prompt 追踪
+3. Force JSON / Long Response 模式追踪
+4. PrompterOutput 元数据追踪 (reasoning, finish_reason, continuation_count)
+5. 工具调用链完整性追踪
+6. 改进的消息构建追踪
 
 用法：
     agent = BaseAgent(llm=llm, debugger=True)
@@ -53,6 +56,10 @@ class EventType(str, Enum):
     PROMPT_CALL_START = "prompt_call_start"
     PROMPT_CALL_END = "prompt_call_end"
 
+    # 消息构建 (新增)
+    MESSAGE_BUILD = "message_build"
+    HISTORY_ATTACHED = "history_attached"
+
     # 记忆操作
     MEMORY_ADD = "memory_add"
     MEMORY_RETRIEVE = "memory_retrieve"
@@ -68,6 +75,10 @@ class EventType(str, Enum):
     POSTPROCESS_START = "postprocess_start"
     POSTPROCESS_END = "postprocess_end"
 
+    # Long Response (新增)
+    CONTINUATION_START = "continuation_start"
+    CONTINUATION_END = "continuation_end"
+
     # 自定义
     CUSTOM = "custom"
     ERROR = "error"
@@ -80,12 +91,12 @@ class DebugEvent:
     event_type: EventType
     timestamp: float
     agent_id: Optional[str] = None
-    session_id: Optional[str] = None  # 会话ID
-    trace_id: Optional[str] = None  # 调用链ID
-    parent_event_id: Optional[str] = None  # 父事件ID
+    session_id: Optional[str] = None
+    trace_id: Optional[str] = None
+    parent_event_id: Optional[str] = None
     data: Dict[str, Any] = field(default_factory=dict)
     duration_ms: Optional[float] = None
-    seq: int = 0  # 序列号
+    seq: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -109,14 +120,14 @@ class SessionInfo:
     start_time: float
     end_time: Optional[float] = None
     root_agent_id: Optional[str] = None
-    query: str = ""  # 用户原始查询
-    status: str = "running"  # running, completed, error
+    query: str = ""
+    status: str = "running"
     event_count: int = 0
     llm_call_count: int = 0
     total_tokens: int = 0
     total_duration_ms: float = 0
     error: Optional[str] = None
-    agents: List[str] = field(default_factory=list)  # 参与的agent_ids
+    agents: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -146,8 +157,8 @@ class AgentInfo:
     config: Dict[str, Any] = field(default_factory=dict)
     llm_info: Dict[str, Any] = field(default_factory=dict)
     children_ids: List[str] = field(default_factory=list)
-    prompt_ids: List[str] = field(default_factory=list)  # 关联的prompts
-    status: str = "active"  # active, idle, destroyed
+    prompt_ids: List[str] = field(default_factory=list)
+    status: str = "active"
     llm_call_count: int = 0
     total_tokens: int = 0
 
@@ -157,21 +168,33 @@ class AgentInfo:
 
 @dataclass
 class PromptInfo:
-    """Prompt信息"""
+    """Prompt信息 (增强版)"""
     prompt_id: str
     agent_id: str
     created_at: float
     session_id: Optional[str] = None
+
+    # 模板
     system_prompt: Optional[str] = None
     template: Optional[str] = None
     placeholders: List[str] = field(default_factory=list)
     rendered_prompt: Optional[str] = None
-    enable_memory: bool = False
-    memory_id: Optional[str] = None
+
+    # 新增: 运行时配置追踪
+    runtime_system_prompts: List[str] = field(default_factory=list)
+    force_json: bool = False
+    long_response: bool = False
+    enable_thinking: bool = False
+
+    # 历史相关
+    history_attached: bool = False
+    history_rounds: int = 0
+    history_has_tool_calls: bool = False
+    history_tool_chain_valid: bool = True
+
     call_count: int = 0
 
     def to_dict(self) -> dict:
-        # 安全转换为字符串，避免Template对象等非字符串类型
         def safe_str(val):
             if val is None:
                 return None
@@ -194,15 +217,21 @@ class PromptInfo:
             "template_preview": safe_preview(self.template),
             "placeholders": self.placeholders,
             "rendered_preview": safe_preview(self.rendered_prompt),
-            "enable_memory": self.enable_memory,
-            "memory_id": self.memory_id,
+            "runtime_system_prompts": [safe_preview(s, 100) for s in self.runtime_system_prompts],
+            "force_json": self.force_json,
+            "long_response": self.long_response,
+            "enable_thinking": self.enable_thinking,
+            "history_attached": self.history_attached,
+            "history_rounds": self.history_rounds,
+            "history_has_tool_calls": self.history_has_tool_calls,
+            "history_tool_chain_valid": self.history_tool_chain_valid,
             "call_count": self.call_count
         }
 
 
 @dataclass
 class LLMCallInfo:
-    """LLM调用详细信息"""
+    """LLM调用详细信息 (增强版)"""
     call_id: str
     agent_id: str
     prompt_id: Optional[str] = None
@@ -232,7 +261,16 @@ class LLMCallInfo:
     stream_chunks: List[Dict] = field(default_factory=list)
     chunk_count: int = 0
     first_token_time: Optional[float] = None
-    stream_content_by_type: Dict[str, str] = field(default_factory=dict)  # 按类型聚合的内容
+    stream_content_by_type: Dict[str, str] = field(default_factory=dict)
+
+    # 工具调用 (增强)
+    has_tool_calls: bool = False
+    tool_calls: List[Dict] = field(default_factory=list)
+
+    # Long Response 续写 (新增)
+    is_continuation: bool = False
+    continuation_index: int = 0
+    parent_call_id: Optional[str] = None
 
     # 错误信息
     error: Optional[str] = None
@@ -264,7 +302,7 @@ class LLMCallInfo:
         return d
 
     def to_summary(self) -> dict:
-        """返回摘要信息（用于列表展示）"""
+        """返回摘要信息"""
         return {
             "call_id": self.call_id,
             "agent_id": self.agent_id,
@@ -281,6 +319,11 @@ class LLMCallInfo:
             "input_preview": self._get_input_preview(),
             "output_preview": self._get_output_preview(),
             "has_error": self.error is not None,
+            "has_tool_calls": self.has_tool_calls,
+            "tool_call_count": len(self.tool_calls),
+            "has_reasoning": bool(self.reasoning_text),
+            "is_continuation": self.is_continuation,
+            "continuation_index": self.continuation_index,
             "finish_reason": self.finish_reason,
             "chunk_count": self.chunk_count,
             "start_time": self.start_time
@@ -290,7 +333,6 @@ class LLMCallInfo:
         if self.request_messages:
             last_msg = self.request_messages[-1]
             content = last_msg.get('content', '')
-            # 安全转换为字符串
             if not isinstance(content, str):
                 content = str(content) if content else ''
             if len(content) > 100:
@@ -300,7 +342,6 @@ class LLMCallInfo:
 
     def _get_output_preview(self) -> str:
         text = self.response_text
-        # 安全转换为字符串
         if not isinstance(text, str):
             text = str(text) if text else ''
         if len(text) > 100:
@@ -328,13 +369,16 @@ class TraceContext:
 
 class DebugTracer:
     """
-    调试追踪器（增强版）
+    调试追踪器 (v2.0)
+
+    适配重构后的 base_prompter.py 和 openai_like.py
 
     新增功能：
-    - 会话(Session)管理，区分每次对话
-    - 完整的流式输出追踪
-    - Prompter追踪
-    - 改进的统计和分析
+    - HistoryPayload 追踪
+    - Runtime System Prompt 追踪
+    - Force JSON / Long Response 模式追踪
+    - PrompterOutput 元数据追踪
+    - 工具调用链完整性追踪
     """
 
     _instance = None
@@ -379,7 +423,11 @@ class DebugTracer:
             'errors': 0,
             'active_streams': 0,
             'avg_tokens_per_second': 0.0,
-            'avg_time_to_first_token_ms': 0.0
+            'avg_time_to_first_token_ms': 0.0,
+            # 新增统计
+            'tool_calls': 0,
+            'continuations': 0,
+            'history_attached_calls': 0
         }
 
         self._max_events = 10000
@@ -454,7 +502,10 @@ class DebugTracer:
                 'errors': 0,
                 'active_streams': 0,
                 'avg_tokens_per_second': 0.0,
-                'avg_time_to_first_token_ms': 0.0
+                'avg_time_to_first_token_ms': 0.0,
+                'tool_calls': 0,
+                'continuations': 0,
+                'history_attached_calls': 0
             }
             self._event_seq = 0
 
@@ -471,15 +522,12 @@ class DebugTracer:
             self._events.append(event)
             self._stats['total_events'] += 1
 
-            # 更新session事件计数
             if event.session_id and event.session_id in self._sessions:
                 self._sessions[event.session_id].event_count += 1
 
-            # 关联到trace
             if event.trace_id and event.trace_id in self._traces:
                 self._traces[event.trace_id].events.append(event.event_id)
 
-            # 限制事件数量
             if len(self._events) > self._max_events:
                 self._events = self._events[-self._max_events:]
 
@@ -513,11 +561,7 @@ class DebugTracer:
     # ==================== Session管理 ====================
 
     def start_session(self, query: str = "", root_agent_id: Optional[str] = None) -> str:
-        """
-        开始一个新会话
-
-        每次用户发起对话时调用
-        """
+        """开始一个新会话"""
         session_id = str(uuid4())
 
         if not self._enabled:
@@ -533,7 +577,6 @@ class DebugTracer:
             self._stats['total_sessions'] += 1
             self._stats['active_sessions'] += 1
 
-        # 设置当前session
         self._local.current_session_id = session_id
 
         self._add_event(DebugEvent(
@@ -661,7 +704,6 @@ class DebugTracer:
             if parent_id and parent_id in self._agents:
                 self._agents[parent_id].children_ids.append(agent_id)
 
-            # 更新session的agents列表
             if session_id and session_id in self._sessions:
                 if agent_id not in self._sessions[session_id].agents:
                     self._sessions[session_id].agents.append(agent_id)
@@ -692,7 +734,6 @@ class DebugTracer:
         child_type = child_agent.__class__.__name__
         session_id = self.get_current_session_id()
 
-        # 更新子agent的parent_id和父agent的children_ids
         with self._data_lock:
             if child_id in self._agents:
                 self._agents[child_id].parent_id = parent_id
@@ -713,7 +754,7 @@ class DebugTracer:
             }
         ))
 
-    # ==================== Prompt追踪 ====================
+    # ==================== Prompt追踪 (增强) ====================
 
     def track_prompt_created(
             self,
@@ -732,7 +773,6 @@ class DebugTracer:
 
         session_id = self.get_current_session_id()
 
-        # 安全转换为字符串，处理Template对象等非字符串类型
         def safe_str(val):
             if val is None:
                 return None
@@ -747,9 +787,7 @@ class DebugTracer:
             created_at=time.time(),
             system_prompt=safe_str(system_prompt),
             template=safe_str(prompt),
-            placeholders=placeholders or [],
-            enable_memory=enable_memory,
-            memory_id=memory_id
+            placeholders=placeholders or []
         )
 
         with self._data_lock:
@@ -788,7 +826,6 @@ class DebugTracer:
 
         session_id = self.get_current_session_id()
 
-        # 更新prompt信息
         with self._data_lock:
             if prompt_id in self._prompts:
                 self._prompts[prompt_id].rendered_prompt = rendered_prompt
@@ -809,14 +846,124 @@ class DebugTracer:
             }
         ))
 
+    def track_message_build(
+            self,
+            agent_id: str,
+            prompt_id: str,
+            messages: List[Dict],
+            force_json: bool = False,
+            runtime_system_prompt: Optional[List[str]] = None,
+            history_info: Optional[Dict] = None
+    ):
+        """
+        追踪消息构建 (新增)
+
+        对应 BasePrompt.build_messages() 方法
+        """
+        if not self._enabled:
+            return
+
+        session_id = self.get_current_session_id()
+
+        # 统计消息类型
+        message_stats = {
+            'total': len(messages),
+            'system': len([m for m in messages if m.get('role') == 'system']),
+            'user': len([m for m in messages if m.get('role') == 'user']),
+            'assistant': len([m for m in messages if m.get('role') == 'assistant']),
+            'tool': len([m for m in messages if m.get('role') == 'tool'])
+        }
+
+        # 更新 prompt 信息
+        with self._data_lock:
+            if prompt_id in self._prompts:
+                prompt = self._prompts[prompt_id]
+                prompt.force_json = force_json
+                if runtime_system_prompt:
+                    prompt.runtime_system_prompts = runtime_system_prompt
+
+                if history_info:
+                    prompt.history_attached = True
+                    prompt.history_rounds = history_info.get('rounds', 0)
+                    prompt.history_has_tool_calls = history_info.get('has_tool_calls', False)
+                    prompt.history_tool_chain_valid = history_info.get('tool_chain_valid', True)
+                    self._stats['history_attached_calls'] += 1
+
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.MESSAGE_BUILD,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            session_id=session_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'prompt_id': prompt_id,
+                'message_stats': message_stats,
+                'force_json': force_json,
+                'has_runtime_system_prompt': bool(runtime_system_prompt),
+                'runtime_system_prompt_count': len(runtime_system_prompt) if runtime_system_prompt else 0,
+                'history_info': history_info
+            }
+        ))
+
+    def track_history_attached(
+            self,
+            agent_id: str,
+            prompt_id: str,
+            session_id_history: Optional[str] = None,
+            rounds: int = 0,
+            message_count: int = 0,
+            has_tool_calls: bool = False,
+            tool_chain_valid: bool = True
+    ):
+        """
+        追踪历史记录附加 (新增)
+
+        当使用 HistoryPayload 时调用
+        """
+        if not self._enabled:
+            return
+
+        session_id = self.get_current_session_id()
+
+        with self._data_lock:
+            if prompt_id in self._prompts:
+                prompt = self._prompts[prompt_id]
+                prompt.history_attached = True
+                prompt.history_rounds = rounds
+                prompt.history_has_tool_calls = has_tool_calls
+                prompt.history_tool_chain_valid = tool_chain_valid
+
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.HISTORY_ATTACHED,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            session_id=session_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'prompt_id': prompt_id,
+                'history_session_id': session_id_history,
+                'rounds': rounds,
+                'message_count': message_count,
+                'has_tool_calls': has_tool_calls,
+                'tool_chain_valid': tool_chain_valid
+            }
+        ))
+
     def track_prompt_call_start(
             self,
             agent_id: str,
             prompt_id: str,
             query: str,
-            is_stream: bool = False
+            is_stream: bool = False,
+            enable_thinking: bool = False,
+            force_json: bool = False,
+            long_response: bool = False,
+            has_tools: bool = False,
+            has_history: bool = False
     ) -> str:
-        """追踪Prompt调用开始"""
+        """追踪Prompt调用开始 (增强)"""
         call_id = str(uuid4())
 
         if not self._enabled:
@@ -826,7 +973,11 @@ class DebugTracer:
 
         with self._data_lock:
             if prompt_id in self._prompts:
-                self._prompts[prompt_id].call_count += 1
+                prompt = self._prompts[prompt_id]
+                prompt.call_count += 1
+                prompt.enable_thinking = enable_thinking
+                prompt.force_json = force_json
+                prompt.long_response = long_response
 
         self._add_event(DebugEvent(
             event_id=str(uuid4()),
@@ -839,7 +990,12 @@ class DebugTracer:
                 'call_id': call_id,
                 'prompt_id': prompt_id,
                 'query_preview': self._truncate_content(query, 300),
-                'is_stream': is_stream
+                'is_stream': is_stream,
+                'enable_thinking': enable_thinking,
+                'force_json': force_json,
+                'long_response': long_response,
+                'has_tools': has_tools,
+                'has_history': has_history
             }
         ))
 
@@ -851,9 +1007,13 @@ class DebugTracer:
             agent_id: str,
             prompt_id: str,
             output: str,
-            duration_ms: float = 0
+            duration_ms: float = 0,
+            reasoning: str = "",
+            finish_reason: str = "",
+            continuation_count: int = 0,
+            tool_calls: Optional[List[Dict]] = None
     ):
-        """追踪Prompt调用结束"""
+        """追踪Prompt调用结束 (增强)"""
         if not self._enabled:
             return
 
@@ -871,12 +1031,18 @@ class DebugTracer:
                 'call_id': call_id,
                 'prompt_id': prompt_id,
                 'output_preview': self._truncate_content(output, 500),
-                'output_length': len(output),
-                'duration_ms': duration_ms
+                'output_length': len(output) if output else 0,
+                'duration_ms': duration_ms,
+                'has_reasoning': bool(reasoning),
+                'reasoning_preview': self._truncate_content(reasoning, 200) if reasoning else None,
+                'finish_reason': finish_reason,
+                'continuation_count': continuation_count,
+                'has_tool_calls': bool(tool_calls),
+                'tool_call_count': len(tool_calls) if tool_calls else 0
             }
         ))
 
-    # ==================== LLM调用追踪 ====================
+    # ==================== LLM调用追踪 (增强) ====================
 
     def track_llm_start(
             self,
@@ -887,9 +1053,12 @@ class DebugTracer:
             is_streaming: bool = False,
             request_params: Optional[Dict] = None,
             system_prompt: Optional[str] = None,
-            prompt_id: Optional[str] = None
+            prompt_id: Optional[str] = None,
+            is_continuation: bool = False,
+            continuation_index: int = 0,
+            parent_call_id: Optional[str] = None
     ) -> str:
-        """追踪LLM调用开始"""
+        """追踪LLM调用开始 (增强)"""
         call_id = str(uuid4())
 
         if not self._enabled:
@@ -906,6 +1075,13 @@ class DebugTracer:
                     'role': msg.get('role', ''),
                     'content': self._truncate_content(msg.get('content', ''), 5000)
                 }
+                # 保留 tool_calls 信息
+                if 'tool_calls' in msg:
+                    msg_copy['tool_calls'] = msg['tool_calls']
+                if 'tool_call_id' in msg:
+                    msg_copy['tool_call_id'] = msg['tool_call_id']
+                if 'name' in msg:
+                    msg_copy['name'] = msg['name']
                 messages_copy.append(msg_copy)
 
         with self._data_lock:
@@ -920,15 +1096,19 @@ class DebugTracer:
                 request_messages=messages_copy,
                 request_params=request_params or {},
                 system_prompt=self._truncate_content(system_prompt, 2000),
-                is_streaming=is_streaming
+                is_streaming=is_streaming,
+                is_continuation=is_continuation,
+                continuation_index=continuation_index,
+                parent_call_id=parent_call_id
             )
             self._stats['total_llm_calls'] += 1
 
-            # 更新session统计
+            if is_continuation:
+                self._stats['continuations'] += 1
+
             if session_id and session_id in self._sessions:
                 self._sessions[session_id].llm_call_count += 1
 
-            # 更新agent统计
             if agent_id in self._agents:
                 self._agents[agent_id].llm_call_count += 1
 
@@ -959,7 +1139,10 @@ class DebugTracer:
                 'input_preview': preview,
                 'message_count': len(messages_copy),
                 'has_system_prompt': bool(system_prompt),
-                'request_params': request_params or {}
+                'request_params': request_params or {},
+                'is_continuation': is_continuation,
+                'continuation_index': continuation_index,
+                'parent_call_id': parent_call_id
             }
         ))
 
@@ -990,12 +1173,11 @@ class DebugTracer:
                 call.reasoning_text += content
             else:
                 call.response_text += content
-                # 按类型聚合内容
                 if content_type not in call.stream_content_by_type:
                     call.stream_content_by_type[content_type] = ""
                 call.stream_content_by_type[content_type] += content
 
-            # 保存chunk（限制数量）
+            # 保存chunk
             if len(call.stream_chunks) < self._max_stream_chunks:
                 call.stream_chunks.append({
                     'index': call.chunk_count,
@@ -1011,9 +1193,10 @@ class DebugTracer:
             output_text: str = "",
             reasoning_text: str = "",
             finish_reason: str = "stop",
-            token_usage: Optional[Dict[str, int]] = None
+            token_usage: Optional[Dict[str, int]] = None,
+            tool_calls: Optional[List[Dict]] = None
     ):
-        """追踪LLM调用结束"""
+        """追踪LLM调用结束 (增强)"""
         if not self._enabled or call_id not in self._llm_calls:
             return
 
@@ -1021,12 +1204,18 @@ class DebugTracer:
             call = self._llm_calls[call_id]
             call.end_time = time.time()
 
-            # 如果不是流式，直接设置输出
+            # 设置输出
             if not call.is_streaming:
-                call.response_text = output_text[:10000]
-                call.reasoning_text = reasoning_text[:5000]
+                call.response_text = output_text[:10000] if output_text else ""
+                call.reasoning_text = reasoning_text[:5000] if reasoning_text else ""
 
             call.finish_reason = finish_reason
+
+            # 工具调用
+            if tool_calls:
+                call.has_tool_calls = True
+                call.tool_calls = tool_calls
+                self._stats['tool_calls'] += len(tool_calls)
 
             # Token统计
             if token_usage:
@@ -1039,11 +1228,9 @@ class DebugTracer:
                 self._stats['prompt_tokens'] += call.prompt_tokens
                 self._stats['completion_tokens'] += call.completion_tokens
 
-                # 更新session统计
                 if call.session_id and call.session_id in self._sessions:
                     self._sessions[call.session_id].total_tokens += call.total_tokens
 
-                # 更新agent统计
                 if call.agent_id in self._agents:
                     self._agents[call.agent_id].total_tokens += call.total_tokens
 
@@ -1060,7 +1247,6 @@ class DebugTracer:
                 if ttft_values:
                     self._stats['avg_time_to_first_token_ms'] = sum(ttft_values) / len(ttft_values)
 
-            # 更新trace
             if call.trace_id and call.trace_id in self._traces:
                 self._traces[call.trace_id].total_tokens += call.total_tokens
 
@@ -1086,7 +1272,9 @@ class DebugTracer:
                 'chunk_count': call.chunk_count if call.is_streaming else 0,
                 'time_to_first_token_ms': call.time_to_first_token_ms,
                 'tokens_per_second': round(call.tokens_per_second, 2),
-                'content_types': list(call.stream_content_by_type.keys()) if call.is_streaming else []
+                'content_types': list(call.stream_content_by_type.keys()) if call.is_streaming else [],
+                'has_tool_calls': call.has_tool_calls,
+                'tool_call_count': len(call.tool_calls)
             }
         ))
 
@@ -1124,6 +1312,64 @@ class DebugTracer:
             }
         ))
 
+    # ==================== Long Response 追踪 (新增) ====================
+
+    def track_continuation_start(
+            self,
+            agent_id: str,
+            call_id: str,
+            continuation_index: int,
+            reason: str = "incomplete"
+    ):
+        """追踪长文本续写开始"""
+        if not self._enabled:
+            return
+
+        session_id = self.get_current_session_id()
+
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.CONTINUATION_START,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            session_id=session_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'call_id': call_id,
+                'continuation_index': continuation_index,
+                'reason': reason
+            }
+        ))
+
+    def track_continuation_end(
+            self,
+            agent_id: str,
+            call_id: str,
+            continuation_index: int,
+            finish_reason: str,
+            total_content_length: int
+    ):
+        """追踪长文本续写结束"""
+        if not self._enabled:
+            return
+
+        session_id = self.get_current_session_id()
+
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.CONTINUATION_END,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            session_id=session_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'call_id': call_id,
+                'continuation_index': continuation_index,
+                'finish_reason': finish_reason,
+                'total_content_length': total_content_length
+            }
+        ))
+
     # ==================== Memory追踪 ====================
 
     def track_memory_add(
@@ -1131,9 +1377,11 @@ class DebugTracer:
             memory_id: str,
             role: str,
             content: str,
-            agent_id: Optional[str] = None
+            agent_id: Optional[str] = None,
+            tool_calls: Optional[List[Dict]] = None,
+            tool_call_id: Optional[str] = None
     ):
-        """追踪记忆添加"""
+        """追踪记忆添加 (增强)"""
         if not self._enabled:
             return
 
@@ -1150,7 +1398,10 @@ class DebugTracer:
                 'memory_id': memory_id,
                 'role': role,
                 'content_preview': self._truncate_content(content, 300),
-                'content_length': len(content)
+                'content_length': len(content) if content else 0,
+                'has_tool_calls': bool(tool_calls),
+                'tool_call_count': len(tool_calls) if tool_calls else 0,
+                'tool_call_id': tool_call_id
             }
         ))
 
@@ -1225,13 +1476,14 @@ class DebugTracer:
             data={'memory_id': memory_id}
         ))
 
-    # ==================== Tool追踪 ====================
+    # ==================== Tool追踪 (增强) ====================
 
     def track_tool_start(
             self,
             tool_name: str,
             args: Dict,
-            agent_id: Optional[str] = None
+            agent_id: Optional[str] = None,
+            tool_call_id: Optional[str] = None
     ) -> str:
         """追踪工具调用开始"""
         call_id = str(uuid4())
@@ -1240,6 +1492,11 @@ class DebugTracer:
             return call_id
 
         session_id = self.get_current_session_id()
+        trace_id = self.get_current_trace_id()
+
+        if trace_id and trace_id in self._traces:
+            with self._data_lock:
+                self._traces[trace_id].tool_calls.append(call_id)
 
         self._add_event(DebugEvent(
             event_id=call_id,
@@ -1247,9 +1504,11 @@ class DebugTracer:
             timestamp=time.time(),
             agent_id=agent_id,
             session_id=session_id,
-            trace_id=self.get_current_trace_id(),
+            trace_id=trace_id,
             data={
+                'call_id': call_id,
                 'tool_name': tool_name,
+                'tool_call_id': tool_call_id,
                 'args': self._safe_serialize(args)
             }
         ))
@@ -1260,7 +1519,7 @@ class DebugTracer:
             self,
             call_id: str,
             tool_name: str,
-            result: Any = None,
+            result: Any,
             duration_ms: float = 0,
             agent_id: Optional[str] = None
     ):
@@ -1281,7 +1540,8 @@ class DebugTracer:
             data={
                 'call_id': call_id,
                 'tool_name': tool_name,
-                'result_preview': self._truncate_content(str(result), 500),
+                'result_preview': self._truncate_content(result, 500),
+                'result_type': type(result).__name__,
                 'duration_ms': duration_ms
             }
         ))
@@ -1291,6 +1551,7 @@ class DebugTracer:
             call_id: str,
             tool_name: str,
             error: str,
+            traceback_str: str = "",
             agent_id: Optional[str] = None
     ):
         """追踪工具调用错误"""
@@ -1309,16 +1570,75 @@ class DebugTracer:
             data={
                 'call_id': call_id,
                 'tool_name': tool_name,
-                'error': error[:1000]
+                'error': error[:1000],
+                'traceback': traceback_str[:2000] if traceback_str else None
             }
         ))
 
-    # ==================== 自定义追踪 ====================
+    # ==================== 后处理追踪 ====================
+
+    def track_postprocess_start(
+            self,
+            processor_name: str,
+            agent_id: Optional[str] = None
+    ) -> str:
+        """追踪后处理开始"""
+        process_id = str(uuid4())
+
+        if not self._enabled:
+            return process_id
+
+        session_id = self.get_current_session_id()
+
+        self._add_event(DebugEvent(
+            event_id=process_id,
+            event_type=EventType.POSTPROCESS_START,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            session_id=session_id,
+            trace_id=self.get_current_trace_id(),
+            data={
+                'process_id': process_id,
+                'processor_name': processor_name
+            }
+        ))
+
+        return process_id
+
+    def track_postprocess_end(
+            self,
+            process_id: str,
+            processor_name: str,
+            duration_ms: float = 0,
+            agent_id: Optional[str] = None
+    ):
+        """追踪后处理结束"""
+        if not self._enabled:
+            return
+
+        session_id = self.get_current_session_id()
+
+        self._add_event(DebugEvent(
+            event_id=str(uuid4()),
+            event_type=EventType.POSTPROCESS_END,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            session_id=session_id,
+            trace_id=self.get_current_trace_id(),
+            duration_ms=duration_ms,
+            data={
+                'process_id': process_id,
+                'processor_name': processor_name,
+                'duration_ms': duration_ms
+            }
+        ))
+
+    # ==================== 自定义事件 ====================
 
     def track_custom(
             self,
             name: str,
-            data: Dict = None,
+            data: Dict[str, Any],
             agent_id: Optional[str] = None
     ):
         """追踪自定义事件"""
@@ -1334,7 +1654,10 @@ class DebugTracer:
             agent_id=agent_id,
             session_id=session_id,
             trace_id=self.get_current_trace_id(),
-            data={'name': name, **(data or {})}
+            data={
+                'name': name,
+                **self._safe_serialize(data)
+            }
         ))
 
     def track_error(
@@ -1367,7 +1690,7 @@ class DebugTracer:
 
     # ==================== 查询方法 ====================
 
-    def get_sessions(self, limit: int = 50, status: Optional[str] = None) -> List[Dict]:
+    def get_sessions(self, status: Optional[str] = None, limit: int = 50) -> List[Dict]:
         """获取会话列表"""
         with self._data_lock:
             sessions = list(self._sessions.values())
@@ -1379,7 +1702,7 @@ class DebugTracer:
             return [s.to_dict() for s in sessions[:limit]]
 
     def get_session(self, session_id: str) -> Optional[Dict]:
-        """获取指定会话详情"""
+        """获取指定会话"""
         with self._data_lock:
             if session_id not in self._sessions:
                 return None
@@ -1387,7 +1710,6 @@ class DebugTracer:
             session = self._sessions[session_id]
             result = session.to_dict()
 
-            # 附加详细信息
             result['events'] = [
                 e.to_dict() for e in self._events
                 if e.session_id == session_id
@@ -1448,14 +1770,12 @@ class DebugTracer:
             agent = self._agents[agent_id]
             result = agent.to_dict()
 
-            # 附加prompts信息
             result['prompts'] = [
                 self._prompts[pid].to_dict()
                 for pid in agent.prompt_ids
                 if pid in self._prompts
             ]
 
-            # 附加LLM调用
             result['llm_calls'] = [
                 self._llm_calls[cid].to_summary()
                 for cid in self._llm_calls
@@ -1492,7 +1812,6 @@ class DebugTracer:
             prompt = self._prompts[prompt_id]
             result = prompt.to_dict()
 
-            # 完整内容 - 安全转换为字符串
             result['system_prompt_full'] = safe_str(prompt.system_prompt)
             result['template_full'] = safe_str(prompt.template)
             result['rendered_full'] = safe_str(prompt.rendered_prompt)
@@ -1643,4 +1962,3 @@ class DebugTracer:
 
 # 全局实例
 tracer = DebugTracer()
-
