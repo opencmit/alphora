@@ -1,5 +1,5 @@
 from uuid import uuid4
-from typing import TypeVar, List, Dict, Optional, Any, Type, Union, TYPE_CHECKING
+from typing import TypeVar, List, Dict, Optional, Any, Type, Union, TYPE_CHECKING, AsyncIterator, Callable
 import logging
 import time
 import re
@@ -14,14 +14,12 @@ from alphora.memory import MemoryManager
 
 from alphora.debugger import tracer
 
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 logger = logging.getLogger(__name__)
-
 
 T = TypeVar('T', bound='BaseAgent')
 
@@ -39,7 +37,6 @@ class MemoryPoolItem(BaseModel):
 
 
 class BaseAgent(object):
-
     agent_type: str = "BaseAgent"
 
     def __init__(self,
@@ -256,3 +253,114 @@ class BaseAgent(object):
         # TODO
         pass
 
+    async def afetch_stream(self,
+                            url: str,
+                            payload: Dict[str, Any],
+                            parser_func: Optional[Callable[[bytes], str]] = None,
+                            method: str = "POST",
+                            headers: Optional[Dict[str, str]] = None,
+                            content_type: str = "char") -> str:
+        """
+        调用第三方的接口，并透传至流式输出，函数返回完整输出字符串。
+
+        Args:
+            url: 目标 URL
+            payload: 请求体 JSON
+            parser_func: 自定义解析函数。
+                         - 如果为 None (默认): 使用标准 OpenAI SSE 解析逻辑 (处理 data: {...})
+                         - 如果传入函数: 接收 raw bytes，返回解析后的 string
+            method: 请求方法
+            headers: 请求头
+            content_type: 输出的ct
+        """
+        import json
+        import httpx
+        from alphora.models.llms.stream_helper import BaseGenerator, GeneratorOutput
+
+        req_headers = headers or {}
+        if "Content-Type" not in req_headers:
+            req_headers["Content-Type"] = "application/json"
+
+        if "Accept" not in req_headers:
+            req_headers["Accept"] = "text/event-stream"
+
+        # 定义标准 OpenAI 解析器 (适配器)
+        class StandardOpenAIAdapter(BaseGenerator[GeneratorOutput]):
+            def __init__(self, response_lines_iter, default_content_type):
+                super().__init__(content_type=default_content_type)
+                self.lines_iter = response_lines_iter
+
+            async def agenerate(self) -> AsyncIterator[GeneratorOutput]:
+                async for line in self.lines_iter:
+
+                    if not line.startswith("data: "):
+                        continue
+
+                    data_str = line.replace("data: ", "").strip()
+                    if data_str == "[DONE]":
+                        break
+
+                    try:
+                        data = json.loads(data_str)
+                        delta = data.get("choices", [{}])[0].get("delta", {})
+
+                        reasoning = delta.get("reasoning_content", "")
+                        content = delta.get("content", "")
+
+                        if reasoning:
+                            yield GeneratorOutput(content=reasoning, content_type="think")
+                        elif content:
+                            yield GeneratorOutput(content=content, content_type=self.content_type)
+
+                    except Exception:
+                        continue
+
+        class CustomRawAdapter(BaseGenerator[GeneratorOutput]):
+            def __init__(self, response_bytes_iter, parser, default_content_type):
+                super().__init__(content_type=default_content_type)
+                self.bytes_iter = response_bytes_iter
+                self.parser = parser
+
+            async def agenerate(self) -> AsyncIterator[GeneratorOutput]:
+                async for chunk in self.bytes_iter:
+                    try:
+                        decoded = self.parser(chunk)
+                        if decoded:
+                            yield GeneratorOutput(content=decoded, content_type=self.content_type)
+                    except Exception as e:
+                        logger.error(f"Custom parse error: {e}")
+
+        # 发起请求
+        full_content = ""
+        client = httpx.AsyncClient(timeout=60.0)
+
+        try:
+            async with client.stream(method, url, json=payload, headers=req_headers) as response:
+                if response.status_code != 200:
+                    error_msg = f"API Error: {response.status_code} - {await response.read()}"
+                    logger.error(error_msg)
+                    return error_msg
+
+                # 根据是否传入 parser_func 决定处理策略
+                if parser_func is None:
+
+                    generator = StandardOpenAIAdapter(
+                        response_lines_iter=response.aiter_lines(),
+                        default_content_type=content_type
+                    )
+                else:
+                    generator = CustomRawAdapter(
+                        response_bytes_iter=response.aiter_bytes(),
+                        parser=parser_func,
+                        default_content_type=content_type
+                    )
+
+                full_content = await self.stream.astream_to_response(generator)
+
+        except Exception as e:
+            logger.error(f"Stream request failed: {e}")
+            raise e
+        finally:
+            await client.aclose()
+
+        return full_content
