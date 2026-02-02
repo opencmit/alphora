@@ -1,17 +1,13 @@
-<img src="asset/image/banner.png" alt="Alphora 框架 banner" style="max-width: 50%; height: auto;">
+<img src="asset/image/banner.png" alt="Alphora 框架 banner" style="max-width: 100%; height: auto; max-height: 300px;">
 
 # Alphora: 一个轻量的智能体开发框架
 
-<div align="center">
-  <br>
-  <br>
-  
-  [![Python Version](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
-  [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-  [![Latest Release](https://img.shields.io/badge/Release-v0.1.0-orange)](https://github.com/your-username/alphora/releases)
+[![Python Version](https://img.shields.io/badge/Python-3.9%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![Latest Release](https://img.shields.io/badge/Release-v0.1.0-orange)](https://github.com/your-username/alphora/releases)
 
-  <a href="README.en.md">🌐 English Version</a>
-</div>
+<a href="README.en.md">🌐 English Version</a>
+
 
 ## 🌟 核心特性
 
