@@ -1,52 +1,16 @@
 """
-BasePrompt (重构版)
+Alphora Base Prompter Module
 
-重构要点:
-- 移除所有自动记忆功能
-- 在 call/acall 中支持传入 HistoryPayload
-- build_messages 负责合并 system + history + user
+This module provides the core orchestration logic for prompt engineering within the Alphora framework.
+It leverages Jinja2 for dynamic template rendering, manages variable interpolation, and handles the
+lifecycle of LLM interactions.
 
-使用示例:
-```python
-from alphora.memory import MemoryManager
-from alphora.prompter import BasePrompt
-
-# 初始化
-memory = MemoryManager()
-prompt = BasePrompt(
-    system_prompt="你是一个友好的助手",
-    user_prompt="{{query}}"
-).add_llm(llm)
-
-# 第一轮对话
-response = await prompt.acall(query="你好")
-memory.add_user("你好")
-memory.add_assistant(response)
-
-# 第二轮对话 (带历史)
-history = memory.build_history(max_rounds=5)
-response = await prompt.acall(query="今天天气怎么样？", history=history)
-memory.add_user("今天天气怎么样？")
-memory.add_assistant(response)
-
-# 工具调用场景
-history = memory.build_history()
-tool_response = await prompt.acall(query="查询天气", history=history, tools=weather_tools)
-
-# 记录工具调用
-memory.add_user("查询天气")
-memory.add_assistant(content=None, tool_calls=tool_response.tool_calls)
-
-# 执行工具并记录结果
-for tc in tool_response.tool_calls:
-    result = await execute_tool(tc)
-    memory.add_tool_result(tc["id"], tc["function"]["name"], result)
-
-# 继续对话
-history = memory.build_history()
-final_response = await prompt.acall(query=None, history=history)
-memory.add_assistant(final_response)
-```
+Key Features:
+- **Orchestration**: Manages the end-to-end flow from template loading to LLM execution.
+- **Stateless Design**: Externalizes history management to ensure scalability and determinism.
+- **Jinja2 Integration**: specialized environment for rendering dynamic system and user contexts.
+- **Dual Mode**: Fully supports both synchronous (`call`) and asynchronous (`acall`) invocation patterns.
+- **Metadata Encapsulation**: Returns enriched string objects containing reasoning traces and generation metadata.
 """
 
 import json
@@ -80,9 +44,11 @@ logger = logging.getLogger(__name__)
 
 class PrompterOutput(str):
     """
-    Prompter 输出包装类
+    A metadata-enriched string wrapper for LLM responses.
 
-    继承自 str，可以直接作为字符串使用，同时携带额外元数据。
+    Inherits directly from `str` to maintain backward compatibility with standard string
+    operations while providing access to model-specific metadata such as reasoning chains
+    and stop sequences.
     """
 
     def __new__(cls, content: str, reasoning: str = "", finish_reason: str = "",
@@ -109,43 +75,44 @@ class PrompterOutput(str):
 
 class BasePrompt:
     """
-    提示词基类 (重构版)
+    Core engine for constructing and executing LLM prompts.
 
-    重构要点:
-    - 完全移除自动记忆功能
-    - 支持通过 history 参数传入 HistoryPayload
-    - 消息构建流程: [Force JSON] + [System] + [History] + [User]
+    This class manages the lifecycle of a prompt, including template loading, placeholder
+    interpolation, message assembly, and final LLM invocation. The message sequence follows
+    a strict topological order:
+    [System Context] -> [Runtime Injections] -> [History] -> [User Input].
 
     Attributes:
-        system_templates: 系统提示词模板列表
-        user_template: 用户提示词模板
-        llm: 绑定的 LLM 实例
-        context: 占位符上下文
+        agent_id (Optional[str]): Unique identifier for the associated agent for tracing.
+        prompt_id (str): Ephemeral identifier for this specific prompt instance.
+        placeholders (List[str]): List of detected variables within the Jinja2 templates.
+        llm (Optional[BaseLLM]): The bound Language Model instance.
     """
 
     def __init__(self,
-                 # --- User Part ---
                  user_prompt: str = None,
                  template_path: str = None,
-                 # --- System 部分 ---
                  system_prompt: Union[str, List[str], None] = None,
-                 # --- 通用设置 ---
                  verbose: bool = False,
                  callback: Optional[DataStreamer] = None,
                  content_type: Optional[str] = None,
                  agent_id: str | None = None,
                  **kwargs):
+
         """
+        Initializes the Prompter with templates and initial context.
+
         Args:
-            user_prompt: 用户提示词模板字符串
-            template_path: 模板文件路径（与 user_prompt 二选一）
-            system_prompt: 系统提示词（支持字符串或字符串列表，支持 Jinja2 模板）
-            verbose: 是否打印中间过程
-            callback: 流式回调
-            content_type: 内容类型
-            agent_id: Agent ID (用于追踪)
-            **kwargs: 模板占位符初始值
+            user_prompt: Raw Jinja2 string for the user message.
+            template_path: File path to a template containing the user message.
+            system_prompt: System-level instructions (string or list of strings).
+            verbose: Enables detailed logging of the internal state.
+            callback: Stream handler for real-time data transmission.
+            content_type: MIME type or format hint for the output (default: 'char').
+            agent_id: Traceable ID for the calling agent.
+            **kwargs: Initial key-value pairs for template placeholders.
         """
+
         self.agent_id = agent_id
         self.prompt_id = str(uuid.uuid4())[:8]
 
@@ -200,7 +167,13 @@ class BasePrompt:
         self.placeholders = self._scan_all_variables()
 
     def _scan_all_variables(self) -> List[str]:
-        """扫描 User 和 System 模板中的所有未定义变量"""
+        """
+        Performs AST analysis on templates to identify undeclared variables.
+
+        Returns:
+            List[str]: A unique list of variable names found in user and system templates.
+        """
+
         vars_set = set()
 
         if self._user_prompt_raw:
@@ -223,7 +196,7 @@ class BasePrompt:
         return list(vars_set)
 
     def _render_user_content(self, query: str) -> str:
-        """渲染 User 部分的内容"""
+        """Interpolates variables into the user template."""
         render_context = self.context.copy()
 
         if query is not None:
@@ -239,12 +212,18 @@ class BasePrompt:
         return query or ""
 
     def _render_system_prompts(self) -> List[str]:
-        """渲染所有的 System 模板"""
+        """Interpolates variables into all system templates."""
         return [tmpl.render(self.context) for tmpl in self.system_templates]
 
     def update_placeholder(self, **kwargs):
         """
-        更新占位符值
+        Updates the internal context with new values for template placeholders.
+
+        Args:
+            **kwargs: Key-value pairs matching template variables.
+
+        Returns:
+            BasePrompt: The current instance for method chaining.
         """
         invalid_placeholders = [k for k in kwargs if k not in self.placeholders]
         missing_placeholders = [p for p in self.placeholders if p not in kwargs and p not in self.context]
@@ -284,22 +263,28 @@ class BasePrompt:
             history: Optional[HistoryPayload] = None,
     ) -> List[Dict[str, str]]:
         """
-        [核心方法] 构建发送给 LLM 的消息列表
+        Assembles the final message list for the LLM.
 
-        消息结构: [Force JSON] + [System Templates] + [Runtime System] + [History] + [User]
+        Constructs the sequence of messages in the following order:
+        1. JSON Constraint (if enforced)
+        2. Pre-configured System Prompts
+        3. Runtime System Prompts
+        4. Historical Context (from MemoryManager)
+        5. User Input
 
         Args:
-            query: 用户输入 (会渲染到 user_template 中)
-            force_json: 是否强制 JSON 输出
-            runtime_system_prompt: 运行时追加的系统提示词
-            history: HistoryPayload 对象 (由 MemoryManager.build_history() 返回)
+            query: The current user input string.
+            force_json: If True, injects a system instruction to strictly enforce JSON output.
+            runtime_system_prompt: Additional system instructions appended dynamically.
+            history: An external history payload object.
 
         Returns:
-            OpenAI 格式的消息列表
+            List[Dict[str, str]]: A list of message dictionaries compliant with Chat Completion API.
 
         Raises:
-            TypeError: 如果 history 不是有效的 HistoryPayload
+            TypeError: If the provided `history` object is not a valid `HistoryPayload`.
         """
+
         messages = []
 
         # 1. Force JSON 指令
@@ -349,7 +334,7 @@ class BasePrompt:
 
     @staticmethod
     def _get_base_path():
-        """自动获取包的绝对路径"""
+        """Resolves the absolute path of the package root."""
         current_file = os.path.abspath(__file__)
         base_path = os.path.dirname(current_file)
         base_path = os.path.dirname(base_path)
@@ -357,7 +342,17 @@ class BasePrompt:
         return base_path
 
     def load_template(self) -> [Optional[Template], str]:
-        """加载 template_path 为 Template 和原始字符串"""
+
+        """
+        Loads the template file from the configured path.
+
+        Returns:
+            Tuple[Optional[Template], str]: The compiled Jinja2 template and the raw string content.
+
+        Raises:
+            Exception: If the file cannot be read or the template cannot be compiled.
+        """
+
         content = None
 
         if self.template_path:
@@ -392,7 +387,7 @@ class BasePrompt:
             return None, ""
 
     def _get_template_variables(self):
-        """使用AST分析获取所有变量"""
+        """Analyzes the template AST to retrieve undeclared variables."""
         if not self.prompt:
             raise ValueError("Prompt is not initialized")
 
@@ -401,6 +396,9 @@ class BasePrompt:
         return [var for var in variables if var != 'query']
 
     def __or__(self, other: "BasePrompt") -> "ParallelPrompt":
+
+        """Support parallel prompt execution."""
+
         from alphora.prompter.parallel import ParallelPrompt
         if not isinstance(other, BasePrompt):
             return NotImplemented
@@ -428,7 +426,17 @@ class BasePrompt:
         return self._render_user_content("{{query}}")
 
     def add_llm(self, model=None) -> "BasePrompt":
-        """绑定 LLM 实例"""
+
+        """
+        Binds a Language Model instance to this prompter.
+
+        Args:
+            model: The BaseLLM instance to bind.
+
+        Returns:
+            BasePrompt: The current instance for method chaining.
+        """
+
         self.llm = model
         return self
 
@@ -446,38 +454,34 @@ class BasePrompt:
              runtime_system_prompt: Union[str, List[str], None] = None,
              history: Optional[HistoryPayload] = None,
              ) -> BaseGenerator | str | Any | ToolCall:
+
         """
-        同步调用 LLM
+        Executes the LLM request synchronously.
+
+        Supports standard generation, streaming, tool invocation, and long-context handling.
 
         Args:
-            query: 用户输入 (可选，如果只是继续工具调用则不需要)
-            is_stream: 是否流式输出
-            tools: 工具列表
-            multimodal_message: 多模态消息
-            return_generator: 是否返回生成器
-            content_type: 内容类型
-            postprocessor: 后处理器
-            enable_thinking: 是否启用思考过程
-            force_json: 是否强制 JSON 输出
-            long_response: 是否长文本模式
-            runtime_system_prompt: 运行时系统提示词
-            history: 历史记录 (HistoryPayload，由 MemoryManager.build_history() 返回)
+            query: The user input (optional if continuing a tool chain).
+            is_stream: If True, streams the response token by token.
+            tools: A list of available tools/functions for the LLM.
+            multimodal_message: A specialized message object for multimodal inputs.
+            return_generator: If True, returns the raw generator instead of consuming it.
+            content_type: MIME type override for the response.
+            postprocessor: One or more processors to transform the stream output.
+            enable_thinking: If True, captures reasoning traces (Chain of Thought).
+            force_json: If True, attempts to repair and parse the output as JSON.
+            long_response: If True, activates the LongResponseGenerator for extended outputs.
+            runtime_system_prompt: System prompts injected specifically for this call.
+            history: The conversation history payload.
 
         Returns:
-            LLM 响应 (PrompterOutput / ToolCall / Generator)
+            Union[PrompterOutput, ToolCall, BaseGenerator]: The generated response, tool call, or stream generator.
 
-        Example:
-            # 简单调用
-            response = prompt.call(query="你好")
-
-            # 带历史
-            history = memory.build_history(max_rounds=5)
-            response = prompt.call(query="你好", history=history)
-
-            # 工具调用
-            history = memory.build_history()
-            tool_response = prompt.call(query=None, history=history, tools=tools)
+        Raises:
+            ValueError: If the LLM has not been bound via `add_llm`.
+            RuntimeError: If the execution fails during generation.
         """
+
         if not self.llm:
             raise ValueError("LLM not initialized. Call add_llm() first.")
 
@@ -606,49 +610,35 @@ class BasePrompt:
                     history: Optional[HistoryPayload] = None,
                     ) -> BaseGenerator | str | Any | ToolCall:
         """
-        异步调用 LLM
+        Asynchronously executes the LLM request.
+
+        Mirror of `call` but optimized for async/await environments. Supports streaming, tools,
+        and callback handling for real-time applications.
 
         Args:
-            query: 用户输入 (可选，如果只是继续工具调用则不需要)
-            is_stream: 是否流式输出
-            tools: 工具列表
-            multimodal_message: 多模态消息
-            return_generator: 是否返回生成器
-            content_type: 内容类型
-            postprocessor: 后处理器
-            enable_thinking: 是否启用思考过程
-            force_json: 是否强制 JSON 输出
-            long_response: 是否长文本模式
-            runtime_system_prompt: 运行时系统提示词
-            history: 历史记录 (HistoryPayload，由 MemoryManager.build_history() 返回)
+            query: The user input (optional if continuing a tool chain).
+            is_stream: If True, streams the response token by token.
+            tools: A list of available tools/functions for the LLM.
+            multimodal_message: A specialized message object for multimodal inputs.
+            return_generator: If True, returns the async generator instead of consuming it.
+            content_type: MIME type override for the response.
+            postprocessor: One or more processors to transform the stream output.
+            enable_thinking: If True, captures reasoning traces (Chain of Thought).
+            force_json: If True, attempts to repair and parse the output as JSON.
+            long_response: If True, activates the LongResponseGenerator for extended outputs.
+            runtime_system_prompt: System prompts injected specifically for this call.
+            history: The conversation history payload.
 
         Returns:
-            LLM 响应 (PrompterOutput / ToolCall / Generator)
+            Union[PrompterOutput, ToolCall, BaseGenerator]: The generated response, tool call, or stream generator.
 
         Example:
-            # 简单调用
-            response = await prompt.acall(query="你好")
-
-            # 带历史
-            history = memory.build_history(max_rounds=5)
-            response = await prompt.acall(query="你好", history=history)
-
-            # 工具调用流程
-            memory.add_user("查询天气")
-            history = memory.build_history()
-            tool_response = await prompt.acall(query=None, history=history, tools=tools)
-
-            # 记录并执行工具
-            memory.add_assistant(content=None, tool_calls=tool_response.tool_calls)
-            for tc in tool_response.tool_calls:
-                result = await execute_tool(tc)
-                memory.add_tool_result(tc["id"], tc["function"]["name"], result)
-
-            # 获取最终回复
-            history = memory.build_history()
-            final = await prompt.acall(query=None, history=history)
-            memory.add_assistant(final)
+            prompt = BasePrompt(user_prompt="Hello, {{name}}")
+            prompt.add_llm(model)
+            prompt.update_placeholder(name="World")
+            response = await prompt.acall(is_stream=True)
         """
+
         if not self.llm:
             raise ValueError("LLM not initialized. Call add_llm() first.")
 

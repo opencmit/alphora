@@ -168,7 +168,7 @@ class AgentInfo:
 
 @dataclass
 class PromptInfo:
-    """Prompt信息 (增强版)"""
+    """Prompt信息 """
     prompt_id: str
     agent_id: str
     created_at: float
@@ -371,8 +371,6 @@ class DebugTracer:
     """
     调试追踪器 (v2.0)
 
-    适配重构后的 base_prompter.py 和 openai_like.py
-
     新增功能：
     - HistoryPayload 追踪
     - Runtime System Prompt 追踪
@@ -424,7 +422,7 @@ class DebugTracer:
             'active_streams': 0,
             'avg_tokens_per_second': 0.0,
             'avg_time_to_first_token_ms': 0.0,
-            # 新增统计
+
             'tool_calls': 0,
             'continuations': 0,
             'history_attached_calls': 0
@@ -559,7 +557,6 @@ class DebugTracer:
         return str(obj)[:500]
 
     # ==================== Session管理 ====================
-
     def start_session(self, query: str = "", root_agent_id: Optional[str] = None) -> str:
         """开始一个新会话"""
         session_id = str(uuid4())

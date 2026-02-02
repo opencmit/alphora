@@ -1,12 +1,7 @@
 """
-记忆管理器 (重构版)
+记忆管理器
 
-统一的对话历史管理入口，提供简洁、开发者友好的API。
-
-重构要点:
-- 移除自动记忆功能，由开发者在 workflow 中手动添加
-- build_history() 返回 HistoryPayload，用于传入 BasePrompt
-- 添加工具调用链完整性验证
+统一的对话历史管理入口，提供简洁、开发者友好的API
 
 特性:
 - 标准 OpenAI 消息格式
@@ -37,12 +32,11 @@ logger = logging.getLogger(__name__)
 
 class MemoryManager:
     """
-    记忆管理器 (重构版)
+    记忆管理器
 
     管理对话历史，支持多会话、工具调用、历史压缩等功能。
 
-    重要变更:
-    - 不再自动记录记忆，需要开发者手动调用 add_* 方法
+    - 需要开发者手动调用 add_* 方法
     - 使用 build_history() 获取 HistoryPayload，传入 BasePrompt
     - 工具调用链会自动验证完整性
 
@@ -564,7 +558,7 @@ class MemoryManager:
                 return msg
         return None
 
-    # ==================== 核心: 构建历史 API ====================
+    # ==================== 构建历史 API ====================
 
     def build_history(
             self,
