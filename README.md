@@ -1,4 +1,4 @@
-<img src="asset/image/banner.png" alt="Alphora 框架 banner" width="60%">
+<img src="asset/image/banner.png" alt="Alphora 框架 banner" width="80%">
 
 # Alphora: 一个轻量的智能体开发框架
 
