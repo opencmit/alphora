@@ -183,37 +183,6 @@ class BaseAgent(object):
                 f"Expected a subclass or instance of BaseAgent."
             )
 
-    # def derive(self, agent_cls_or_instance: Union[Type[T], T], **kwargs) -> T:
-    #     """从当前 agent 派生出一个新的 agent 实例"""
-    #
-    #     override_params = {**self.init_params, **kwargs, 'config': self.config}
-    #
-    #     if isinstance(agent_cls_or_instance, type) and issubclass(agent_cls_or_instance, BaseAgent):
-    #         derived_agent = agent_cls_or_instance(**override_params, callback=self.callback)
-    #
-    #         tracer.track_agent_derived(self, derived_agent)
-    #
-    #         return derived_agent
-    #
-    #     elif isinstance(agent_cls_or_instance, BaseAgent):
-    #
-    #         merged_params = agent_cls_or_instance.__dict__.copy()
-    #         merged_params.update(override_params)
-    #         agent_cls_or_instance._reinitialize(**merged_params)
-    #         # agent_cls_or_instance._reinitialize(**override_params)
-    #         agent_cls_or_instance.callback = self.callback
-    #
-    #         agent_cls_or_instance.config = self.config
-    #
-    #         tracer.track_agent_derived(self, agent_cls_or_instance)
-    #
-    #         return agent_cls_or_instance
-    #     else:
-    #         raise TypeError(
-    #             f"Unsupported type: {type(agent_cls_or_instance)}. "
-    #             f"Expected a subclass or instance of BaseAgent."
-    #         )
-
     def create_prompt(
             self,
             prompt: str = None,

@@ -1,763 +1,722 @@
-import os
-import sys
-import subprocess
-import contextlib
-import shutil
-import json
-import time
-from typing import List, Dict, Any, Optional, Tuple, Union
-from pathlib import Path
+"""
+Alphora Sandbox - Core Sandbox Class
+
+Main sandbox class providing unified interface for code execution.
+"""
+import uuid
+import asyncio
 import logging
-from alphora.sandbox.file_reader import FileReaderFactory, FileReader
-from alphora.agent import BaseAgent
+from pathlib import Path
+from datetime import datetime
+from typing import Optional, List, Dict, Any, Union, Type, TypeVar
+from contextlib import asynccontextmanager
+
+from alphora.sandbox.types import (
+    BackendType,
+    SandboxStatus,
+    ExecutionResult,
+    ResourceLimits,
+    SecurityPolicy,
+    FileInfo,
+    FileType,
+    PackageInfo,
+    SandboxInfo,
+)
+from alphora.sandbox.backends.base import ExecutionBackend, BackendFactory
+from alphora.sandbox.config import SandboxConfig
+from alphora.sandbox.exceptions import (
+    SandboxError,
+    SandboxNotRunningError,
+    SandboxAlreadyRunningError,
+    ConfigurationError,
+)
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T", bound="Sandbox")
 
 
-class Sandbox(BaseAgent):
-    def __init__(self,
-                 sandbox_path: str,
-                 format_on_init: bool = False,
-                 **kwargs):
+class Sandbox:
+    """
+    Sandbox Core Class
+    
+    Provides a secure, isolated code execution environment.
+    
+    Features:
+        - Multiple backend support (Local, Docker)
+        - File operations within sandbox
+        - Package management
+        - Environment variable management
+        - Resource monitoring
+        - Async context manager support
+    
+    Usage - Direct:
+        ```python
+        sandbox = Sandbox.create_local("/data/sandboxes")
+        await sandbox.start()
+        result = await sandbox.execute_code("print('Hello')")
+        print(result.stdout)  # Hello
+        await sandbox.stop()
+        ```
+    
+    Usage - Context Manager:
+        ```python
+        async with Sandbox.create_local() as sandbox:
+            result = await sandbox.execute_code("print('Hello')")
+            print(result.stdout)
+        ```
+    
+    Usage - From Config:
+        ```python
+        config = SandboxConfig.docker(image="python:3.11")
+        async with Sandbox.from_config(config) as sandbox:
+            result = await sandbox.run("print('Hello')")
+        ```
+    
+    Extensibility - Subclass:
+        ```python
+        class MySandbox(Sandbox):
+            async def my_custom_method(self):
+                return await self.execute_code("print('custom')")
+        
+        sandbox = MySandbox.create_local()
+        ```
+    """
+    
+    def __init__(
+        self,
+        backend_type: Union[str, BackendType] = BackendType.LOCAL,
+        sandbox_id: Optional[str] = None,
+        name: Optional[str] = None,
+        base_path: str = "/tmp/sandboxes",
+        docker_image: str = "python:3.11-slim",
+        resource_limits: Optional[ResourceLimits] = None,
+        security_policy: Optional[SecurityPolicy] = None,
+        auto_cleanup: bool = False,
+        **kwargs
+    ):
         """
-        创建一个Python代码执行沙箱
-
+        Initialize sandbox.
+        
         Args:
-            sandbox_path: 沙箱目录路径，如果为None则创建临时目录
+            backend_type: Backend type ("local" or "docker")
+            sandbox_id: Unique identifier (auto-generated if not provided)
+            name: Human-readable name
+            base_path: Base path for sandbox workspaces
+            docker_image: Docker image (for Docker backend)
+            resource_limits: Resource limits configuration
+            security_policy: Security policy configuration
+            auto_cleanup: Cleanup workspace on stop
+            **kwargs: Additional backend-specific options
         """
-        super(Sandbox, self).__init__(**kwargs)
-        self.sandbox_path = sandbox_path
-
-        if self.sandbox_path is None:
-            raise ValueError("Sandbox path is None")
-
-        # 检查路径是否已存在，存在则不执行初始化
-        if os.path.exists(self.sandbox_path):
-            logging.info(f"沙箱路径已存在: {self.sandbox_path}，跳过初始化")
-        else:
-            if format_on_init:
-                self.format_sandbox(confirm=True)
-            self._sandbox_init()
-
-    def _sandbox_init(self) -> None:
-        """初始化沙箱环境"""
-        self._ensure_dir_exists(self.sandbox_path)
-
-        self.create_sandbox(session_id=int(time.time()))
-
-        # 检查现有文件是否有描述信息，没有则生成
-        self._check_existing_files()
-
-    def _check_existing_files(self) -> None:
-        """检查沙箱中现有文件是否有描述信息，没有则生成"""
-        sandbox_root = Path(self.sandbox_path)
-
-        for root, dirs, files in os.walk(sandbox_root):
-            # 过滤隐藏目录
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
-
-            for file in files:
-                # if file.startswith('.'):  # 过滤以 . 开头的文件
-                if file.endswith('.description'):  # 过滤描述文件
-                    continue
-
-                file_path = Path(root) / file
-
-                # 检查文件是否有描述信息
-                description = FileReader.read_description(file_path)
-                if not description:
-                    print('未发现描述文件')
-                    try:
-                        # 使用FileReaderFactory生成描述
-                        description = self._generate_file_description(file_path)
-                        if description:
-                            # 保存描述到隐藏文件
-                            FileReader.save_description(file_path, description)
-                    except Exception as e:
-                        logging.warning(f"无法为文件 {file_path} 生成描述: {str(e)}")
-
-    def _generate_file_description(self, file_path: Path) -> str:
-        """生成文件描述信息"""
-        try:
-            # 使用FileReaderFactory读取文件并生成描述
-            file_info = FileReaderFactory(**self.init_params).read_file(file_path=file_path)
-            return file_info["description"]
-        except Exception as e:
-            logging.warning(f"生成文件描述失败: {str(e)}")
-            return ""
-
-    def _ensure_dir_exists(self, path: str) -> None:
-        """确保目录存在，增强安全校验"""
-        normalized_path = os.path.normpath(path)
-        if not normalized_path.startswith(self.sandbox_path):
-            raise ValueError(f"非法路径: {path}")
-        Path(normalized_path).mkdir(parents=True, exist_ok=True)
-
-    def create_sandbox(self, session_id: int) -> None:
-        """创建沙箱环境，添加初始化文件"""
-        sandbox_root = Path(self.sandbox_path)
-
-        logging.info(f"沙箱已创建: {self.sandbox_path}, session_id: {session_id}")
-
-    def read_files(self, with_description: bool = False) -> List[Dict[str, Any]]:
+        # Handle backend type
+        if isinstance(backend_type, str):
+            backend_type = BackendType(backend_type.lower())
+        
+        self._backend_type = backend_type
+        self._sandbox_id = sandbox_id or str(uuid.uuid4())[:8]
+        self._name = name or f"sandbox-{self._sandbox_id}"
+        self._base_path = Path(base_path)
+        self._workspace_path = self._base_path / self._sandbox_id
+        self._docker_image = docker_image
+        self._resource_limits = resource_limits or ResourceLimits()
+        self._security_policy = security_policy or SecurityPolicy()
+        self._auto_cleanup = auto_cleanup
+        self._extra_kwargs = kwargs
+        
+        # State
+        self._status = SandboxStatus.CREATED
+        self._backend: Optional[ExecutionBackend] = None
+        self._lock = asyncio.Lock()
+        self._created_at = datetime.now()
+        self._started_at: Optional[datetime] = None
+        self._stopped_at: Optional[datetime] = None
+        self._execution_count = 0
+    
+    # ==========================================================================
+    # Factory Methods
+    # ==========================================================================
+    
+    @classmethod
+    def create_local(
+        cls: Type[T],
+        base_path: str = "/tmp/sandboxes",
+        resource_limits: Optional[ResourceLimits] = None,
+        security_policy: Optional[SecurityPolicy] = None,
+        **kwargs
+    ) -> T:
         """
-        读取沙箱中所有文件信息.
-        Returns:
-            文件列表，包含文件名、大小、修改时间、类型等信息
-        """
-        file_list = []
-        sandbox_root = Path(self.sandbox_path)
-
-        for root, dirs, files in os.walk(sandbox_root):
-            # 过滤隐藏目录
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
-
-            for file in files:
-                # if file.startswith('.'):  # 过滤以 . 开头的文件
-                if file.endswith('.description'):  # 过滤描述文件
-                    continue
-
-                file_path = Path(root) / file
-                rel_path = str(file_path.relative_to(sandbox_root))
-
-                try:
-                    stat = file_path.stat()
-                    file_info = {
-                        "name": rel_path,
-                        "size": stat.st_size,
-                        "modified": stat.st_mtime,
-                        "created": stat.st_ctime,
-                        "type": "directory" if file_path.is_dir() else "file",
-                        "extension": file_path.suffix.lower()[1:] if file_path.suffix else ""
-                    }
-
-                    if with_description:
-                        # 从隐藏文件读取描述信息
-                        description = FileReader.read_description(file_path)
-                        file_info["description"] = description
-
-                    file_list.append(file_info)
-
-                except OSError as e:
-                    logging.warning(f"无法访问文件: {file_path}, 错误: {e}")
-
-        return file_list
-
-    def list_resource(self) -> List[Dict[str, Any]]:
-        """
-        列出沙盒下所有文件的content和description
-
-        Returns:
-            包含文件名、content和description的列表
-        """
-        resource_list = []
-        sandbox_root = Path(self.sandbox_path)
-
-        # 遍历所有文件（排除隐藏文件和描述文件）
-        for file_path in sandbox_root.glob('**/*'):
-            if file_path.is_dir() or file_path.name.startswith('.') or file_path.name.endswith('.description'):
-                continue
-
-            try:
-                # file_info = self.read_file(str(file_path.relative_to(sandbox_root)))
-                resource_list.append({
-                    "文件名": str(file_path.relative_to(sandbox_root)),
-                    # "内容": file_info["内容"],
-                    # "概要信息": file_info["概要信息"]
-                })
-            except Exception as e:
-                logging.warning(f"获取文件资源失败: {file_path}, 错误: {e}")
-
-        return resource_list
-
-    def execute_python(self, file_name: str) -> str:
-        """
-        执行Python代码文件
+        Create a local sandbox.
+        
         Args:
-            file_name: 要执行的Python文件名
+            base_path: Base path for sandbox workspace
+            resource_limits: Resource limits
+            security_policy: Security policy
+            **kwargs: Additional options
+        
         Returns:
-            包含标准输出、标准错误和返回码的元组
+            Sandbox: Local sandbox instance
         """
-
-        file_path = Path(self.sandbox_path) / file_name
-
-        if not file_path.is_file():
-            raise FileNotFoundError(f"文件不存在: {file_name}")
-        if file_path.suffix.lower() != '.py':
-            raise ValueError(f"不是有效的Python文件: {file_name}")
-
-        # 限制执行环境
-        env = os.environ.copy()
-        env["PYTHONPATH"] = str(self.sandbox_path)
-        env["SANDBOX_SECURE"] = "1"  # 标记安全执行环境
-
-        try:
-            result = subprocess.run(
-                [sys.executable, str(file_path)],
-                cwd=self.sandbox_path,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-
-            if result.returncode == 1:
-                raise RuntimeError(f"执行错误: {result.stderr}")
-
-            else:
-                return result.stdout
-
-            # return result.stdout, result.stderr, result.returncode
-
-        except subprocess.TimeoutExpired:
-            raise "执行超时"
-        except Exception as e:
-            raise f"执行错误: {str(e)}"
-
-    def save_file(self, content: str, file_name: str) -> None:
-        """创建名为file_name的文件(需带文件后缀，例如README.md)，并将content提供的内容写入进去，内容长度不限"""
-        target_path = Path(self.sandbox_path) / file_name
-        # 防止路径穿越
-        if not str(target_path).startswith(self.sandbox_path):
-            raise ValueError("非法的文件路径，禁止路径穿越")
-
-        # 确保目录存在
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # 写入文件
-        target_path.write_text(content, encoding='utf-8')
-        logging.info(f"文件已保存: {target_path}")
-
-        # 生成并保存文件描述
-        try:
-            # 使用FileReaderFactory读取文件并生成描述
-            file_info = FileReaderFactory(**self.init_params).read_file(file_path=target_path)
-            if file_info["description"]:
-                FileReader.save_description(target_path, file_info["description"])
-        except Exception as e:
-            logging.warning(f"无法为文件 {target_path} 生成描述: {str(e)}")
-
-    async def asave_file(self, content: str, file_name: str) -> None:
-        """创建名为file_name的文件(需带文件后缀，例如README.md)，并将content提供的内容写入进去，内容长度不限"""
-        target_path = Path(self.sandbox_path) / file_name
-        # 防止路径穿越
-        if not str(target_path).startswith(self.sandbox_path):
-            raise ValueError("非法的文件路径，禁止路径穿越")
-
-        # 确保目录存在
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # 写入文件
-        target_path.write_text(content, encoding='utf-8')
-        logging.info(f"文件已保存: {target_path}")
-
-        # 生成并保存文件描述
-        try:
-            # 使用FileReaderFactory读取文件并生成描述
-            file_info = await FileReaderFactory(**self.init_params).aread_file(file_path=target_path)
-            if file_info["description"]:
-                FileReader.save_description(target_path, file_info["description"])
-        except Exception as e:
-            logging.warning(f"无法为文件 {target_path} 生成描述: {str(e)}")
-
-    def read_file(self, file_name: str) -> Dict[str, Any]:
-        """读取指定文件内容和描述，返回包含content和description的字典"""
-
-        target_path = Path(self.sandbox_path) / file_name
-
-        if not target_path.is_file():
-            raise FileNotFoundError(f"文件不存在: {file_name}")
-
-        try:
-            # 检查描述文件是否存在
-            description_path = target_path.with_name(f"{target_path.name}.description")
-            if description_path.exists():
-                # 读取描述文件内容
-                description = description_path.read_text(encoding='utf-8')
-                # 读取文件内容
-                reader = FileReaderFactory(**self.init_params).create_reader(file_path=target_path)
-                content = reader.read(file_path=target_path)
-            else:
-                # 使用FileReaderFactory读取文件内容和描述
-                file_info = FileReaderFactory(**self.init_params).read_file(file_path=target_path)
-                description = file_info["description"]
-                content = file_info["content"]
-
-            return {
-                "内容": content,
-                "概要信息": description
-            }
-
-        except Exception as e:
-            raise ValueError(f"文件读取错误: {str(e)}") from e
-
-    async def aread_file(self, file_name: str) -> Dict[str, Any]:
-        """读取指定文件内容和描述，返回包含content和description的字典"""
-
-        target_path = Path(self.sandbox_path) / file_name
-
-        if not target_path.is_file():
-            raise FileNotFoundError(f"文件不存在: {file_name}")
-
-        try:
-            # 检查描述文件是否存在
-            description_path = target_path.with_name(f"{target_path.name}.description")
-            if description_path.exists():
-                # 读取描述文件内容
-                description = description_path.read_text(encoding='utf-8')
-                # 读取文件内容
-                reader = FileReaderFactory(**self.init_params).create_reader(file_path=target_path)
-                content = reader.read(file_path=target_path)
-            else:
-                # 使用FileReaderFactory读取文件内容和描述
-                file_info = await FileReaderFactory(**self.init_params).aread_file(file_path=target_path)
-                description = file_info["description"]
-                content = file_info["content"]
-
-            return {
-                "内容": content,
-                "概要信息": description
-            }
-
-        except Exception as e:
-            raise ValueError(f"文件读取错误: {str(e)}") from e
-
-    def delete_file(self, file_name: str) -> bool:
-        """删除沙箱中的文件及其描述文件"""
-        target_path = Path(self.sandbox_path) / file_name
-        if not target_path.exists():
-            return False
-
-        # 删除描述文件
-        # description_path = target_path.with_name(f".{target_path.name}.description")
-        description_path = target_path.with_name(f"{target_path.name}.description")
-
-        if description_path.exists():
-            description_path.unlink()
-
-        # 删除原文件
-        if target_path.is_dir():
-            shutil.rmtree(target_path)
-        else:
-            target_path.unlink()
-        return True
-
-    def install_package(self, package_name: str) -> Dict[str, Any]:
-        """安装Python包到沙箱环境"""
-        requirements_path = Path(self.sandbox_path) / "requirements.txt"
-        current_packages = requirements_path.read_text(encoding='utf-8').splitlines()
-
-        # 检查是否已安装
-        if any(package_name in line for line in current_packages if not line.startswith('#')):
-            return {"status": "already_installed", "package": package_name}
-
-        # 添加到requirements.txt
-        with requirements_path.open('a', encoding='utf-8') as f:
-            f.write(f"{package_name}\n")
-
-        # 执行安装
-        stdout, stderr, code = self.execute_python(
-            "src/install_package.py"
+        return cls(
+            backend_type=BackendType.LOCAL,
+            base_path=base_path,
+            resource_limits=resource_limits,
+            security_policy=security_policy,
+            **kwargs
         )
-
-        return {
-            "status": "success" if code == 0 else "failed",
-            "package": package_name,
-            "stdout": stdout,
-            "stderr": stderr
-        }
-
-    @contextlib.contextmanager
-    def redirect_stdio(self, stdout_path: str, stderr_path: str):
+    
+    @classmethod
+    def create_docker(
+        cls: Type[T],
+        base_path: str = "/tmp/sandboxes",
+        docker_image: str = "python:3.11-slim",
+        resource_limits: Optional[ResourceLimits] = None,
+        security_policy: Optional[SecurityPolicy] = None,
+        **kwargs
+    ) -> T:
         """
-        重定向标准输出和标准错误，支持Path对象
+        Create a Docker sandbox.
+        
+        Args:
+            base_path: Base path for sandbox workspace
+            docker_image: Docker image to use
+            resource_limits: Resource limits
+            security_policy: Security policy
+            **kwargs: Additional options
+        
+        Returns:
+            Sandbox: Docker sandbox instance
         """
-        stdout_path = Path(self.sandbox_path) / stdout_path
-        stderr_path = Path(self.sandbox_path) / stderr_path
-
-        original_stdout = sys.stdout
-        original_stderr = sys.stderr
-
+        return cls(
+            backend_type=BackendType.DOCKER,
+            base_path=base_path,
+            docker_image=docker_image,
+            resource_limits=resource_limits,
+            security_policy=security_policy,
+            **kwargs
+        )
+    
+    @classmethod
+    def from_config(cls: Type[T], config: SandboxConfig, **kwargs) -> T:
+        """
+        Create sandbox from configuration.
+        
+        Args:
+            config: Sandbox configuration
+            **kwargs: Override options
+        
+        Returns:
+            Sandbox: Configured sandbox instance
+        """
+        return cls(
+            backend_type=config.backend_type,
+            base_path=config.base_path,
+            docker_image=config.docker.image if config.docker else "python:3.11-slim",
+            resource_limits=config.resource_limits,
+            security_policy=config.security_policy,
+            auto_cleanup=config.auto_cleanup,
+            **kwargs
+        )
+    
+    @classmethod
+    @asynccontextmanager
+    async def create(
+        cls: Type[T],
+        backend_type: Union[str, BackendType] = BackendType.LOCAL,
+        **kwargs
+    ):
+        """
+        Create sandbox as async context manager.
+        
+        Args:
+            backend_type: Backend type
+            **kwargs: Sandbox options
+        
+        Yields:
+            Sandbox: Running sandbox instance
+        """
+        sandbox = cls(backend_type=backend_type, **kwargs)
         try:
-            with stdout_path.open('w') as f_stdout, stderr_path.open('w') as f_stderr:
-                sys.stdout = f_stdout
-                sys.stderr = f_stderr
-                yield
+            await sandbox.start()
+            yield sandbox
         finally:
-            sys.stdout = original_stdout
-            sys.stderr = original_stderr
-
-    def format_sandbox(self, confirm: bool = False) -> Dict[str, Any]:
+            await sandbox.stop()
+    
+    # ==========================================================================
+    # Properties
+    # ==========================================================================
+    
+    @property
+    def sandbox_id(self) -> str:
+        """Get sandbox ID"""
+        return self._sandbox_id
+    
+    @property
+    def name(self) -> str:
+        """Get sandbox name"""
+        return self._name
+    
+    @property
+    def status(self) -> SandboxStatus:
+        """Get current status"""
+        return self._status
+    
+    @property
+    def is_running(self) -> bool:
+        """Check if sandbox is running"""
+        return self._status == SandboxStatus.RUNNING
+    
+    @property
+    def backend_type(self) -> BackendType:
+        """Get backend type"""
+        return self._backend_type
+    
+    @property
+    def workspace_path(self) -> Path:
+        """Get workspace directory path"""
+        return self._workspace_path
+    
+    @property
+    def resource_limits(self) -> ResourceLimits:
+        """Get resource limits"""
+        return self._resource_limits
+    
+    @property
+    def security_policy(self) -> SecurityPolicy:
+        """Get security policy"""
+        return self._security_policy
+    
+    @property
+    def backend(self) -> Optional[ExecutionBackend]:
+        """Get execution backend"""
+        return self._backend
+    
+    # ==========================================================================
+    # Lifecycle Management
+    # ==========================================================================
+    
+    async def start(self) -> "Sandbox":
         """
-        安全格式化沙箱目录（清空所有数据）
-        """
-        # 安全确认机制（防止误操作）
-        if not confirm:
-            raise ValueError("格式化操作未确认，请设置confirm=True强制执行")
-
-        start_time = time.time()
-        sandbox_path = Path(self.sandbox_path)
-
-        # 路径安全校验（防止越权操作）
-        if not str(sandbox_path).startswith(self.sandbox_path):
-            raise ValueError(f"非法格式化路径: {sandbox_path}")
-
-        # 统计并删除文件
-        file_count = 0
-        dir_count = 0
-
-        try:
-            # 递归删除沙箱内所有内容
-            for root, dirs, files in os.walk(sandbox_path, topdown=False):
-                for f in files:
-                    file_path = os.path.join(root, f)
-                    os.remove(file_path)
-                    file_count += 1
-                for d in dirs:
-                    dir_path = os.path.join(root, d)
-                    os.rmdir(dir_path)
-                    dir_count += 1
-
-            # 删除空的根目录（重新创建）
-            if os.path.exists(sandbox_path):
-                os.rmdir(sandbox_path)
-
-            # 重新初始化沙箱环境
-            self._sandbox_init()
-
-            return {
-                "status": "success",
-                "message": "沙箱格式化完成",
-                "deleted_files": file_count,
-                "deleted_dirs": dir_count,
-                "elapsed_seconds": round(time.time() - start_time, 2)
-            }
-
-        except Exception as e:
-            return {
-                "status": "failed",
-                "message": f"格式化失败: {str(e)}",
-                "deleted_files": file_count,
-                "deleted_dirs": dir_count,
-                "error": str(e)
-            }
-
-    async def aadd_file(
-            self,
-            source_path: Optional[str] = None,
-            base64_content: Optional[str] = None,
-            url: Optional[str] = None,
-            target_file_name: Optional[str] = None,
-            auto_description: bool = False,
-    ) -> str:
-        """
-        向沙箱中添加文件，支持以下任一方式：
-          - 从本地路径复制 (source_path)
-          - 从 Base64 内容解码写入 (base64_content)
-          - 从 URL 下载 (url)
-
-        必须且只能指定其中一种来源。
-
-        Args:
-            source_path: 本地文件路径（相对于调用环境）
-            base64_content: Base64 编码的文件内容
-            url: 文件的网络地址（需可公开访问）
-            target_file_name: 沙箱内的目标文件名（含后缀）。若未提供，
-                              将尝试从 source_path 或 url 自动推导；
-                              使用 base64_content 时必须显式指定。
-            auto_description: 描述文件
-
+        Start the sandbox.
+        
         Returns:
-            文件的描述信息（description）
+            Sandbox: Self for chaining
+        
+        Raises:
+            SandboxAlreadyRunningError: If already running
         """
-        from urllib.parse import urlparse
-
-        sources = [source_path, base64_content, url]
-        provided = [s for s in sources if s is not None]
-        if len(provided) == 0:
-            raise ValueError("必须提供 source_path、base64_content 或 url 中的一个")
-        if len(provided) > 1:
-            raise ValueError("只能指定 source_path、base64_content 或 url 中的一个")
-
-        # 智能推导 target_file_name
-        if target_file_name is None:
-            if source_path is not None:
-                target_file_name = Path(source_path).name
-            elif url is not None:
-                parsed = urlparse(url)
-                name = Path(parsed.path).name
-                if not name or '.' not in name:
-                    raise ValueError(
-                        "无法从 URL 推断有效文件名（需包含扩展名），请显式指定 target_file_name"
-                    )
-                target_file_name = name
-            elif base64_content is not None:
-                raise ValueError("使用 base64_content 时必须指定 target_file_name")
-            else:
-                raise RuntimeError("未预期状态")
-
-        # 安全校验：target_file_name 不能包含路径分隔符或以 . 开头（防止隐藏文件/路径穿越）
-        if not target_file_name or '/' in target_file_name or '\\' in target_file_name:
-            raise ValueError("target_file_name 不能包含路径分隔符")
-        if target_file_name.startswith('.'):
-            raise ValueError("target_file_name 不能以 '.' 开头（禁止隐藏文件）")
-
-        target_path = Path(self.sandbox_path) / target_file_name
-
-        # 路径安全校验（防止路径穿越）
-        try:
-            target_path = target_path.resolve(strict=False)
-            sandbox_root = Path(self.sandbox_path).resolve()
-            if not str(target_path).startswith(str(sandbox_root)):
-                raise ValueError("非法的目标路径，禁止路径穿越")
-        except Exception as e:
-            raise ValueError(f"路径解析失败: {e}")
-
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            if source_path is not None:
-                shutil.copy2(source_path, target_path)
-            elif base64_content is not None:
-                from alphora.utils.base64 import base64_to_file
-                base64_to_file(base64_content, target_path)
-            elif url is not None:
-                # 动态导入 requests，避免硬依赖
-                try:
-                    import requests
-                except ImportError:
-                    raise ImportError("使用 URL 上传需要安装 'requests' 库")
-                response = requests.get(url, timeout=30)
-                response.raise_for_status()
-                target_path.write_bytes(response.content)
-            else:
-                raise RuntimeError("未预期的分支")
-
-            logging.info(f"文件已添加到沙箱: {target_path}")
-
-            # 自动生成描述
-            if auto_description:
-                file_info = await FileReaderFactory(**self.init_params).aread_file(file_path=target_path)
-                description = file_info.get("description", "")
-                if description:
-                    FileReader.save_description(target_path, description)
-
-                return description
-
-            else:
-                return ""
-
-        except Exception as e:
-            # 清理可能残留的文件
-            if target_path.exists():
-                target_path.unlink()
-            raise RuntimeError(f"添加文件失败: {e}") from e
-
-    def add_file(
-            self,
-            source_path: Optional[str] = None,
-            base64_content: Optional[str] = None,
-            url: Optional[str] = None,
-            target_file_name: Optional[str] = None,
-            auto_description: bool = False,
-    ) -> str:
-        """
-        向沙箱中添加文件，支持以下任一方式：
-          - 从本地路径复制 (source_path)
-          - 从 Base64 内容解码写入 (base64_content)
-          - 从 URL 下载 (url)
-
-        必须且只能指定其中一种来源。
-
-        Args:
-            source_path: 本地文件路径（相对于调用环境）
-            base64_content: Base64 编码的文件内容
-            url: 文件的网络地址（需可公开访问）
-            target_file_name: 沙箱内的目标文件名（含后缀）。若未提供，
-                              将尝试从 source_path 或 url 自动推导；
-                              使用 base64_content 时必须显式指定。
-            auto_description: 自动描述
-        Returns:
-            文件的描述信息（description）
-        """
-        from urllib.parse import urlparse
-
-        sources = [source_path, base64_content, url]
-        provided = [s for s in sources if s is not None]
-        if len(provided) == 0:
-            raise ValueError("必须提供 source_path、base64_content 或 url 中的一个")
-        if len(provided) > 1:
-            raise ValueError("只能指定 source_path、base64_content 或 url 中的一个")
-
-        # 智能推导 target_file_name
-        if target_file_name is None:
-            if source_path is not None:
-                target_file_name = Path(source_path).name
-            elif url is not None:
-                parsed = urlparse(url)
-                name = Path(parsed.path).name
-                if not name or '.' not in name:
-                    raise ValueError(
-                        "无法从 URL 推断有效文件名（需包含扩展名），请显式指定 target_file_name"
-                    )
-                target_file_name = name
-            elif base64_content is not None:
-                raise ValueError("使用 base64_content 时必须指定 target_file_name")
-            else:
-                raise RuntimeError("未预期状态")
-
-        # 安全校验：target_file_name 不能包含路径分隔符或以 . 开头（防止隐藏文件/路径穿越）
-        if not target_file_name or '/' in target_file_name or '\\' in target_file_name:
-            raise ValueError("target_file_name 不能包含路径分隔符")
-        if target_file_name.startswith('.'):
-            raise ValueError("target_file_name 不能以 '.' 开头（禁止隐藏文件）")
-
-        target_path = Path(self.sandbox_path) / target_file_name
-
-        # 路径安全校验（防止路径穿越）
-        try:
-            target_path = target_path.resolve(strict=False)
-            sandbox_root = Path(self.sandbox_path).resolve()
-            if not str(target_path).startswith(str(sandbox_root)):
-                raise ValueError("非法的目标路径，禁止路径穿越")
-        except Exception as e:
-            raise ValueError(f"路径解析失败: {e}")
-
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            if source_path is not None:
-                shutil.copy2(source_path, target_path)
-            elif base64_content is not None:
-                from alphora.utils.base64 import base64_to_file
-                base64_to_file(base64_content, target_path)
-            elif url is not None:
-                # 动态导入 requests，避免硬依赖
-                try:
-                    import requests
-                except ImportError:
-                    raise ImportError("使用 URL 上传需要安装 'requests' 库")
-                response = requests.get(url, timeout=30)
-                response.raise_for_status()
-                target_path.write_bytes(response.content)
-            else:
-                raise RuntimeError("未预期的分支")
-
-            logging.info(f"文件已添加到沙箱: {target_path}")
-
-            # 自动生成描述
-            if auto_description:
-                file_info = FileReaderFactory(**self.init_params).read_file(file_path=target_path)
-                description = file_info.get("description", "")
-                if description:
-                    FileReader.save_description(target_path, description)
-
-                return description
-            else:
-                return ""
-
-        except Exception as e:
-            # 清理可能残留的文件
-            if target_path.exists():
-                target_path.unlink()
-            raise RuntimeError(f"添加文件失败: {e}") from e
-
-    def is_empty(self) -> bool:
-        """
-        判断沙箱目录是否为空（不包含有效文件，忽略隐藏文件和描述文件）
-
-        Returns:
-            bool: 沙箱为空返回True，否则返回False
-        """
-        sandbox_root = Path(self.sandbox_path)
-
-        if not sandbox_root.exists():
-            return True  # 路径不存在视为空
-
-        # 遍历目录检查是否有有效文件
-        for root, dirs, files in os.walk(sandbox_root):
-            # 过滤隐藏目录
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
-
-            # 过滤隐藏文件和描述文件
-            valid_files = [
-                f for f in files
-                if not f.startswith('.') and not f.endswith('.description')
-            ]
-
-            if valid_files:
-                return False  # 存在有效文件，不为空
-
-        return True  # 无有效文件，视为空
-
-    def destroy(self, confirm: bool = False) -> None:
-        """
-        销毁沙箱（彻底删除沙箱目录及所有内容）
-
-        Args:
-            confirm: 是否确认销毁，必须设置为True才会执行删除操作
-        """
-        if not confirm:
-            logging.error("销毁操作未确认，请设置confirm=True强制执行")
-            return
-
-        start_time = time.time()
-        sandbox_root = Path(self.sandbox_path)
-
-        # 安全校验：防止删除非沙箱路径
-        if not str(sandbox_root).startswith(self.sandbox_path):
-            logging.error(f"非法销毁路径: {sandbox_root}")
-            return
-
-        try:
-            if not sandbox_root.exists():
-                logging.info(f"沙箱路径不存在，无需销毁: {sandbox_root}")
+        async with self._lock:
+            if self._status == SandboxStatus.RUNNING:
+                raise SandboxAlreadyRunningError(f"Sandbox {self._sandbox_id} is already running")
+            
+            self._status = SandboxStatus.STARTING
+            logger.info(f"Starting sandbox {self._sandbox_id}")
+            
+            try:
+                # Create workspace directory
+                self._workspace_path.mkdir(parents=True, exist_ok=True)
+                
+                # Create backend
+                self._backend = self._create_backend()
+                
+                # Initialize and start
+                await self._backend.initialize()
+                await self._backend.start()
+                
+                self._status = SandboxStatus.RUNNING
+                self._started_at = datetime.now()
+                logger.info(f"Sandbox {self._sandbox_id} started")
+                return self
+            
+            except Exception as e:
+                self._status = SandboxStatus.ERROR
+                logger.error(f"Failed to start sandbox: {e}")
+                raise
+    
+    async def stop(self) -> None:
+        """Stop the sandbox."""
+        async with self._lock:
+            if self._status not in (SandboxStatus.RUNNING, SandboxStatus.STARTING):
                 return
-
-            # 统计并删除所有内容
-            file_count = 0
-            dir_count = 0
-
-            # 先删除文件
-            for root, dirs, files in os.walk(sandbox_root, topdown=False):
-                for f in files:
-                    file_path = os.path.join(root, f)
-                    os.remove(file_path)
-                    file_count += 1
-                for d in dirs:
-                    dir_path = os.path.join(root, d)
-                    os.rmdir(dir_path)
-                    dir_count += 1
-
-            # 最后删除根目录
-            os.rmdir(sandbox_root)
-
-            elapsed = round(time.time() - start_time, 2)
-            logging.info(
-                f"沙箱已成功销毁: {sandbox_root} "
-                f"[删除文件: {file_count}, 删除目录: {dir_count}, 耗时: {elapsed}秒]"
+            
+            self._status = SandboxStatus.STOPPING
+            logger.info(f"Stopping sandbox {self._sandbox_id}")
+            
+            try:
+                if self._backend:
+                    await self._backend.stop()
+                
+                self._status = SandboxStatus.STOPPED
+                self._stopped_at = datetime.now()
+                
+                if self._auto_cleanup:
+                    await self._cleanup()
+                
+                logger.info(f"Sandbox {self._sandbox_id} stopped")
+            
+            except Exception as e:
+                self._status = SandboxStatus.ERROR
+                logger.error(f"Error stopping sandbox: {e}")
+                raise
+    
+    async def restart(self) -> "Sandbox":
+        """Restart the sandbox."""
+        await self.stop()
+        return await self.start()
+    
+    async def destroy(self) -> None:
+        """Destroy the sandbox completely."""
+        await self.stop()
+        
+        if self._backend:
+            await self._backend.destroy()
+            self._backend = None
+        
+        await self._cleanup()
+        self._status = SandboxStatus.DESTROYED
+        logger.info(f"Sandbox {self._sandbox_id} destroyed")
+    
+    async def _cleanup(self) -> None:
+        """Clean up workspace directory"""
+        import shutil
+        if self._workspace_path.exists():
+            try:
+                shutil.rmtree(self._workspace_path)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup workspace: {e}")
+    
+    def _create_backend(self) -> ExecutionBackend:
+        """Create execution backend instance"""
+        backend_kwargs = {
+            "sandbox_id": self._sandbox_id,
+            "workspace_path": str(self._workspace_path),
+            "resource_limits": self._resource_limits,
+            "security_policy": self._security_policy,
+        }
+        
+        if self._backend_type == BackendType.DOCKER:
+            backend_kwargs["docker_image"] = self._docker_image
+        
+        backend_kwargs.update(self._extra_kwargs)
+        
+        return BackendFactory.create(self._backend_type.value, **backend_kwargs)
+    
+    def _ensure_running(self) -> None:
+        """Ensure sandbox is running"""
+        if self._status != SandboxStatus.RUNNING:
+            raise SandboxNotRunningError(
+                f"Sandbox {self._sandbox_id} is not running. Call 'await sandbox.start()' first."
             )
-
-        except Exception as e:
-            logging.error(
-                f"沙箱销毁失败: {sandbox_root}, 错误: {str(e)} ", exc_info=True
-            )
-            return
-
-
-if __name__ == '__main__':
-    from alphora.models import OpenAILike
-    from alphora.utils.base64 import file_to_base64
-
-    llm = OpenAILike(base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                     api_key="sk-xxx",
-                     model_name='qwen-vl-max-latest',
-                     is_multimodal=True)
-
-    file = "/Users/tiantiantian/Code/宝藏小工具/ai2md.py"
-
-    sb = Sandbox(sandbox_path='/Users/tiantiantian/临时/chatbi_workspace/sandbox/test',
-                 llm=llm)
-
-    desc = sb.add_file(source_path=file)
-    print(desc)
-    print('111')
-    sb.list_resource()
+    
+    # ==========================================================================
+    # Code Execution
+    # ==========================================================================
+    
+    async def execute_code(
+        self,
+        code: str,
+        timeout: Optional[int] = None,
+        **kwargs
+    ) -> ExecutionResult:
+        """
+        Execute Python code.
+        
+        Args:
+            code: Python code to execute
+            timeout: Execution timeout in seconds
+            **kwargs: Additional options
+        
+        Returns:
+            ExecutionResult: Execution result
+        """
+        self._ensure_running()
+        timeout = timeout or self._resource_limits.timeout_seconds
+        result = await self._backend.execute_code(code, timeout=timeout, **kwargs)
+        self._execution_count += 1
+        return result
+    
+    async def execute_file(
+        self,
+        file_path: str,
+        args: Optional[List[str]] = None,
+        timeout: Optional[int] = None,
+        **kwargs
+    ) -> ExecutionResult:
+        """
+        Execute a Python file.
+        
+        Args:
+            file_path: Path to the file (relative to workspace)
+            args: Command line arguments
+            timeout: Execution timeout
+            **kwargs: Additional options
+        
+        Returns:
+            ExecutionResult: Execution result
+        """
+        self._ensure_running()
+        timeout = timeout or self._resource_limits.timeout_seconds
+        result = await self._backend.execute_file(file_path, args=args, timeout=timeout, **kwargs)
+        self._execution_count += 1
+        return result
+    
+    async def execute_shell(
+        self,
+        command: str,
+        timeout: Optional[int] = None,
+        **kwargs
+    ) -> ExecutionResult:
+        """
+        Execute a shell command.
+        
+        Args:
+            command: Shell command
+            timeout: Execution timeout
+            **kwargs: Additional options
+        
+        Returns:
+            ExecutionResult: Execution result
+        """
+        self._ensure_running()
+        timeout = timeout or self._resource_limits.timeout_seconds
+        result = await self._backend.execute_shell(command, timeout=timeout, **kwargs)
+        self._execution_count += 1
+        return result
+    
+    async def run(self, code: str, timeout: Optional[int] = None) -> ExecutionResult:
+        """
+        Shorthand for execute_code.
+        
+        Args:
+            code: Python code to execute
+            timeout: Execution timeout
+        
+        Returns:
+            ExecutionResult: Execution result
+        """
+        return await self.execute_code(code, timeout=timeout)
+    
+    # ==========================================================================
+    # File Operations
+    # ==========================================================================
+    
+    async def read_file(self, path: str) -> str:
+        """Read file content as text."""
+        self._ensure_running()
+        return await self._backend.read_file(path)
+    
+    async def read_file_bytes(self, path: str) -> bytes:
+        """Read file content as bytes."""
+        self._ensure_running()
+        return await self._backend.read_file_bytes(path)
+    
+    async def write_file(self, path: str, content: str) -> None:
+        """Write text content to file."""
+        self._ensure_running()
+        await self._backend.write_file(path, content)
+    
+    async def write_file_bytes(self, path: str, content: bytes) -> None:
+        """Write binary content to file."""
+        self._ensure_running()
+        await self._backend.write_file_bytes(path, content)
+    
+    async def save_file(self, path: str, content: str) -> FileInfo:
+        """
+        Save file and return file info.
+        
+        Args:
+            path: File path
+            content: File content
+        
+        Returns:
+            FileInfo: File information
+        """
+        self._ensure_running()
+        await self._backend.write_file(path, content)
+        
+        return FileInfo(
+            name=Path(path).name,
+            path=path,
+            size=len(content.encode("utf-8")),
+            file_type=FileType.from_extension(path),
+        )
+    
+    async def delete_file(self, path: str) -> bool:
+        """Delete a file or directory."""
+        self._ensure_running()
+        return await self._backend.delete_file(path)
+    
+    async def file_exists(self, path: str) -> bool:
+        """Check if file exists."""
+        self._ensure_running()
+        return await self._backend.file_exists(path)
+    
+    async def list_files(
+        self,
+        path: str = "",
+        recursive: bool = False,
+        pattern: Optional[str] = None
+    ) -> List[FileInfo]:
+        """
+        List files in directory.
+        
+        Args:
+            path: Directory path
+            recursive: Include subdirectories
+            pattern: Filename pattern filter (glob)
+        
+        Returns:
+            List of FileInfo objects
+        """
+        self._ensure_running()
+        
+        files = await self._backend.list_directory(path, recursive=recursive)
+        
+        result = []
+        for f in files:
+            if pattern:
+                import fnmatch
+                if not fnmatch.fnmatch(f.get("name", ""), pattern):
+                    continue
+            
+            result.append(FileInfo(
+                name=f.get("name", ""),
+                path=f.get("path", ""),
+                size=f.get("size", 0),
+                file_type=FileType.from_extension(f.get("name", "")),
+                is_directory=f.get("is_directory", False),
+            ))
+        
+        return result
+    
+    async def download_file(self, path: str) -> bytes:
+        """Download file as bytes."""
+        return await self.read_file_bytes(path)
+    
+    async def copy_file(self, source: str, dest: str) -> None:
+        """Copy a file within sandbox."""
+        self._ensure_running()
+        await self._backend.copy_file(source, dest)
+    
+    async def move_file(self, source: str, dest: str) -> None:
+        """Move a file within sandbox."""
+        self._ensure_running()
+        await self._backend.move_file(source, dest)
+    
+    # ==========================================================================
+    # Package Management
+    # ==========================================================================
+    
+    async def install_package(
+        self,
+        package: str,
+        version: Optional[str] = None,
+        upgrade: bool = False
+    ) -> ExecutionResult:
+        """Install a Python package."""
+        self._ensure_running()
+        return await self._backend.install_package(package, version=version, upgrade=upgrade)
+    
+    async def install_packages(self, packages: List[str]) -> ExecutionResult:
+        """Install multiple packages."""
+        self._ensure_running()
+        cmd = f"pip install {' '.join(packages)}"
+        return await self.execute_shell(cmd)
+    
+    async def uninstall_package(self, package: str) -> ExecutionResult:
+        """Uninstall a package."""
+        self._ensure_running()
+        return await self._backend.uninstall_package(package)
+    
+    async def list_packages(self) -> List[PackageInfo]:
+        """List installed packages."""
+        self._ensure_running()
+        return await self._backend.list_packages()
+    
+    async def package_installed(self, package: str) -> bool:
+        """Check if package is installed."""
+        packages = await self.list_packages()
+        return any(p.name.lower() == package.lower() for p in packages)
+    
+    async def install_requirements(self, requirements_path: str) -> ExecutionResult:
+        """Install packages from requirements file."""
+        self._ensure_running()
+        return await self._backend.install_requirements(requirements_path)
+    
+    # ==========================================================================
+    # Environment Variables
+    # ==========================================================================
+    
+    async def set_env(self, key: str, value: str) -> None:
+        """Set environment variable."""
+        self._ensure_running()
+        await self._backend.set_env_var(key, value)
+    
+    async def get_env(self, key: str) -> Optional[str]:
+        """Get environment variable."""
+        self._ensure_running()
+        return await self._backend.get_env_var(key)
+    
+    async def set_env_vars(self, env_vars: Dict[str, str]) -> None:
+        """Set multiple environment variables."""
+        self._ensure_running()
+        await self._backend.set_env_vars(env_vars)
+    
+    # ==========================================================================
+    # Monitoring
+    # ==========================================================================
+    
+    async def get_resource_usage(self) -> Dict[str, Any]:
+        """Get current resource usage."""
+        self._ensure_running()
+        return await self._backend.get_resource_usage()
+    
+    async def health_check(self) -> bool:
+        """Check if sandbox is healthy."""
+        if not self._backend:
+            return False
+        return await self._backend.health_check()
+    
+    async def get_status(self) -> Dict[str, Any]:
+        """Get sandbox status dictionary."""
+        return {
+            "sandbox_id": self._sandbox_id,
+            "name": self._name,
+            "status": self._status.value,
+            "backend_type": self._backend_type.value,
+            "is_running": self.is_running,
+            "workspace_path": str(self._workspace_path),
+            "created_at": self._created_at.isoformat(),
+            "started_at": self._started_at.isoformat() if self._started_at else None,
+            "execution_count": self._execution_count,
+        }
+    
+    async def get_info(self) -> SandboxInfo:
+        """Get complete sandbox information."""
+        return SandboxInfo(
+            sandbox_id=self._sandbox_id,
+            name=self._name,
+            status=self._status,
+            backend_type=self._backend_type,
+            workspace_path=str(self._workspace_path),
+            created_at=self._created_at,
+            started_at=self._started_at,
+            stopped_at=self._stopped_at,
+            resource_limits=self._resource_limits,
+            security_policy=self._security_policy,
+            execution_count=self._execution_count,
+        )
+    
+    # ==========================================================================
+    # Context Manager
+    # ==========================================================================
+    
+    async def __aenter__(self: T) -> T:
+        await self.start()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        await self.stop()
+    
+    def __repr__(self) -> str:
+        return f"Sandbox(id={self._sandbox_id!r}, backend={self._backend_type.value!r}, status={self._status.value!r})"

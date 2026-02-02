@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+
+  # MinIO - S3-compatible object storage
+  minio:
+    image: minio/minio:latest
+    container_name: alphora-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web Console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Redis - Caching and message queue (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: alphora-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+
+  # Sandbox API Server (example)
+  # sandbox-api:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: alphora-sandbox-api
+  #   environment:
+  #     - SANDBOX_BASE_PATH=/data/sandboxes
+  #     - SANDBOX_BACKEND=docker
+  #     - SANDBOX_STORAGE_TYPE=minio
+  #     - SANDBOX_S3_ENDPOINT=http://minio:9000
+  #     - SANDBOX_S3_ACCESS_KEY=minioadmin
+  #     - SANDBOX_S3_SECRET_KEY=minioadmin123
+  #     - SANDBOX_S3_BUCKET=sandboxes
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #     - sandbox-data:/data/sandboxes
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     - minio
+  #     - redis
+  #   restart: unless-stopped
+
+
+# Volumes
+volumes:
+  minio-data:
+    driver: local
+  redis-data:
+    driver: local
+  sandbox-data:
+    driver: local
+
+# Networks
+networks:
+  default:
+    name: alphora-network
+    driver: bridge
