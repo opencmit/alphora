@@ -124,9 +124,7 @@ class StorageConfig:
         )
 
 
-# =============================================================================
 # Docker Configuration
-# =============================================================================
 
 @dataclass
 class DockerConfig:
@@ -185,10 +183,7 @@ class DockerConfig:
         }
 
 
-# =============================================================================
 # Main Sandbox Configuration
-# =============================================================================
-
 @dataclass
 class SandboxConfig:
     """
@@ -247,11 +242,8 @@ class SandboxConfig:
             "startup_timeout": self.startup_timeout,
             "shutdown_timeout": self.shutdown_timeout,
         }
-    
-    # ==========================================================================
+
     # Factory Methods
-    # ==========================================================================
-    
     @classmethod
     def local(
         cls,
@@ -400,9 +392,7 @@ class SandboxConfig:
         )
 
 
-# =============================================================================
 # Configuration Loading Functions
-# =============================================================================
 
 def config_from_env(prefix: str = "SANDBOX_") -> SandboxConfig:
     """

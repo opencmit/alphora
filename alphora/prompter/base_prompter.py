@@ -11,6 +11,7 @@ Key Features:
 - **Jinja2 Integration**: specialized environment for rendering dynamic system and user contexts.
 - **Dual Mode**: Fully supports both synchronous (`call`) and asynchronous (`acall`) invocation patterns.
 - **Metadata Encapsulation**: Returns enriched string objects containing reasoning traces and generation metadata.
+
 """
 
 import json

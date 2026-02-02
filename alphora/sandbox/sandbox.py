@@ -132,11 +132,8 @@ class Sandbox:
         self._started_at: Optional[datetime] = None
         self._stopped_at: Optional[datetime] = None
         self._execution_count = 0
-    
-    # ==========================================================================
+
     # Factory Methods
-    # ==========================================================================
-    
     @classmethod
     def create_local(
         cls: Type[T],
@@ -242,10 +239,8 @@ class Sandbox:
         finally:
             await sandbox.stop()
     
-    # ==========================================================================
+
     # Properties
-    # ==========================================================================
-    
     @property
     def sandbox_id(self) -> str:
         """Get sandbox ID"""
@@ -290,11 +285,8 @@ class Sandbox:
     def backend(self) -> Optional[ExecutionBackend]:
         """Get execution backend"""
         return self._backend
-    
-    # ==========================================================================
+
     # Lifecycle Management
-    # ==========================================================================
-    
     async def start(self) -> "Sandbox":
         """
         Start the sandbox.
@@ -407,11 +399,8 @@ class Sandbox:
             raise SandboxNotRunningError(
                 f"Sandbox {self._sandbox_id} is not running. Call 'await sandbox.start()' first."
             )
-    
-    # ==========================================================================
+
     # Code Execution
-    # ==========================================================================
-    
     async def execute_code(
         self,
         code: str,
@@ -495,11 +484,8 @@ class Sandbox:
             ExecutionResult: Execution result
         """
         return await self.execute_code(code, timeout=timeout)
-    
-    # ==========================================================================
+
     # File Operations
-    # ==========================================================================
-    
     async def read_file(self, path: str) -> str:
         """Read file content as text."""
         self._ensure_running()
@@ -602,11 +588,8 @@ class Sandbox:
         """Move a file within sandbox."""
         self._ensure_running()
         await self._backend.move_file(source, dest)
-    
-    # ==========================================================================
+
     # Package Management
-    # ==========================================================================
-    
     async def install_package(
         self,
         package: str,
@@ -642,11 +625,8 @@ class Sandbox:
         """Install packages from requirements file."""
         self._ensure_running()
         return await self._backend.install_requirements(requirements_path)
-    
-    # ==========================================================================
+
     # Environment Variables
-    # ==========================================================================
-    
     async def set_env(self, key: str, value: str) -> None:
         """Set environment variable."""
         self._ensure_running()
@@ -661,11 +641,8 @@ class Sandbox:
         """Set multiple environment variables."""
         self._ensure_running()
         await self._backend.set_env_vars(env_vars)
-    
-    # ==========================================================================
+
     # Monitoring
-    # ==========================================================================
-    
     async def get_resource_usage(self) -> Dict[str, Any]:
         """Get current resource usage."""
         self._ensure_running()
@@ -706,11 +683,8 @@ class Sandbox:
             security_policy=self._security_policy,
             execution_count=self._execution_count,
         )
-    
-    # ==========================================================================
+
     # Context Manager
-    # ==========================================================================
-    
     async def __aenter__(self: T) -> T:
         await self.start()
         return self

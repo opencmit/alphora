@@ -124,11 +124,8 @@ class DockerBackend(ExecutionBackend):
     def container_name(self) -> str:
         """Get container name"""
         return f"sandbox-{self.sandbox_id}"
-    
-    # ==========================================================================
+
     # Lifecycle Methods
-    # ==========================================================================
-    
     async def initialize(self) -> None:
         """Initialize Docker client and pull image"""
         try:
@@ -302,10 +299,8 @@ class DockerBackend(ExecutionBackend):
         
         raise ContainerError(self.container_name, "Container failed to become ready")
     
-    # ==========================================================================
+
     # Code Execution
-    # ==========================================================================
-    
     async def execute_code(
         self,
         code: str,
@@ -404,11 +399,8 @@ class DockerBackend(ExecutionBackend):
             return ExecutionResult.timeout_result(timeout)
         except Exception as e:
             return ExecutionResult.error_result(str(e))
-    
-    # ==========================================================================
+
     # File Operations
-    # ==========================================================================
-    
     async def read_file(self, path: str) -> str:
         """Read file from container workspace"""
         full_path = self._workspace_path / path.lstrip("/")
@@ -474,11 +466,8 @@ class DockerBackend(ExecutionBackend):
                 continue
         
         return sorted(results, key=lambda x: (not x["is_directory"], x["name"]))
-    
-    # ==========================================================================
+
     # Package Management
-    # ==========================================================================
-    
     async def install_package(
         self,
         package: str,
@@ -513,10 +502,6 @@ class DockerBackend(ExecutionBackend):
         except Exception:
             return []
     
-    # ==========================================================================
-    # Environment Variables
-    # ==========================================================================
-    
     async def set_env_var(self, key: str, value: str) -> None:
         """Set environment variable"""
         self._env_vars[key] = value
@@ -530,11 +515,8 @@ class DockerBackend(ExecutionBackend):
         if result.success:
             return result.stdout.strip() or None
         return None
-    
-    # ==========================================================================
+
     # Resource Monitoring
-    # ==========================================================================
-    
     async def get_resource_usage(self) -> Dict[str, Any]:
         """Get container resource usage"""
         if not self._container:

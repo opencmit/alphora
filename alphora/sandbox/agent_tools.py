@@ -97,11 +97,8 @@ class SandboxTools:
     def _error(self, error: str, output: Any = None) -> Dict[str, Any]:
         """Create error response"""
         return {"success": False, "output": output, "error": str(error)}
-    
-    # ==========================================================================
+
     # Code Execution Tools
-    # ==========================================================================
-    
     async def run_python_code(
         self,
         code: str,
@@ -182,11 +179,8 @@ class SandboxTools:
             }
         except Exception as e:
             return self._error(str(e))
-    
-    # ==========================================================================
+
     # File Operation Tools
-    # ==========================================================================
-    
     async def save_file(self, path: str, content: str) -> Dict[str, Any]:
         """
         Save content to a file.
@@ -313,11 +307,8 @@ class SandboxTools:
             return self._success(f"Moved {source} to {dest}")
         except Exception as e:
             return self._error(str(e))
-    
-    # ==========================================================================
+
     # Package Management Tools
-    # ==========================================================================
-    
     async def install_pip_package(
         self,
         package: str,
@@ -412,11 +403,8 @@ class SandboxTools:
             return self._success(installed)
         except Exception as e:
             return self._error(str(e), False)
-    
-    # ==========================================================================
+
     # Environment Variable Tools
-    # ==========================================================================
-    
     async def set_environment_variable(self, key: str, value: str) -> Dict[str, Any]:
         """
         Set an environment variable.
@@ -449,11 +437,8 @@ class SandboxTools:
             return self._success(value)
         except Exception as e:
             return self._error(str(e))
-    
-    # ==========================================================================
+
     # Status Tools
-    # ==========================================================================
-    
     async def get_sandbox_status(self) -> Dict[str, Any]:
         """
         Get sandbox status information.
@@ -492,11 +477,8 @@ class SandboxTools:
             return self._success("Sandbox reset successfully")
         except Exception as e:
             return self._error(str(e))
-    
-    # ==========================================================================
+
     # Tool Execution
-    # ==========================================================================
-    
     async def execute_tool(
         self,
         tool_name: str,
@@ -526,11 +508,8 @@ class SandboxTools:
     def get_available_tools(self) -> List[str]:
         """Get list of available tool names."""
         return list(self._tool_registry.keys())
-    
-    # ==========================================================================
+
     # Tool Definitions
-    # ==========================================================================
-    
     def get_tool_definitions(self) -> Dict[str, Dict]:
         """
         Get all tool definitions.
@@ -576,10 +555,7 @@ class SandboxTools:
         ]
 
 
-# =============================================================================
 # Tool Definitions
-# =============================================================================
-
 TOOL_DEFINITIONS = {
     "run_python_code": {
         "name": "run_python_code",

@@ -19,7 +19,7 @@ async def example_basic_usage():
     print("Example 1: Basic Usage")
     print("=" * 60)
 
-    sandbox = Sandbox.create_docker()
+    sandbox = Sandbox.create_docker(docker_image='python:3.11-slim')
     await sandbox.start()
     result = await sandbox.execute_shell(command='pwd')
     print(result)

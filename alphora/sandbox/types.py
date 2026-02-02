@@ -10,10 +10,6 @@ from datetime import datetime
 from pathlib import Path
 
 
-# =============================================================================
-# Enums
-# =============================================================================
-
 class BackendType(Enum):
     """Execution backend type"""
     LOCAL = "local"
@@ -100,10 +96,6 @@ class FileType(Enum):
         }
         return mapping.get(ext, cls.UNKNOWN)
 
-
-# =============================================================================
-# Configuration Dataclasses
-# =============================================================================
 
 @dataclass
 class ResourceLimits:
@@ -203,10 +195,6 @@ class SecurityPolicy:
         """Permissive security policy (for trusted environments)"""
         return cls(allow_shell=True, allow_network=True, allow_subprocess=True, blocked_imports=[])
 
-
-# =============================================================================
-# Result Dataclasses
-# =============================================================================
 
 @dataclass
 class ExecutionResult:
@@ -405,6 +393,5 @@ class ResourceUsage:
         }
 
 
-# Type Aliases
 PathLike = Union[str, Path]
 JsonDict = Dict[str, Any]

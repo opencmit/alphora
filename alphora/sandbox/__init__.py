@@ -58,16 +58,10 @@ Multi-Sandbox Management:
         )
     ```
 """
-
-__version__ = "0.1.0"
-__author__ = "Alphora Team"
-
-# Core classes
 from alphora.sandbox.sandbox import Sandbox
 from alphora.sandbox.manager import SandboxManager
 from alphora.sandbox.agent_tools import SandboxTools, get_tool_definitions, get_openai_tools
 
-# Types
 from alphora.sandbox.types import (
     BackendType,
     StorageType,
@@ -83,7 +77,6 @@ from alphora.sandbox.types import (
     ResourceUsage,
 )
 
-# Configuration
 from alphora.sandbox.config import (
     SandboxConfig,
     StorageConfig,
@@ -92,7 +85,6 @@ from alphora.sandbox.config import (
     config_from_file,
 )
 
-# Exceptions
 from alphora.sandbox.exceptions import (
     SandboxError,
     SandboxNotFoundError,
@@ -114,7 +106,6 @@ from alphora.sandbox.exceptions import (
     ConfigurationError,
 )
 
-# Backends
 from alphora.sandbox.backends import (
     ExecutionBackend,
     BackendFactory,
@@ -123,7 +114,6 @@ from alphora.sandbox.backends import (
     is_docker_available,
 )
 
-# Storage
 from alphora.sandbox.storage import (
     StorageBackend,
     StorageObject,
@@ -133,17 +123,11 @@ from alphora.sandbox.storage import (
 )
 
 __all__ = [
-    # Version
-    "__version__",
-    
-    # Core
     "Sandbox",
     "SandboxManager",
     "SandboxTools",
     "get_tool_definitions",
     "get_openai_tools",
-    
-    # Types
     "BackendType",
     "StorageType",
     "SandboxStatus",
@@ -156,15 +140,11 @@ __all__ = [
     "PackageInfo",
     "SandboxInfo",
     "ResourceUsage",
-    
-    # Configuration
     "SandboxConfig",
     "StorageConfig",
     "DockerConfig",
     "config_from_env",
     "config_from_file",
-    
-    # Exceptions
     "SandboxError",
     "SandboxNotFoundError",
     "SandboxAlreadyExistsError",
@@ -183,15 +163,11 @@ __all__ = [
     "DockerError",
     "StorageError",
     "ConfigurationError",
-    
-    # Backends
     "ExecutionBackend",
     "BackendFactory",
     "LocalBackend",
     "DockerBackend",
     "is_docker_available",
-    
-    # Storage
     "StorageBackend",
     "StorageObject",
     "StorageFactory",
