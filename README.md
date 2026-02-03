@@ -353,12 +353,19 @@ cd alphora && pip install -e ".[dev]"
 pytest tests/
 ```
 
-## Community
+## Contributors
 
--  [GitHub Discussions](https://github.com/alphora/alphora/discussions) — Questions and ideas
--  [GitHub Issues](https://github.com/alphora/alphora/issues) — Bug reports and features
--  [Documentation](https://docs.alphora.dev) — Guides and reference
+Architected and crafted entirely in-house by the AlphaData Team.
+
+| Core Member | Role & Affiliation                                                                                                                                                      |
+| :---: |:------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| <img src="https://avatars.githubusercontent.com/tian-cmcc" width="80px" style="border-radius: 50%;"/> <br /> **Tian Tian** | **Architecture & Design** <br>  *China Mobile Communications Group Co.,Ltd* <br>  Email: [tiantianit@chinamobile.com](tiantianit@chinamobile.com)                       |
+| <img src="https://github.com/identicons/app.png" width="80px" style="border-radius: 50%;"/> <br /> **Your Name** | **Role Description** <br> *China Mobile Communications Group Co.,Ltd* <br> Email: [xxx@chinamobile.com](https://github.com/) |
+
 
 ## License
 
-CLA 
+This project is licensed under the **Apache License 2.0**.  
+See [LICENSE](./LICENSE) for details.
+
+Contributions require acceptance of the [Contributor License Agreement (CLA)](CLA.md).
