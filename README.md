@@ -333,7 +333,7 @@ For detailed system design, component relationships, and implementation patterns
 ---
 ## Contributors
 
-Currently maintained with ❤️ by the **AlphaData Team**.
+Crafted with ❤️ by the AlphaData Team. Built with ❤️ by the AlphaData Team.
 
 <table>
   <tr>
