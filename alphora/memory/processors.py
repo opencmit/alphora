@@ -1,3 +1,8 @@
+# Copyright 2026 China Mobile Information Technology Co., Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Author: Tian Tian (tiantianit@chinamobile.com)
+
 """
 消息处理器模块
 
@@ -689,20 +694,14 @@ def token_budget(
     return processor
 
 
-# =============================================================================
-# 导出
-# =============================================================================
-
 __all__ = [
-    # 类型
+
     "Processor",
     "ProcessorContext",
-    
-    # 工具函数
+
     "chain",
     "identity",
-    
-    # 过滤类
+
     "keep_last",
     "keep_first",
     "keep_rounds",
@@ -714,17 +713,14 @@ __all__ = [
     "filter_by",
     "exclude_by",
     "keep_important_and_last",
-    
-    # 变换类
+
     "truncate_content",
     "map_content",
     "map_messages",
-    
-    # 工具调用相关
+
     "summarize_tool_calls",
     "remove_tool_details",
     "keep_final_tool_result",
-    
-    # Token 控制
+
     "token_budget",
 ]

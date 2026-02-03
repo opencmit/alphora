@@ -1,6 +1,10 @@
+# Copyright 2026 China Mobile Information Technology Co., Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Author: Tian Tian (tiantianit@chinamobile.com)
+
 """
 Alphora Debugger - API Routes
-FastAPI路由和WebSocket处理
 """
 
 import asyncio

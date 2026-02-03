@@ -1,3 +1,8 @@
+# Copyright 2026 China Mobile Information Technology Co., Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Author: Tian Tian (tiantianit@chinamobile.com)
+
 """
 消息模型
 
@@ -259,8 +264,6 @@ class Message:
 
         return Message(**params)
 
-    # ==================== 标记属性 ====================
-
     @property
     def is_pinned(self) -> bool:
         """是否被固定"""
@@ -274,8 +277,6 @@ class Message:
     def has_tag(self, tag: str) -> bool:
         """检查是否有指定标签"""
         return tag in self.tags
-
-    # ==================== OpenAI 格式转换 ====================
 
     def to_openai_format(self) -> Dict[str, Any]:
         """

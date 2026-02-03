@@ -1,4 +1,11 @@
-# 统一规范消息，包含多模态：图片、文本、音频等
+# Copyright 2026 China Mobile Information Technology Co., Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Author: Tian Tian (tiantianit@chinamobile.com)
+
+"""
+统一规范消息，包含多模态：图片、文本、音频等
+"""
 
 from typing import Optional, List, Dict, Union, Any
 import base64

@@ -1,3 +1,8 @@
+# Copyright 2026 China Mobile Information Technology Co., Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Author: Tian Tian (tiantianit@chinamobile.com)
+
 from abc import ABC, abstractmethod
 from typing import Union, Optional, List, Dict, Any, Mapping
 from alphora.models.message import Message

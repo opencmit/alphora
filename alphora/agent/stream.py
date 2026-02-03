@@ -1,6 +1,8 @@
-"""
-因为改了异步，所有的同步方法都不允许使用了！！！
-"""
+# Copyright 2026 China Mobile Information Technology Co., Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Author: Tian Tian (tiantianit@chinamobile.com)
+
 
 from alphora.server.stream_responser import DataStreamer
 from typing import Optional, List, Iterator

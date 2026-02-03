@@ -1,9 +1,12 @@
+# Copyright 2026 China Mobile Information Technology Co., Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Author: Tian Tian (tiantianit@chinamobile.com)
+
 """
-Alphora Debugger (v2.0)
+Alphora Debugger
 
-适配重构后的 base_prompter.py 和 openai_like.py
-
-新增功能：
+Features
 1. HistoryPayload 追踪 - 记录历史消息的使用情况
 2. Runtime System Prompt 追踪
 3. Force JSON / Long Response 模式追踪

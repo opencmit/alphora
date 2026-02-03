@@ -1,3 +1,8 @@
+# Copyright 2026 China Mobile Information Technology Co., Ltd.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Author: Tian Tian (tiantianit@chinamobile.com)
+
 """
 工具调用类型定义
 
@@ -75,8 +80,8 @@ class ToolCall(list):
             格式化的字符串
 
         Example:
-            >>> print(response.format_details())
-            🔧 工具调用详情 (共 2 个)
+            print(response.format_details())
+            工具调用详情 (共 2 个)
             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             [1] get_weather
                 ID: call_abc123
@@ -90,7 +95,7 @@ class ToolCall(list):
                   • timezone: "Asia/Shanghai"
         """
         if not self:
-            return "📭 无工具调用"
+            return "无工具调用"
 
         lines = [
             f"工具调用详情 (共 {len(self)} 个)",
@@ -144,7 +149,7 @@ class ToolCall(list):
 
         Example:
             >>> response.pretty_print()
-            🔧 工具调用详情 (共 1 个)
+            工具调用详情 (共 1 个)
             ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             [1] get_weather
                 ID: call_abc123

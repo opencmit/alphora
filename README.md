@@ -288,17 +288,17 @@ For detailed system design, component relationships, and implementation patterns
 
 ### Component Overview
 
-| Component | Purpose |
-|-----------|---------|
-| [Agent](docs/cn/agent_readme.md) | Core agent lifecycle, derivation, ReAct loop |
-| [Prompter](./docs/prompter_readme.md) | Jinja2 templates, LLM invocation, streaming |
-| [Models](./docs/model_readme.md) | LLM interface, multimodal, load balancing |
-| [Tools](./docs/tool_readme.md) | @tool decorator, registry, parallel execution |
-| [Memory](./docs/memory_readme.md) | Session management, history, pin/tag system |
-| [Storage](./docs/storage_readme.md) | Persistent backends (memory, JSON, SQLite) |
-| [Sandbox](./docs/sandbox_readme.md) | Secure code execution environment |
-| [Server](./docs/server_readme.md) | API publishing, SSE streaming |
-| [Postprocess](./docs/postprocess_readme.md) | Stream transformation pipeline |
+| Component                                    | Purpose |
+|----------------------------------------------|---------|
+| [Agent](docs/components/cn/agent_readme.md)             | Core agent lifecycle, derivation, ReAct loop |
+| [Prompter](docs/components/cn/prompter_readme.md)       | Jinja2 templates, LLM invocation, streaming |
+| [Models](docs/components/cn/model_readme.md)            | LLM interface, multimodal, load balancing |
+| [Tools](docs/components/cn/tool_readme.md)              | tool decorator, registry, parallel execution |
+| [Memory](docs/components/cn/memory_readme.md)           | Session management, history, pin/tag system |
+| [Storage](docs/components/cn/storage_readme.md)         | Persistent backends (memory, JSON, SQLite) |
+| [Sandbox](docs/components/cn/sandbox_readme.md)         | Secure code execution environment |
+| [Server](docs/components/cn/server_readme.md)           | API publishing, SSE streaming |
+| [Postprocess](docs/components/cn/postprocess_readme.md) | Stream transformation pipeline |
 
 ---
 
