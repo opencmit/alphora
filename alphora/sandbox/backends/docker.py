@@ -84,7 +84,7 @@ class DockerBackend(ExecutionBackend):
         workspace_path: str,
         resource_limits: Optional[ResourceLimits] = None,
         security_policy: Optional[SecurityPolicy] = None,
-        docker_image: str = "python:3.11-slim",
+        docker_image: str = "alphora-sandbox:latest",
         docker_config: Optional[DockerConfig] = None,
         **kwargs
     ):
@@ -107,9 +107,12 @@ class DockerBackend(ExecutionBackend):
             security_policy=security_policy,
             **kwargs
         )
-        
+
         self._docker_image = docker_image
         self._docker_config = docker_config or DockerConfig(image=docker_image)
+
+        self._docker_dir = Path(__file__).parent.parent / "docker"
+
         self._container = None
         self._client = None
         self._container_workspace = "/workspace"
@@ -125,31 +128,52 @@ class DockerBackend(ExecutionBackend):
         """Get container name"""
         return f"sandbox-{self.sandbox_id}"
 
-    # Lifecycle Methods
     async def initialize(self) -> None:
-        """Initialize Docker client and pull image"""
+        """检查镜像，不存在则构建"""
         try:
             import docker
             self._client = docker.from_env()
         except ImportError:
             raise DockerError("docker package not installed. Install with: pip install docker")
-        except Exception as e:
-            raise DockerError(f"Failed to connect to Docker: {e}")
-        
-        # Create workspace directory
-        self._workspace_path.mkdir(parents=True, exist_ok=True)
-        
-        # Pull image if not exists
+
         try:
             self._client.images.get(self._docker_image)
-            logger.info(f"Image {self._docker_image} found locally")
+            logger.info(f"Using existing sandbox image: {self._docker_image}")
+
         except Exception:
-            logger.info(f"Pulling image {self._docker_image}...")
-            try:
+            # if self._docker_image == "alphora-sandbox:latest":
+            if self._docker_image.startswith('alphora'):
+                await self._build_custom_image()
+            else:
+                logger.info(f"Pulling image {self._docker_image}...")
                 self._client.images.pull(self._docker_image)
-                logger.info(f"Image {self._docker_image} pulled successfully")
-            except Exception as e:
-                raise DockerError(f"Failed to pull image {self._docker_image}: {e}")
+
+        self._workspace_path.mkdir(parents=True, exist_ok=True)
+
+    async def _build_custom_image(self) -> None:
+        """执行本地 Dockerfile 构建"""
+
+        logger.info(f"Image {self._docker_image} not found. Performing first-time setup; please be patient as the build process completes (this may take a few minutes) ...")
+
+        if not self._docker_dir.exists():
+            raise DockerError(f"Docker build directory not found at {self._docker_dir}")
+
+        try:
+            image, logs = self._client.images.build(
+                path=str(self._docker_dir),
+                tag=self._docker_image,
+                rm=True,
+                target="base"    # 对应 Dockerfile 中 AS base
+            )
+
+            for line in logs:
+                if 'stream' in line:
+                    logger.debug(line['stream'].strip())
+
+            logger.info(f"Successfully built {self._docker_image}")
+
+        except Exception as e:
+            raise DockerError(f"Failed to build custom sandbox image: {e}")
     
     async def start(self) -> None:
         """Start the Docker container"""

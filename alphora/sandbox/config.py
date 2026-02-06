@@ -133,7 +133,8 @@ class DockerConfig:
     
     Settings for Docker container execution.
     """
-    image: str = "python:3.11-slim"
+    # image: str = "python:3.11-slim"
+    image: str = "alphora-sandbox:latest"
     network_mode: str = "none"  # none, bridge, host
     auto_remove: bool = True
     privileged: bool = False

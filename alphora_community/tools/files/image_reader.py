@@ -24,7 +24,7 @@ from alphora.sandbox import Sandbox
 
 class ImageAnalysisInput(BaseModel):
     """图片分析参数"""
-    image_path: str = Field(..., description="图片文件路径")
+    image_path: str = Field(..., description="图片文件路径(沙箱)")
     prompt: str = Field("请描述这张图片的内容", description="分析提示词")
     mode: str = Field("describe", description="分析模式: describe(描述)/ocr(文字识别)/qa(问答)/extract(结构化提取)")
 
@@ -47,11 +47,7 @@ class ImageReaderTool:
         # 自定义问答
         result = await tool.analyze("path/to/image.png", prompt="图片中有几个人？")
     """
-
-    # 支持的图片格式
     SUPPORTED_FORMATS = {'.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp', '.tiff', '.ico'}
-
-    # 预设提示词模板
     PROMPT_TEMPLATES = {
         "describe": "请简洁地描述这张图片的内容，包括主要对象、场景、颜色、布局等信息。",
         "ocr": "请识别并提取图片中的所有文字内容，保持原有的格式和布局。如果没有文字，请说明。",
@@ -69,8 +65,6 @@ class ImageReaderTool:
             sandbox: Sandbox = None
     ):
         """
-        初始化 ImageReaderTool
-
         Args:
             llm: 已配置的多模态 LLM 实例
             sandbox: sandbox
@@ -111,13 +105,11 @@ class ImageReaderTool:
                 f"支持的格式: {', '.join(sorted(ImageReaderTool.SUPPORTED_FORMATS))}"
             )
 
-        # 读取文件并编码
         with open(path, "rb") as f:
             image_data = f.read()
 
         base64_data = base64.b64encode(image_data).decode("utf-8")
 
-        # 标准化格式名称
         format_map = {
             ".jpg": "jpeg",
             ".jpeg": "jpeg",
@@ -144,7 +136,7 @@ class ImageReaderTool:
 
         Args:
             mode: 分析模式
-            custom_prompt: 自定义提示词（优先级最高）
+            custom_prompt: 自定义提示词
             question: 问答模式的问题
             extract_fields: 结构化提取的字段列表
 
@@ -248,11 +240,11 @@ class ImageReaderTool:
                 self._llm.set_temperature(original_temperature)
 
         except FileNotFoundError as e:
-            return f"❌ 错误: {str(e)}"
+            return f"错误: {str(e)}"
         except ValueError as e:
-            return f"❌ 错误: {str(e)}"
+            return f"错误: {str(e)}"
         except Exception as e:
-            return f"❌ 分析图片时出错: {str(e)}"
+            return f"分析图片时出错: {str(e)}"
 
     async def analyze_batch(
             self,
@@ -301,7 +293,6 @@ class ImageReaderTool:
             对比分析结果
         """
         try:
-            # 构建包含多张图片的消息
             message = Message()
 
             # 默认对比提示词
@@ -310,12 +301,10 @@ class ImageReaderTool:
 
             message.add_text(prompt)
 
-            # 添加所有图片
             for i, path in enumerate(image_paths, 1):
                 base64_data, image_format = self._read_image_as_base64(path)
                 message.add_image(data=base64_data, format=image_format)
 
-            # 调用模型
             response = await self._llm.ainvoke(message)
             return response
 
@@ -325,10 +314,8 @@ class ImageReaderTool:
     async def extract_text(self, image_path: str) -> str:
         """
         OCR 文字识别快捷方法
-
         Args:
             image_path: 图片文件路径
-
         Returns:
             识别出的文字内容
         """
@@ -337,10 +324,8 @@ class ImageReaderTool:
     async def describe(self, image_path: str) -> str:
         """
         图片描述快捷方法
-
         Args:
             image_path: 图片文件路径
-
         Returns:
             图片描述
         """
@@ -349,11 +334,9 @@ class ImageReaderTool:
     async def ask(self, image_path: str, question: str) -> str:
         """
         图片问答快捷方法
-
         Args:
             image_path: 图片文件路径
             question: 问题
-
         Returns:
             回答
         """
@@ -362,10 +345,8 @@ class ImageReaderTool:
     async def extract_table(self, image_path: str) -> str:
         """
         表格提取快捷方法
-
         Args:
             image_path: 图片文件路径
-
         Returns:
             Markdown 格式的表格
         """
@@ -379,12 +360,10 @@ class ImageReaderTool:
     ) -> Union[str, dict]:
         """
         结构化信息提取
-
         Args:
             image_path: 图片文件路径
             fields: 要提取的字段列表
             output_format: 输出格式 ("json" 或 "text")
-
         Returns:
             提取的结构化信息
         """
@@ -396,8 +375,6 @@ class ImageReaderTool:
 
         if output_format == "json":
             try:
-                # 尝试解析 JSON
-                # 处理可能的 markdown 代码块
                 clean_result = result.strip()
                 if clean_result.startswith("```json"):
                     clean_result = clean_result[7:]
@@ -413,11 +390,9 @@ class ImageReaderTool:
 
     def get_image_info(self, image_path: str) -> dict:
         """
-        获取图片基本信息（不调用 LLM）
-
+        获取图片基本信息 no llm
         Args:
             image_path: 图片文件路径
-
         Returns:
             包含图片信息的字典
         """
@@ -436,7 +411,6 @@ class ImageReaderTool:
             "size_human": self._format_size(stat.st_size),
         }
 
-        # 尝试获取图片尺寸
         try:
             from PIL import Image
             with Image.open(path) as img:
@@ -464,52 +438,29 @@ class ImageReaderTool:
         return f"支持的图片格式: {', '.join(sorted(self.SUPPORTED_FORMATS))}"
 
 
-# 同步包装器（便于非异步环境使用）
-class ImageReaderToolSync:
-    """
-    ImageReaderTool 的同步版本
-
-    使用示例：
-        tool = ImageReaderToolSync(llm=your_llm)
-        result = tool.analyze("image.png")
-    """
-
-    def __init__(self, *args, **kwargs):
-        self._async_tool = ImageReaderTool(*args, **kwargs)
-
-    def analyze(self, *args, **kwargs) -> str:
-        import asyncio
-        return asyncio.run(self._async_tool.analyze(*args, **kwargs))
-
-    def extract_text(self, image_path: str) -> str:
-        import asyncio
-        return asyncio.run(self._async_tool.extract_text(image_path))
-
-    def describe(self, image_path: str) -> str:
-        import asyncio
-        return asyncio.run(self._async_tool.describe(image_path))
-
-    def ask(self, image_path: str, question: str) -> str:
-        import asyncio
-        return asyncio.run(self._async_tool.ask(image_path, question))
-
-    def get_image_info(self, image_path: str) -> dict:
-        return self._async_tool.get_image_info(image_path)
-
-
 if __name__ == "__main__":
+    from alphora.models import OpenAILike
+    from alphora.sandbox import Sandbox, StorageConfig, LocalStorage
     import asyncio
 
-
     async def main():
-        # 示例用法
         llm = OpenAILike(model_name='qwen-vl-plus', is_multimodal=True)
+        sb_storage_config = StorageConfig(local_path='/Users/tiantiantian/临时/sandbox/my_sandbox')
+        sb_storage = LocalStorage(config=sb_storage_config)
+        sb = Sandbox.create_docker(base_path='/Users/tiantiantian/临时/sandbox', storage=sb_storage, sandbox_id='123456')
+
+        await sb.start()
+
         tool = ImageReaderTool(
             llm=llm,
+            sandbox=sb
         )
 
-        # 描述图片
-        result = await tool.describe("/Users/tiantiantian/工作/1-梧桐AlphaData/3-测试数据/alphaclaw_test/IMG_1621.jpeg")
+        print(await sb.list_files())
+
+        result = await tool.describe("WechatIMG3494.jpg")
         print(f"图片描述: {result}")
+
+        await sb.destroy()
 
     asyncio.run(main())

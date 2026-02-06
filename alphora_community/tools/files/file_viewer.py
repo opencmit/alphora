@@ -25,9 +25,7 @@ from .utils.common import find_file, list_available_files, get_file_info
 class FileViewerAgent:
     """
     通用文件查看器 Agent
-
     为 AI Agent 提供统一的文件查看接口，支持多种文件格式。
-
     使用示例：
         agent = FileViewerAgent(base_dir="/path/to/sandbox")
 
@@ -41,34 +39,24 @@ class FileViewerAgent:
         result = agent.view_file("销售数据.xlsx", purpose="structure")
     """
 
-    # 文件类型分类
     TABULAR_EXTENSIONS = TabularViewer.SUPPORTED_EXTENSIONS
     DOCUMENT_EXTENSIONS = DocumentViewer.SUPPORTED_EXTENSIONS
     PRESENTATION_EXTENSIONS = PresentationViewer.SUPPORTED_EXTENSIONS
     PDF_EXTENSIONS = PDFViewer.SUPPORTED_EXTENSIONS
     TEXT_EXTENSIONS = TextViewer.SUPPORTED_EXTENSIONS
 
-    def __init__(self, sandbox: Sandbox, **kwargs):
+    def __init__(self, sandbox: Sandbox | None = None):
         """
         初始化 FileViewerAgent
 
         Args:
             sandbox: Sandbox
         """
-        super().__init__(**kwargs)
         self._sandbox = sandbox
-
-    @property
-    def base_dir(self) -> str:
-        """获取基础目录"""
-        if self._sandbox:
-            return str(self._sandbox.workspace_path)
-
-        raise ValueError("Sandbox未传入")
 
     async def view_file(
             self,
-            file_name: str,
+            file_path: str,
             purpose: str = "preview",
             keyword: Optional[str] = None,
             max_lines: int = 50,
@@ -95,9 +83,7 @@ class FileViewerAgent:
         - 代码类：Python、JavaScript、SQL、HTML 等
 
         Args:
-            file_name (str): 要查看的文件名。必填参数。
-                支持模糊匹配，可只提供部分文件名。
-
+            file_path (str): 要查看的文件的相对路径。
             purpose (str): 查看目的。可选值：
                 - "preview"：预览文件内容（默认）
                 - "structure"：查看文件结构（列名、类型、目录等）
@@ -106,18 +92,18 @@ class FileViewerAgent:
                 - "stats"：统计信息（仅表格类文件）
 
             keyword (str): 搜索关键词。
-                ⚠️ 提供此参数会自动切换为 search 模式，无需设置 purpose="search"
+                - 提供此参数会自动切换为 search 模式，无需设置 purpose="search"
 
             max_lines (int): 最大返回行数，默认 100。
 
             columns (str): 【表格类】要查看的列，逗号分隔。
-                示例："姓名,年龄" 或 "A,B,C"
+                - 示例："姓名,年龄" 或 "A,B,C"
 
             start_row (int): 【表格/文本】起始行号（从1开始）。
-                ⚠️ 提供此参数会自动切换为 range 模式
+                - 提供此参数会自动切换为 range 模式
 
             end_row (int): 【表格/文本】结束行号。
-                填负数如 -10 表示最后 10 行。
+                - 填负数如 -10 表示最后 10 行。
 
             sheet_name (str): 【Excel】工作表名称。
                 - 不填：查看默认工作表
@@ -158,16 +144,15 @@ class FileViewerAgent:
             # 在 Word 中搜索
             >>> view_file("合同.docx", keyword="甲方")
         """
-        # 查找文件
-        try:
-            base = self.base_dir
-        except ValueError as e:
-            return f"❌ 配置错误: {e}"
 
-        file_path = find_file(base, file_name)
-        if not file_path:
-            available = list_available_files(base)
-            return f"❌ 找不到文件 '{file_name}'\n\n当前目录下的文件：\n{available}"
+        if self._sandbox:
+            file_path = self._sandbox.to_host_path(path=file_path)
+        else:
+            file_path = file_path
+
+        if not os.path.exists(file_path):
+
+            return f"找不到文件 '{file_path}'"
 
         # 获取文件扩展名
         ext = os.path.splitext(file_path)[1].lower()
@@ -254,7 +239,7 @@ class FileViewerAgent:
                         start_row=start_row,
                         end_row=end_row
                     )
-                    contents = f"⚠️ 未知文件类型 {ext}，尝试作为文本文件处理\n\n{result}"
+                    contents = f"未知文件类型 {ext}，尝试作为文本文件处理\n\n{result}"
                     # await self.stream.astream_message(content_type='stdout', content=contents)
                     return contents
 
@@ -266,59 +251,10 @@ class FileViewerAgent:
                         self.PDF_EXTENSIONS |
                         self.TEXT_EXTENSIONS
                     ))
-                    contents = f"❌ 不支持的文件类型: {ext}\n\n支持的格式: {supported}"
+                    contents = f"不支持的文件类型: {ext}\n\n支持的格式: {supported}"
                     # await self.stream.astream_message(content_type='stdout', content=contents)
                     return contents
         except Exception as e:
-            contents = f"❌ 查看文件时出错: {str(e)}"
+            contents = f"查看文件时出错: {str(e)}"
             # await self.stream.astream_message(content_type='stdout', content=contents)
             return contents
-
-    def list_files(self, max_files: int = 50) -> str:
-        """
-        列出当前目录下的所有文件
-
-        Args:
-            max_files: 最大显示文件数
-
-        Returns:
-            格式化的文件列表
-        """
-        try:
-            base = self.base_dir
-        except ValueError as e:
-            return f"❌ 配置错误: {e}"
-
-        files = list_available_files(base, max_files)
-        return f"📁 目录: {base}\n\n{files}"
-
-    def get_file_info(self, file_name: str) -> str:
-        """
-        获取文件的基本信息
-
-        Args:
-            file_name: 文件名
-
-        Returns:
-            文件信息字符串
-        """
-        try:
-            base = self.base_dir
-        except ValueError as e:
-            return f"❌ 配置错误: {e}"
-
-        file_path = find_file(base, file_name)
-        if not file_path:
-            return f"❌ 找不到文件 '{file_name}'"
-
-        info = get_file_info(file_path)
-
-        lines = [
-            f"📄 文件名: {info['name']}",
-            f"📁 路径: {info['path']}",
-            f"📦 大小: {info['size_human']}",
-            f"🕐 修改时间: {info['modified_str']}",
-            f"📋 类型: {info['extension']}",
-        ]
-
-        return '\n'.join(lines)

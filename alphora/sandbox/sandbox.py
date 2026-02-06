@@ -215,7 +215,7 @@ class Sandbox:
     def create_docker(
             cls: Type[T],
             base_path: str = "/tmp/sandboxes",
-            docker_image: str = "python:3.11-slim",
+            docker_image: str = "alphora-sandbox:latest",
             resource_limits: Optional[ResourceLimits] = None,
             security_policy: Optional[SecurityPolicy] = None,
             storage: Optional["StorageBackend"] = None,
