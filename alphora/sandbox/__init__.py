@@ -60,7 +60,7 @@ Multi-Sandbox Management:
 """
 from alphora.sandbox.sandbox import Sandbox
 from alphora.sandbox.manager import SandboxManager
-from alphora.sandbox.agent_tools import SandboxTools, get_tool_definitions, get_openai_tools
+from alphora.sandbox.agent_tools import SandboxTools
 
 from alphora.sandbox.types import (
     BackendType,
@@ -126,8 +126,6 @@ __all__ = [
     "Sandbox",
     "SandboxManager",
     "SandboxTools",
-    "get_tool_definitions",
-    "get_openai_tools",
     "BackendType",
     "StorageType",
     "SandboxStatus",

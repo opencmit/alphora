@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentChat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Source+Code+Pro:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github.min.css">
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<style>
+/* ═══════════════ Variables ═══════════════ */
+:root {
+  --white: #ffffff;
+  --bg: #f7f7f8;
+  --bg-alt: #f0f0f2;
+  --bg-hover: #eaeaec;
+  --border: #e5e5e7;
+  --border-light: #efefef;
+  --text-1: #1a1a1a;
+  --text-2: #555555;
+  --text-3: #888888;
+  --text-4: #aaaaaa;
+  --accent: #2563eb;
+  --accent-light: #dbeafe;
+  --accent-hover: #1d4ed8;
+  --user-bg: #f0f0f2;
+  --green: #16a34a;
+  --red: #dc2626;
+  --amber: #b45309;
+  --font: 'DM Sans', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+  --mono: 'Source Code Pro', 'Fira Code', ui-monospace, SFMono-Regular, monospace;
+  --r-sm: 6px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+  --ease: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --panel-w: 440px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg); color: var(--text-1); font-family: var(--font); font-size: 14px; line-height: 1.6; overflow: hidden; -webkit-font-smoothing: antialiased; }
+button { font-family: var(--font); cursor: pointer; }
+input, select, textarea { font-family: var(--font); }
+
+/* ═══════════════ App Layout ═══════════════ */
+#app { display: flex; height: 100vh; }
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; transition: margin-right 0.35s var(--ease); }
+#main.panel-open { margin-right: var(--panel-w); }
+
+/* ═══════════════ Top Bar ═══════════════ */
+#topbar { height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; background: var(--white); border-bottom: 1px solid var(--border); flex-shrink: 0; z-index: 20; }
+#topbar .brand { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; color: var(--text-1); letter-spacing: -0.2px; }
+#topbar .brand-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+.top-actions { display: flex; align-items: center; gap: 4px; }
+.top-btn { display: flex; align-items: center; gap: 5px; padding: 6px 12px; background: transparent; border: none; color: var(--text-3); font-size: 13px; font-weight: 500; border-radius: var(--r-sm); transition: all 0.15s; }
+.top-btn:hover { background: var(--bg); color: var(--text-2); }
+.top-btn.active { background: var(--accent-light); color: var(--accent); }
+.top-btn svg { width: 16px; height: 16px; }
+
+/* ═══════════════ API Config ═══════════════ */
+#api-config { display: flex; align-items: center; gap: 12px; padding: 8px 20px; background: var(--white); border-bottom: 1px solid var(--border-light); flex-shrink: 0; }
+#api-config.hidden { display: none; }
+.cfg-group { display: flex; align-items: center; gap: 5px; }
+.cfg-group label { font-size: 12px; color: var(--text-3); font-weight: 500; white-space: nowrap; }
+.cfg-input { height: 28px; padding: 0 8px; background: var(--bg); border: 1px solid var(--border); color: var(--text-1); border-radius: var(--r-sm); font-size: 12px; font-family: var(--mono); outline: none; transition: border-color 0.15s; }
+.cfg-input:focus { border-color: var(--accent); }
+#cfg-url { width: 300px; }
+#cfg-model { width: 130px; }
+.cfg-select { height: 28px; padding: 0 6px; background: var(--bg); border: 1px solid var(--border); color: var(--text-1); border-radius: var(--r-sm); font-size: 12px; outline: none; }
+
+/* ═══════════════ Message List ═══════════════ */
+#messages { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+#messages::-webkit-scrollbar { width: 6px; }
+#messages::-webkit-scrollbar-track { background: transparent; }
+#messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+#messages::-webkit-scrollbar-thumb:hover { background: var(--text-4); }
+
+/* ── Welcome ── */
+#welcome { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center; padding: 40px 20px; }
+#welcome h2 { font-size: 24px; font-weight: 700; color: var(--text-1); margin-bottom: 6px; letter-spacing: -0.5px; }
+#welcome p { color: var(--text-3); font-size: 14px; line-height: 1.7; max-width: 360px; }
+
+/* ── Message Row ── */
+.msg { padding: 20px 0; }
+.msg + .msg { border-top: 1px solid var(--border-light); }
+.msg-inner { max-width: 760px; margin: 0 auto; padding: 0 24px; display: flex; gap: 16px; }
+
+/* user */
+.msg.user .msg-inner { justify-content: flex-end; }
+.msg.user .msg-content { background: var(--user-bg); padding: 10px 16px; border-radius: 18px 18px 4px 18px; font-size: 14px; line-height: 1.6; max-width: 70%; word-break: break-word; color: var(--text-1); }
+
+/* assistant */
+.msg.assistant .msg-inner { align-items: flex-start; }
+.msg.assistant .msg-avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--text-1); display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+.msg.assistant .msg-avatar svg { width: 16px; height: 16px; }
+.msg.assistant .msg-content { flex: 1; min-width: 0; }
+
+/* file attachment display */
+.msg-files { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.msg-file-chip { display: flex; align-items: center; gap: 5px; padding: 4px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; color: var(--text-2); }
+.msg-file-chip svg { width: 14px; height: 14px; color: var(--text-3); }
+
+/* ── Content Blocks ── */
+.cblock { margin: 6px 0; border-radius: var(--r-md); overflow: hidden; word-break: break-word; }
+.cblock:first-child { margin-top: 0; }
+.cblock-label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--text-4); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 4px; user-select: none; }
+.cblock-label.clickable { cursor: pointer; }
+.cblock-label .arrow { font-size: 9px; transition: transform 0.2s; display: inline-block; }
+.cblock-label .arrow.down { transform: rotate(0deg); }
+.cblock-label .arrow.right { transform: rotate(-90deg); }
+.cblock-body { overflow: hidden; transition: max-height 0.3s var(--ease), opacity 0.2s; }
+.cblock-body.collapsed { max-height: 0 !important; opacity: 0; padding-top: 0 !important; padding-bottom: 0 !important; }
+
+/* markdown inside blocks */
+.md-body h1,.md-body h2,.md-body h3,.md-body h4 { margin: 14px 0 6px; font-weight: 600; color: var(--text-1); }
+.md-body h1 { font-size: 1.35em; } .md-body h2 { font-size: 1.2em; } .md-body h3 { font-size: 1.05em; }
+.md-body p { margin: 5px 0; }
+.md-body ul, .md-body ol { padding-left: 20px; margin: 5px 0; }
+.md-body li { margin: 2px 0; }
+.md-body code { font-family: var(--mono); background: var(--bg-alt); padding: 1px 5px; border-radius: 4px; font-size: 0.88em; }
+.md-body pre { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 12px 14px; overflow-x: auto; margin: 8px 0; }
+.md-body pre code { background: none; padding: 0; font-size: 13px; line-height: 1.55; }
+.md-body a { color: var(--accent); text-decoration: none; }
+.md-body a:hover { text-decoration: underline; }
+.md-body blockquote { border-left: 3px solid var(--border); padding-left: 14px; color: var(--text-2); margin: 8px 0; }
+.md-body table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
+.md-body th, .md-body td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; }
+.md-body th { background: var(--bg); font-weight: 600; }
+.md-body img { max-width: 100%; border-radius: var(--r-md); }
+
+/* streaming cursor */
+.streaming-dot::after { content: ''; display: inline-block; width: 6px; height: 6px; background: var(--accent); border-radius: 50%; margin-left: 4px; animation: dotPulse 1s infinite; vertical-align: middle; }
+@keyframes dotPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.3;transform:scale(0.7)} }
+
+/* ═══════════════ Input Area ═══════════════ */
+#input-area { padding: 12px 24px 18px; flex-shrink: 0; }
+#input-box { max-width: 760px; margin: 0 auto; background: var(--white); border: 1px solid var(--border); border-radius: var(--r-lg); transition: border-color 0.2s, box-shadow 0.2s; position: relative; }
+#input-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37,99,235,0.08); }
+#input-box.drag-over { border-color: var(--accent); background: var(--accent-light); }
+
+/* file preview row */
+#file-preview { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px 0; }
+#file-preview:empty { display: none; }
+.file-tag { display: flex; align-items: center; gap: 4px; padding: 3px 8px; background: var(--bg); border-radius: 6px; font-size: 12px; color: var(--text-2); }
+.file-tag button { background: none; border: none; color: var(--text-4); font-size: 14px; padding: 0 2px; line-height: 1; }
+.file-tag button:hover { color: var(--red); }
+
+/* textarea row */
+#input-row { display: flex; align-items: flex-end; padding: 8px 8px 8px 14px; gap: 6px; }
+#user-input { flex: 1; border: none; background: transparent; color: var(--text-1); font-size: 14px; line-height: 1.55; resize: none; min-height: 24px; max-height: 180px; outline: none; padding: 4px 0; }
+#user-input::placeholder { color: var(--text-4); }
+
+.input-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.input-icon-btn { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--text-4); border-radius: var(--r-sm); transition: all 0.15s; }
+.input-icon-btn:hover { background: var(--bg); color: var(--text-2); }
+.input-icon-btn svg { width: 18px; height: 18px; }
+#send-btn { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border: none; background: var(--text-1); color: var(--white); border-radius: var(--r-md); transition: all 0.15s; }
+#send-btn:hover { background: #333; }
+#send-btn:disabled { background: var(--border); color: var(--text-4); cursor: not-allowed; }
+#send-btn svg { width: 16px; height: 16px; }
+
+#input-hint { text-align: center; padding: 6px 0 0; font-size: 11px; color: var(--text-4); }
+#input-hint a { color: var(--text-3); }
+
+/* hidden file input */
+#file-input { display: none; }
+
+/* ═══════════════ Right Panel (Terminal) ═══════════════ */
+#panel { position: fixed; top: 0; right: 0; width: var(--panel-w); height: 100vh; background: #1a1a2e; transform: translateX(100%); transition: transform 0.35s var(--ease); z-index: 50; display: flex; flex-direction: column; box-shadow: -2px 0 12px rgba(0,0,0,0.1); }
+#panel.open { transform: translateX(0); }
+#panel-bar { display: flex; align-items: center; justify-content: space-between; padding: 0 16px; height: 44px; background: #12122a; border-bottom: 1px solid #2a2a4a; flex-shrink: 0; }
+#panel-bar h3 { font-size: 12px; font-weight: 600; color: #8888aa; font-family: var(--mono); letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px; }
+.term-dots { display: flex; gap: 5px; }
+.term-dot { width: 10px; height: 10px; border-radius: 50%; }
+.term-dot.r { background: #ff5f57; } .term-dot.y { background: #febc2e; } .term-dot.g { background: #28c840; }
+#panel-close { background: none; border: none; color: #666688; font-size: 18px; padding: 4px; }
+#panel-close:hover { color: #ccc; }
+#panel-body { flex: 1; overflow-y: auto; padding: 12px 16px; font-family: var(--mono); font-size: 13px; line-height: 1.55; color: #d1d5db; white-space: pre-wrap; word-break: break-all; }
+#panel-body::-webkit-scrollbar { width: 5px; } #panel-body::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+.term-line { margin: 1px 0; animation: termFade 0.12s ease; }
+@keyframes termFade { from{opacity:0} to{opacity:1} }
+.term-line.cmd { color: #4ade80; }
+.term-line.err { color: #f87171; }
+
+/* ═══════════════ Settings Modal ═══════════════ */
+#settings-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 200; display: none; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
+#settings-bg.open { display: flex; }
+#settings { background: var(--white); border-radius: var(--r-lg); width: 860px; max-width: 94vw; height: 600px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.15); overflow: hidden; animation: modalIn 0.2s var(--ease); }
+@keyframes modalIn { from{opacity:0;transform:translateY(8px) scale(0.98)} to{opacity:1;transform:translateY(0) scale(1)} }
+#settings-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#settings-head h2 { font-size: 16px; font-weight: 600; }
+#settings-x { background: none; border: none; color: var(--text-3); font-size: 20px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: var(--r-sm); }
+#settings-x:hover { background: var(--bg); color: var(--text-1); }
+#settings-main { display: flex; flex: 1; overflow: hidden; }
+
+/* left list */
+#stg-list { width: 170px; border-right: 1px solid var(--border); overflow-y: auto; flex-shrink: 0; padding: 8px 0; }
+.stg-item { display: flex; align-items: center; gap: 7px; padding: 8px 16px; font-size: 13px; color: var(--text-2); cursor: pointer; border-left: 3px solid transparent; transition: all 0.12s; }
+.stg-item:hover { background: var(--bg); color: var(--text-1); }
+.stg-item.active { background: var(--accent-light); color: var(--accent); border-left-color: var(--accent); font-weight: 500; }
+.stg-item .stg-icon { font-size: 12px; width: 18px; text-align: center; flex-shrink: 0; }
+.stg-add { color: var(--accent); font-weight: 500; }
+
+/* right editor */
+#stg-editor { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+#stg-editor-inner { flex: 1; overflow-y: auto; padding: 20px; }
+
+/* section titles */
+.stg-section { margin-bottom: 20px; }
+.stg-section h4 { font-size: 11px; font-weight: 700; color: var(--text-4); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px; }
+.stg-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.stg-row label { font-size: 12px; color: var(--text-2); width: 80px; flex-shrink: 0; font-weight: 500; }
+.stg-row input[type="text"], .stg-row select { flex: 1; height: 32px; padding: 0 10px; background: var(--bg); border: 1px solid var(--border); color: var(--text-1); border-radius: var(--r-sm); font-size: 12px; outline: none; }
+.stg-row input:focus, .stg-row select:focus { border-color: var(--accent); }
+.stg-toggle { display: flex; gap: 4px; flex: 1; }
+.stg-toggle button { padding: 5px 12px; font-size: 12px; border: 1px solid var(--border); background: var(--white); color: var(--text-2); border-radius: var(--r-sm); font-weight: 500; transition: all 0.12s; }
+.stg-toggle button.on { background: var(--accent); border-color: var(--accent); color: var(--white); }
+
+/* preset cards */
+.preset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.preset-card { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); cursor: pointer; transition: all 0.12s; text-align: center; }
+.preset-card:hover { border-color: var(--text-4); background: var(--bg); }
+.preset-card.active { border-color: var(--accent); background: var(--accent-light); }
+.preset-card .pc-name { font-size: 12px; font-weight: 600; color: var(--text-1); }
+.preset-card .pc-desc { font-size: 10px; color: var(--text-3); margin-top: 2px; }
+
+/* atom chips */
+.atom-group { margin-bottom: 10px; }
+.atom-group-title { font-size: 11px; color: var(--text-3); margin-bottom: 5px; font-weight: 500; }
+.atom-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.atom-chip { padding: 3px 9px; font-size: 11px; border: 1px solid var(--border); border-radius: 20px; cursor: pointer; color: var(--text-2); background: var(--white); transition: all 0.12s; font-family: var(--mono); }
+.atom-chip:hover { border-color: var(--text-4); }
+.atom-chip.on { background: var(--accent); border-color: var(--accent); color: var(--white); }
+
+/* live preview */
+#stg-preview-wrap { padding: 16px 20px; border-top: 1px solid var(--border); flex-shrink: 0; background: var(--bg); }
+#stg-preview-label { font-size: 11px; color: var(--text-4); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+#stg-preview-box { min-height: 60px; border-radius: var(--r-md); overflow: hidden; }
+#stg-preview-content { transition: all 0.2s; }
+
+/* footer */
+#stg-footer { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-top: 1px solid var(--border); flex-shrink: 0; }
+.stg-footer-l { display: flex; gap: 6px; }
+.stg-btn { padding: 7px 16px; font-size: 13px; font-weight: 500; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--white); color: var(--text-2); transition: all 0.12s; }
+.stg-btn:hover { background: var(--bg); color: var(--text-1); }
+.stg-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--white); }
+.stg-btn.primary:hover { background: var(--accent-hover); }
+
+/* ═══════════════ Animation ═══════════════ */
+.msg { animation: msgSlide 0.25s var(--ease); }
+@keyframes msgSlide { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+
+/* ═══════════════ Responsive ═══════════════ */
+@media(max-width:768px){
+  :root{--panel-w:100vw}
+  #main.panel-open{margin-right:0}
+  .msg-inner{padding:0 14px}
+  #input-area{padding:10px 12px 14px}
+  #api-config{display:none}
+  #settings{width:98vw;height:92vh}
+  .preset-grid{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+<div id="main">
+
+  <!-- Top Bar -->
+  <div id="topbar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      AgentChat
+    </div>
+    <div class="top-actions">
+      <button class="top-btn" id="btn-cfg" title="API 配置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+      </button>
+      <button class="top-btn" id="btn-stg" title="渲染器设置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>渲染器</span>
+      </button>
+      <button class="top-btn" id="btn-panel" title="终端面板">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        <span>终端</span>
+      </button>
+      <button class="top-btn" id="btn-clear" title="新对话">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- API Config -->
+  <div id="api-config" class="hidden">
+    <div class="cfg-group"><label>Endpoint</label><input class="cfg-input" id="cfg-url" value="/v1/chat/completions"></div>
+    <div class="cfg-group"><label>Model</label><input class="cfg-input" id="cfg-model" value="" placeholder="model name"></div>
+    <div class="cfg-group"><label>Stream</label><select class="cfg-select" id="cfg-stream"><option value="true" selected>Yes</option><option value="false">No</option></select></div>
+  </div>
+
+  <!-- Messages -->
+  <div id="messages">
+    <div id="welcome">
+      <h2>开始对话</h2>
+      <p>输入消息或上传文件开始。支持流式渲染与多类型内容展示。</p>
+    </div>
+  </div>
+
+  <!-- Input -->
+  <div id="input-area">
+    <div id="input-box">
+      <div id="file-preview"></div>
+      <div id="input-row">
+        <textarea id="user-input" rows="1" placeholder="输入消息…"></textarea>
+        <div class="input-actions">
+          <button class="input-icon-btn" id="btn-attach" title="上传文件">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <button id="send-btn" title="发送 (Enter)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div id="input-hint">Enter 发送 · Shift+Enter 换行 · 支持拖拽上传文件</div>
+  </div>
+
+  <input type="file" id="file-input" multiple>
+</div>
+
+<!-- Terminal Panel -->
+<div id="panel">
+  <div id="panel-bar">
+    <h3><span class="term-dots"><span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span></span> Terminal</h3>
+    <button id="panel-close">✕</button>
+  </div>
+  <div id="panel-body"></div>
+</div>
+</div>
+
+<!-- Settings Modal -->
+<div id="settings-bg">
+<div id="settings">
+  <div id="settings-head"><h2>渲染器配置</h2><button id="settings-x">✕</button></div>
+  <div id="settings-main">
+    <div id="stg-list"></div>
+    <div id="stg-editor">
+      <div id="stg-editor-inner">
+        <p style="color:var(--text-3);font-size:13px;padding:20px;">← 选择一个 content_type 开始配置</p>
+      </div>
+      <div id="stg-preview-wrap">
+        <div id="stg-preview-label">实时预览</div>
+        <div id="stg-preview-box"><div id="stg-preview-content"></div></div>
+      </div>
+    </div>
+  </div>
+  <div id="stg-footer">
+    <div class="stg-footer-l">
+      <button class="stg-btn" id="stg-export">导出配置</button>
+      <button class="stg-btn" id="stg-reset">重置默认</button>
+    </div>
+    <button class="stg-btn primary" id="stg-save">保存并关闭</button>
+  </div>
+</div>
+</div>
+
+<script src="renderer_config.js"></script>
+<script>
+(()=>{
+"use strict";
+
+/* ══════════ DOM ══════════ */
+const $ = id => document.getElementById(id);
+const D = {
+  main: $('main'), messages: $('messages'), welcome: $('welcome'),
+  input: $('user-input'), sendBtn: $('send-btn'), inputBox: $('input-box'),
+  fileInput: $('file-input'), filePreview: $('file-preview'),
+  panel: $('panel'), panelBody: $('panel-body'),
+  apiCfg: $('api-config'), cfgUrl: $('cfg-url'), cfgModel: $('cfg-model'), cfgStream: $('cfg-stream'),
+  stgBg: $('settings-bg'), stgList: $('stg-list'), stgEditorInner: $('stg-editor-inner'),
+  stgPreviewContent: $('stg-preview-content'),
+};
+
+/* ══════════ State ══════════ */
+let config = JSON.parse(JSON.stringify(window.RENDERER_CONFIG));
+let history = [];
+let attachedFiles = [];
+let isStreaming = false;
+let panelOpen = false;
+let cfgVisible = false;
+let editingType = null;
+
+/* ══════════ Config ══════════ */
+function loadConfig() { try { const s = localStorage.getItem('agentchat_cfg'); if(s) config = JSON.parse(s); } catch{} }
+function saveConfig() { try { localStorage.setItem('agentchat_cfg', JSON.stringify(config)); } catch{} }
+function getRC(type) { return config[type] || config._default || { component:'text', layout:'inline', atoms:[], style:{} }; }
+function computeStyle(rc) { return window.resolveStyle ? window.resolveStyle(rc) : (rc.style || {}); }
+loadConfig();
+
+/* ══════════ Helpers ══════════ */
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function scrollBottom() { requestAnimationFrame(()=>{ D.messages.scrollTop = D.messages.scrollHeight; }); }
+
+/* Mock text per component type for previews */
+const MOCK = {
+  text: "这是一段示例文本，展示当前样式配置的渲染效果。The quick brown fox jumps over the lazy dog.",
+  markdown: "## 标题示例\n\n这是一段 **Markdown** 正文，包含 `行内代码` 和链接。\n\n- 列表项一\n- 列表项二\n\n> 引用文字",
+  code: 'def hello():\n    """Say hello"""\n    print("Hello, World!")\n    return True\n\nhello()',
+  terminal: "$ pip install pandas\nCollecting pandas\n  Downloading pandas-2.2.0.tar.gz (4.4 MB)\nSuccessfully installed pandas-2.2.0",
+  json: '{\n  "status": "ok",\n  "data": {\n    "count": 42,\n    "items": ["alpha", "beta"]\n  }\n}',
+  html: "<p>HTML 内容预览</p>",
+  image: "",
+  table: '[{"Name":"Alice","Score":95},{"Name":"Bob","Score":87}]',
+  hidden: "(此类型不会显示)",
+};
+
+/* ══════════ Panel (Terminal) ══════════ */
+function togglePanel(force) {
+  panelOpen = force !== undefined ? force : !panelOpen;
+  D.panel.classList.toggle('open', panelOpen);
+  D.main.classList.toggle('panel-open', panelOpen);
+  $('btn-panel').classList.toggle('active', panelOpen);
+}
+function appendPanel(text, type) {
+  if (!panelOpen) togglePanel(true);
+  const el = document.createElement('div');
+  el.className = 'term-line' + (type==='bash'?' cmd':'') + (type==='stderr'?' err':'');
+  if (type === 'bash') el.innerHTML = '<span style="color:#4ade80">$ </span>' + esc(text);
+  else el.textContent = text;
+  D.panelBody.appendChild(el);
+  D.panelBody.scrollTop = D.panelBody.scrollHeight;
+}
+
+/* ══════════ File Upload ══════════ */
+function handleFiles(files) {
+  for (const f of files) {
+    if (attachedFiles.some(a => a.name === f.name && a.size === f.size)) continue;
+    attachedFiles.push(f);
+  }
+  renderFilePreviews();
+}
+function renderFilePreviews() {
+  D.filePreview.innerHTML = '';
+  attachedFiles.forEach((f, i) => {
+    const tag = document.createElement('span');
+    tag.className = 'file-tag';
+    tag.innerHTML = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>${esc(f.name)}<button data-i="${i}">✕</button>`;
+    tag.querySelector('button').onclick = () => { attachedFiles.splice(i,1); renderFilePreviews(); };
+    D.filePreview.appendChild(tag);
+  });
+}
+async function fileToBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(',')[1]);
+    r.onerror = () => rej(new Error('read error'));
+    r.readAsDataURL(file);
+  });
+}
+
+/* Drag & drop */
+D.inputBox.addEventListener('dragover', e => { e.preventDefault(); D.inputBox.classList.add('drag-over'); });
+D.inputBox.addEventListener('dragleave', () => D.inputBox.classList.remove('drag-over'));
+D.inputBox.addEventListener('drop', e => { e.preventDefault(); D.inputBox.classList.remove('drag-over'); if(e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); });
+$('btn-attach').addEventListener('click', () => D.fileInput.click());
+D.fileInput.addEventListener('change', () => { if(D.fileInput.files.length) handleFiles(D.fileInput.files); D.fileInput.value=''; });
+
+/* Paste files */
+D.input.addEventListener('paste', e => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  const files = [];
+  for (const it of items) { if (it.kind === 'file') files.push(it.getAsFile()); }
+  if (files.length) handleFiles(files);
+});
+
+/* ══════════ Messages ══════════ */
+function addUserMsg(text, files) {
+  if (D.welcome) D.welcome.style.display = 'none';
+  const row = document.createElement('div');
+  row.className = 'msg user';
+  let filesHtml = '';
+  if (files && files.length) {
+    filesHtml = '<div class="msg-files">' + files.map(f =>
+      `<span class="msg-file-chip"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>${esc(f.name)}</span>`
+    ).join('') + '</div>';
+  }
+  row.innerHTML = `<div class="msg-inner"><div class="msg-content">${filesHtml}${esc(text)}</div></div>`;
+  D.messages.appendChild(row);
+  scrollBottom();
+}
+
+function createAssistantMsg() {
+  if (D.welcome) D.welcome.style.display = 'none';
+  const row = document.createElement('div');
+  row.className = 'msg assistant';
+  row.innerHTML = `<div class="msg-inner"><div class="msg-avatar"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="white" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><div class="msg-content"></div></div>`;
+  D.messages.appendChild(row);
+  scrollBottom();
+  return row.querySelector('.msg-content');
+}
+
+/* ══════════ Content Block Rendering ══════════ */
+function getOrCreateBlock(container, type, blocks) {
+  if (blocks[type]) return blocks[type];
+  const rc = getRC(type);
+
+  // panel layout → redirect to terminal panel
+  if (rc.layout === 'panel') {
+    blocks[type] = { panel: true, rc, buf: '' };
+    return blocks[type];
+  }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'cblock';
+
+  // label row (for non-text types)
+  const showLabel = rc.icon || (rc.label && rc.label !== '正文' && rc.label !== '默认');
+  if (showLabel) {
+    const lbl = document.createElement('div');
+    lbl.className = 'cblock-label' + (rc.collapsible ? ' clickable' : '');
+    const arrowCls = rc.defaultCollapsed ? 'right' : 'down';
+    lbl.innerHTML = (rc.collapsible ? `<span class="arrow ${arrowCls}">▾</span>` : '') +
+      (rc.icon ? `<span>${rc.icon}</span>` : '') +
+      `<span>${rc.label || type}</span>`;
+    wrap.appendChild(lbl);
+
+    if (rc.collapsible) {
+      lbl.onclick = () => {
+        const body = lbl.nextElementSibling;
+        const arr = lbl.querySelector('.arrow');
+        const collapsed = !body.classList.contains('collapsed');
+        body.classList.toggle('collapsed', collapsed);
+        arr.className = 'arrow ' + (collapsed ? 'right' : 'down');
+      };
+    }
+  }
+
+  const body = document.createElement('div');
+  body.className = 'cblock-body' + (rc.component === 'markdown' ? ' md-body' : '') + (rc.defaultCollapsed ? ' collapsed' : '');
+
+  // apply computed style
+  const st = computeStyle(rc);
+  Object.assign(body.style, st);
+  if (rc.maxHeight) { body.style.maxHeight = rc.maxHeight; body.style.overflowY = 'auto'; }
+
+  wrap.appendChild(body);
+  container.appendChild(wrap);
+  blocks[type] = { el: body, rc, buf: '' };
+  return blocks[type];
+}
+
+function pushContent(bi, content, streaming) {
+  if (!content) return;
+  if (bi.panel) { appendPanel(content, bi.rc.panelId === 'terminal' ? (bi.rc.label === '命令' ? 'bash' : bi.rc.label === '错误输出' ? 'stderr' : 'stdout') : 'stdout'); return; }
+  bi.buf += content;
+  const el = bi.el, rc = bi.rc;
+  switch (rc.component) {
+    case 'markdown': renderMD(el, bi.buf, streaming); break;
+    case 'code': renderCode(el, bi.buf, streaming); break;
+    case 'terminal': renderTerm(el, bi.buf, streaming); break;
+    case 'json': renderJSON(el, bi.buf, streaming); break;
+    case 'html': renderHTML(el, bi.buf); break;
+    case 'image': renderImg(el, bi.buf); break;
+    case 'table': renderTable(el, bi.buf); break;
+    default: renderText(el, bi.buf, streaming);
+  }
+  scrollBottom();
+}
+
+function renderText(el, text, s) { el.textContent = text; el.classList.toggle('streaming-dot', s); }
+function renderMD(el, text, s) {
+  try { el.innerHTML = marked.parse(text, {breaks:true,gfm:true}); el.querySelectorAll('pre code').forEach(b=>hljs.highlightElement(b)); } catch{ el.textContent = text; }
+  if (s) { const last = el.lastElementChild || el; if(!last.querySelector('.sd')){const c=document.createElement('span');c.className='sd streaming-dot';last.appendChild(c);} }
+}
+function renderCode(el, text, s) {
+  let pre = el.querySelector('pre'); if(!pre){pre=document.createElement('pre');const c=document.createElement('code');pre.appendChild(c);el.innerHTML='';el.appendChild(pre);}
+  const code = pre.querySelector('code'); code.textContent = text; try{hljs.highlightElement(code);}catch{}
+  el.classList.toggle('streaming-dot', s);
+}
+function renderTerm(el, text, s) { el.style.fontFamily='var(--mono)'; el.style.whiteSpace='pre-wrap'; el.textContent=text; el.classList.toggle('streaming-dot',s); }
+function renderJSON(el, text, s) {
+  try { const o=JSON.parse(text); const p=JSON.stringify(o,null,2); let pre=el.querySelector('pre');if(!pre){pre=document.createElement('pre');const c=document.createElement('code');c.className='language-json';pre.appendChild(c);el.innerHTML='';el.appendChild(pre);} pre.querySelector('code').textContent=p; try{hljs.highlightElement(pre.querySelector('code'));}catch{} }
+  catch{ el.style.fontFamily='var(--mono)'; el.textContent=text; }
+  el.classList.toggle('streaming-dot',s);
+}
+function renderHTML(el, html) {
+  let f=el.querySelector('iframe');if(!f){f=document.createElement('iframe');f.sandbox='allow-scripts';f.style.cssText='width:100%;border:none;border-radius:8px;background:#fff;min-height:60px;';el.innerHTML='';el.appendChild(f);}
+  f.srcdoc=html; f.onload=()=>{try{f.style.height=f.contentDocument.body.scrollHeight+20+'px';}catch{}};
+}
+function renderImg(el, src) {
+  let img=el.querySelector('img');if(!img){img=document.createElement('img');img.style.cssText='max-width:100%;border-radius:12px;';el.innerHTML='';el.appendChild(img);}
+  img.src = src.startsWith('data:')||src.startsWith('http') ? src : 'data:image/png;base64,'+src.trim();
+}
+function renderTable(el, text) {
+  try{const d=JSON.parse(text);if(Array.isArray(d)&&d.length){const ks=Object.keys(d[0]);let h='<table style="border-collapse:collapse;width:100%;font-size:13px;"><tr>'+ks.map(k=>`<th style="border:1px solid var(--border);padding:7px 10px;background:var(--bg);font-weight:600;text-align:left;">${esc(k)}</th>`).join('')+'</tr>';d.forEach(r=>{h+='<tr>'+ks.map(k=>`<td style="border:1px solid var(--border);padding:7px 10px;">${esc(String(r[k]??''))}</td>`).join('')+'</tr>';});h+='</table>';el.innerHTML=h;return;}}catch{}
+  el.textContent=text;
+}
+
+function clearCursors(container) {
+  container.querySelectorAll('.streaming-dot').forEach(e=>e.classList.remove('streaming-dot'));
+  container.querySelectorAll('.sd').forEach(e=>e.remove());
+}
+
+/* ══════════ API Call ══════════ */
+async function send() {
+  const text = D.input.value.trim();
+  if ((!text && !attachedFiles.length) || isStreaming) return;
+  D.input.value = ''; D.input.style.height = 'auto';
+
+  const files = [...attachedFiles];
+  attachedFiles = [];
+  renderFilePreviews();
+  addUserMsg(text, files);
+
+  // Build message content
+  let content;
+  if (files.length) {
+    const parts = [];
+    for (const f of files) {
+      try {
+        const b64 = await fileToBase64(f);
+        const isImage = f.type.startsWith('image/');
+        if (isImage) parts.push({ type:'image_url', image_url:{ url:`data:${f.type};base64,${b64}` } });
+        else parts.push({ type:'text', text:`[File: ${f.name}]\n(base64 data: ${b64.substring(0,100)}...)` });
+      } catch {}
+    }
+    if (text) parts.push({ type:'text', text });
+    content = parts;
+  } else {
+    content = text;
+  }
+  history.push({ role:'user', content });
+
+  const url = D.cfgUrl.value.trim();
+  const model = D.cfgModel.value.trim();
+  const stream = D.cfgStream.value === 'true';
+  const body = { model, messages: history, stream };
+
+  isStreaming = true;
+  D.sendBtn.disabled = true;
+  const bubble = createAssistantMsg();
+  const blocks = {};
+
+  try {
+    if (stream) await doStream(url, body, bubble, blocks);
+    else await doNonStream(url, body, bubble, blocks);
+  } catch(err) {
+    if (err.name !== 'AbortError') {
+      const b = getOrCreateBlock(bubble,'error',blocks);
+      pushContent(b, '请求失败: '+err.message, false);
+    }
+  } finally {
+    isStreaming = false;
+    D.sendBtn.disabled = false;
+    clearCursors(bubble);
+    const full = Object.values(blocks).filter(b=>!b.panel).map(b=>b.buf).join('\n');
+    if (full) history.push({role:'assistant',content:full});
+  }
+}
+
+async function doStream(url, body, bubble, blocks) {
+  const resp = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let partial = '';
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    partial += dec.decode(value, {stream:true});
+    const lines = partial.split('\n');
+    partial = lines.pop();
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t || !t.startsWith('data: ')) continue;
+      const d = t.slice(6);
+      if (d === '[DONE]') return;
+      try {
+        const chunk = JSON.parse(d);
+        const ch = chunk.choices?.[0];
+        if (!ch) continue;
+        const delta = ch.delta || {};
+        const ct = delta.content_type || 'text';
+        const fr = ch.finish_reason;
+        if (fr === 'stop' || ct === 'stop') return;
+        if (delta.content) { const bi = getOrCreateBlock(bubble, ct, blocks); pushContent(bi, delta.content, true); }
+      } catch{}
+    }
+  }
+}
+
+async function doNonStream(url, body, bubble, blocks) {
+  const resp = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  const ch = data.choices?.[0];
+  if (!ch) return;
+  const content = ch.delta?.content || ch.message?.content || '';
+  const ct = ch.delta?.content_type || 'text';
+  if (ct === 'mixed-xml' && content.includes('<content')) {
+    const re = /<content\s+type="([^"]+)">([\s\S]*?)<\/content>/g;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      const t = m[2].replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'");
+      const bi = getOrCreateBlock(bubble, m[1], blocks);
+      pushContent(bi, t, false);
+    }
+  } else {
+    const bi = getOrCreateBlock(bubble, ct, blocks);
+    pushContent(bi, content, false);
+  }
+}
+
+/* ══════════ Settings Panel ══════════ */
+function openSettings() { D.stgBg.classList.add('open'); buildStgList(); }
+function closeSettings() { D.stgBg.classList.remove('open'); }
+
+function buildStgList() {
+  D.stgList.innerHTML = '';
+  const types = Object.keys(config).filter(k=>k!=='_default');
+  types.unshift('_default');
+  types.forEach(t => {
+    const rc = config[t];
+    const el = document.createElement('div');
+    el.className = 'stg-item' + (t===editingType?' active':'');
+    el.innerHTML = `<span class="stg-icon">${rc.icon||'·'}</span><span>${t==='_default'?'默认(default)':t}</span>`;
+    el.onclick = () => editType(t);
+    D.stgList.appendChild(el);
+  });
+  // add new
+  const add = document.createElement('div');
+  add.className = 'stg-item stg-add';
+  add.innerHTML = '<span class="stg-icon">+</span><span>添加新类型</span>';
+  add.onclick = () => {
+    const n = prompt('输入 content_type 名称:');
+    if (n && !config[n]) { config[n] = JSON.parse(JSON.stringify(config._default)); config[n].label = n; buildStgList(); editType(n); }
+  };
+  D.stgList.appendChild(add);
+}
+
+function editType(type) {
+  editingType = type;
+  buildStgList();
+  const rc = config[type];
+  const ed = D.stgEditorInner;
+
+  // Build the atom categories
+  const atomCats = [
+    { title: '字体大小', atoms: ['text-xs','text-sm','text-base','text-lg'] },
+    { title: '字重', atoms: ['font-light','font-normal','font-medium','font-semibold','font-bold'] },
+    { title: '字体族', atoms: ['font-sans','font-mono','font-serif'] },
+    { title: '文字颜色', atoms: ['color-primary','color-secondary','color-muted','color-accent','color-success','color-warning','color-danger','color-white','color-term-green','color-term-gray','color-term-red'] },
+    { title: '背景色', atoms: ['bg-none','bg-white','bg-gray-50','bg-gray-100','bg-gray-900','bg-blue-50','bg-green-50','bg-amber-50','bg-red-50','bg-purple-50'] },
+    { title: '内边距', atoms: ['p-0','p-2','p-3','p-4','p-5'] },
+    { title: '圆角', atoms: ['rounded-none','rounded-sm','rounded-md','rounded-lg'] },
+    { title: '边框', atoms: ['border','border-l-blue','border-l-green','border-l-amber','border-l-red','border-l-purple','border-l-gray'] },
+    { title: '行高', atoms: ['leading-tight','leading-normal','leading-relaxed'] },
+    { title: '其他', atoms: ['italic','not-italic','shadow-sm','shadow'] },
+  ];
+
+  const currentAtoms = new Set(rc.atoms || []);
+
+  ed.innerHTML = `
+    <!-- Basic -->
+    <div class="stg-section"><h4>基础配置</h4>
+      <div class="stg-row"><label>Label</label><input type="text" data-f="label" value="${esc(rc.label||'')}"></div>
+      <div class="stg-row"><label>Icon</label><input type="text" data-f="icon" value="${esc(rc.icon||'')}" style="width:60px;flex:none" placeholder="emoji"></div>
+      <div class="stg-row"><label>组件</label><select data-f="component">${['text','markdown','code','terminal','json','html','image','table','hidden'].map(c=>`<option ${rc.component===c?'selected':''}>${c}</option>`).join('')}</select></div>
+      <div class="stg-row"><label>布局</label>
+        <div class="stg-toggle">${['inline','panel'].map(l=>`<button class="${rc.layout===l?'on':''}" data-layout="${l}">${l==='inline'?'对话内':'侧面板'}</button>`).join('')}</div>
+      </div>
+      <div class="stg-row"><label>可折叠</label>
+        <div class="stg-toggle"><button class="${rc.collapsible?'on':''}" data-bool="collapsible" data-v="true">是</button><button class="${!rc.collapsible?'on':''}" data-bool="collapsible" data-v="false">否</button></div>
+      </div>
+      <div class="stg-row"><label>默认折叠</label>
+        <div class="stg-toggle"><button class="${rc.defaultCollapsed?'on':''}" data-bool="defaultCollapsed" data-v="true">是</button><button class="${!rc.defaultCollapsed?'on':''}" data-bool="defaultCollapsed" data-v="false">否</button></div>
+      </div>
+    </div>
+
+    <!-- Presets -->
+    <div class="stg-section"><h4>预设样式（点击一键应用）</h4>
+      <div class="preset-grid">${Object.entries(window.STYLE_PRESETS).map(([name,p])=>`<div class="preset-card${rc.preset===name?' active':''}" data-preset="${esc(name)}"><div class="pc-name">${esc(name)}</div><div class="pc-desc">${esc(p.desc)}</div></div>`).join('')}</div>
+    </div>
+
+    <!-- Atoms -->
+    <div class="stg-section"><h4>原子样式（点选组合）</h4>
+      ${atomCats.map(cat => `<div class="atom-group"><div class="atom-group-title">${cat.title}</div><div class="atom-chips">${cat.atoms.map(a=>`<span class="atom-chip${currentAtoms.has(a)?' on':''}" data-atom="${a}">${a}</span>`).join('')}</div></div>`).join('')}
+    </div>
+
+    <!-- Custom CSS overrides -->
+    <div class="stg-section"><h4>自定义 CSS 覆盖</h4>
+      <div class="stg-row"><label>Color</label><input type="text" data-cs="color" value="${rc.style?.color||''}" placeholder="e.g. #333"></div>
+      <div class="stg-row"><label>Background</label><input type="text" data-cs="backgroundColor" value="${rc.style?.backgroundColor||''}" placeholder="e.g. #f5f5f5"></div>
+      <div class="stg-row"><label>Font Size</label><input type="text" data-cs="fontSize" value="${rc.style?.fontSize||''}" placeholder="e.g. 14px"></div>
+      <div class="stg-row"><label>Padding</label><input type="text" data-cs="padding" value="${rc.style?.padding||''}" placeholder="e.g. 16px"></div>
+      <div class="stg-row"><label>Border</label><input type="text" data-cs="border" value="${rc.style?.border||''}" placeholder="e.g. 1px solid #eee"></div>
+      <div class="stg-row"><label>Border Left</label><input type="text" data-cs="borderLeft" value="${rc.style?.borderLeft||''}" placeholder="e.g. 3px solid blue"></div>
+      <div class="stg-row"><label>Radius</label><input type="text" data-cs="borderRadius" value="${rc.style?.borderRadius||''}" placeholder="e.g. 8px"></div>
+      <div class="stg-row"><label>Font</label><input type="text" data-cs="fontFamily" value="${rc.style?.fontFamily||''}" placeholder="font family"></div>
+    </div>
+  `;
+
+  // Bind events
+  ed.querySelectorAll('[data-f]').forEach(inp => {
+    inp.oninput = () => { config[type][inp.dataset.f] = inp.value; updatePreview(); };
+  });
+  ed.querySelectorAll('[data-layout]').forEach(btn => {
+    btn.onclick = () => {
+      config[type].layout = btn.dataset.layout;
+      btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('on'));
+      btn.classList.add('on');
+      updatePreview();
+    };
+  });
+  ed.querySelectorAll('[data-bool]').forEach(btn => {
+    btn.onclick = () => {
+      config[type][btn.dataset.bool] = btn.dataset.v === 'true';
+      btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('on'));
+      btn.classList.add('on');
+      updatePreview();
+    };
+  });
+  // Preset cards
+  ed.querySelectorAll('.preset-card').forEach(card => {
+    card.onclick = () => {
+      const name = card.dataset.preset;
+      const preset = window.STYLE_PRESETS[name];
+      if (!preset) return;
+      config[type].preset = name;
+      config[type].atoms = [...preset.atoms];
+      config[type].style = {};
+      editType(type); // re-render
+    };
+  });
+  // Atom chips
+  ed.querySelectorAll('.atom-chip').forEach(chip => {
+    chip.onclick = () => {
+      const a = chip.dataset.atom;
+      if (!config[type].atoms) config[type].atoms = [];
+      const atoms = config[type].atoms;
+
+      // For mutually exclusive groups, remove others in same category
+      const cat = atomCats.find(c => c.atoms.includes(a));
+      if (cat) {
+        cat.atoms.forEach(other => {
+          const idx = atoms.indexOf(other);
+          if (idx > -1) atoms.splice(idx, 1);
+        });
+        // Deselect siblings in UI
+        chip.parentElement.querySelectorAll('.atom-chip').forEach(c => c.classList.remove('on'));
+      }
+
+      // Toggle this atom
+      const idx = atoms.indexOf(a);
+      if (idx > -1) { atoms.splice(idx, 1); chip.classList.remove('on'); }
+      else { atoms.push(a); chip.classList.add('on'); }
+
+      config[type].preset = null; // clear preset binding
+      ed.querySelectorAll('.preset-card').forEach(c=>c.classList.remove('active'));
+      updatePreview();
+    };
+  });
+  // Custom CSS inputs
+  ed.querySelectorAll('[data-cs]').forEach(inp => {
+    inp.oninput = () => {
+      if (!config[type].style) config[type].style = {};
+      if (inp.value) config[type].style[inp.dataset.cs] = inp.value;
+      else delete config[type].style[inp.dataset.cs];
+      updatePreview();
+    };
+  });
+
+  updatePreview();
+}
+
+function updatePreview() {
+  if (!editingType) return;
+  const rc = config[editingType];
+  const st = computeStyle(rc);
+  const el = D.stgPreviewContent;
+
+  // Reset
+  el.removeAttribute('style');
+  el.innerHTML = '';
+  Object.assign(el.style, st);
+
+  // Render mock content based on component type
+  const comp = rc.component || 'text';
+  const mock = MOCK[comp] || MOCK.text;
+
+  if (comp === 'markdown') {
+    el.classList.add('md-body');
+    try { el.innerHTML = marked.parse(mock, {breaks:true,gfm:true}); el.querySelectorAll('pre code').forEach(b=>hljs.highlightElement(b)); } catch{ el.textContent = mock; }
+  } else if (comp === 'code') {
+    el.classList.remove('md-body');
+    el.innerHTML = `<pre style="margin:0;background:transparent;border:none;padding:0;"><code>${esc(mock)}</code></pre>`;
+    try { el.querySelectorAll('code').forEach(b=>hljs.highlightElement(b)); } catch{}
+  } else if (comp === 'terminal') {
+    el.classList.remove('md-body');
+    el.style.whiteSpace = 'pre-wrap';
+    el.style.fontFamily = "var(--mono)";
+    el.textContent = mock;
+  } else if (comp === 'json') {
+    el.classList.remove('md-body');
+    el.innerHTML = `<pre style="margin:0;background:transparent;border:none;padding:0;"><code class="language-json">${esc(mock)}</code></pre>`;
+    try { el.querySelectorAll('code').forEach(b=>hljs.highlightElement(b)); } catch{}
+  } else if (comp === 'table') {
+    el.classList.remove('md-body');
+    renderTable(el, mock);
+  } else {
+    el.classList.remove('md-body');
+    el.textContent = mock;
+  }
+}
+
+/* ══════════ Event Bindings ══════════ */
+D.input.addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();} });
+D.input.addEventListener('input', () => { D.input.style.height='auto'; D.input.style.height=Math.min(D.input.scrollHeight,180)+'px'; });
+D.sendBtn.addEventListener('click', send);
+
+$('btn-cfg').addEventListener('click', () => { cfgVisible=!cfgVisible; D.apiCfg.classList.toggle('hidden',!cfgVisible); $('btn-cfg').classList.toggle('active',cfgVisible); });
+$('btn-panel').addEventListener('click', ()=>togglePanel());
+$('panel-close').addEventListener('click', ()=>togglePanel(false));
+$('btn-stg').addEventListener('click', openSettings);
+$('settings-x').addEventListener('click', closeSettings);
+D.stgBg.addEventListener('click', e=>{if(e.target===D.stgBg)closeSettings();});
+$('stg-save').addEventListener('click', ()=>{saveConfig();closeSettings();});
+$('stg-reset').addEventListener('click', ()=>{ if(confirm('重置所有渲染器为默认配置？')){config=JSON.parse(JSON.stringify(window.RENDERER_CONFIG));localStorage.removeItem('agentchat_cfg');if(editingType)editType(editingType);} });
+$('stg-export').addEventListener('click', ()=>{
+  const js = `const RENDERER_CONFIG = ${JSON.stringify(config,null,2)};\nif(typeof module!=='undefined'&&module.exports)module.exports={RENDERER_CONFIG};else window.RENDERER_CONFIG=RENDERER_CONFIG;`;
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([js],{type:'application/javascript'}));a.download='renderer_config.js';a.click();
+});
+$('btn-clear').addEventListener('click', ()=>{
+  history=[];
+  D.messages.innerHTML='';
+  D.welcome.style.display='';
+  D.messages.appendChild(D.welcome);
+  D.panelBody.innerHTML='';
+});
+
+// ── Init ──
+D.input.focus();
+
+window.AgentChat = { send, config, getRC, togglePanel };
+
+})();
+</script>
+</body>
+</html>

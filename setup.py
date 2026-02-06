@@ -11,7 +11,10 @@ setup(
     author="Tian tian",
     author_email="tiantianit@chinamobile.com",
     license="CLA",
-    packages=find_packages(include=["alphora", "alphora.*"]),
+    packages=find_packages(include=[
+        "alphora", "alphora.*",
+        "alphora_community", "alphora_community.*"
+    ]),
     include_package_data=True,
     python_requires=">=3.9",
     install_requires=open("requirements.txt").read().splitlines()

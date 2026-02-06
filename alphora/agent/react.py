@@ -83,7 +83,7 @@ class ReActAgent(BaseAgent):
             llm: OpenAILike,
             tools: List[Union[Tool, Callable]],
             system_prompt: str = "",
-            max_iterations: int = 10,
+            max_iterations: int = 100,
             sandbox: Optional[Sandbox] = None,
             memory: Optional[MemoryManager] = None,
             **kwargs
@@ -129,110 +129,10 @@ class ReActAgent(BaseAgent):
 
         self._sandbox_tools = SandboxTools(sandbox)
 
-        @tool(name="execute_python", description="在安全沙箱中执行 Python 代码并返回结果。用于数据分析、计算、文件处理等任务。")
-        async def execute_python(code: str) -> str:
-            """
-            执行 Python 代码
-
-            Args:
-                code: 要执行的 Python 代码
-
-            Returns:
-                执行结果，包含 stdout 输出或错误信息
-            """
-            result = await self._sandbox_tools.run_python_code(code)
-            if result.get("success"):
-                output = result.get("output", "").strip()
-                return output if output else "(代码执行成功，无输出)"
-            else:
-                error = result.get("error", "未知错误")
-                return f"执行错误: {error}"
-
-        # 创建文件保存工具
-        @tool(name="save_file", description="在沙箱中保存文件")
-        async def save_file(filename: str, content: str) -> str:
-            """
-            保存文件到沙箱
-
-            Args:
-                filename: 文件名
-                content: 文件内容
-
-            Returns:
-                操作结果
-            """
-            result = await self._sandbox_tools.save_file(filename, content)
-            if result.get("success"):
-                return f"文件 '{filename}' 保存成功"
-            else:
-                return f"保存失败: {result.get('error', '未知错误')}"
-
-        # 创建文件读取工具
-        @tool(name="read_file", description="从沙箱中读取文件内容")
-        async def read_file(filename: str) -> str:
-            """
-            读取沙箱中的文件
-
-            Args:
-                filename: 文件名
-
-            Returns:
-                文件内容或错误信息
-            """
-            result = await self._sandbox_tools.read_file(filename)
-            if result.get("success"):
-                return result.get("content", "")
-            else:
-                return f"读取失败: {result.get('error', '未知错误')}"
-
-        # 创建文件列表工具
-        @tool(name="list_files", description="列出沙箱中的文件")
-        async def list_files(path: str = ".") -> str:
-            """
-            列出沙箱目录中的文件
-
-            Args:
-                path: 目录路径，默认为当前目录
-
-            Returns:
-                文件列表
-            """
-            result = await self._sandbox_tools.list_files(path)
-            if result.get("success"):
-                files = result.get("files", [])
-                if files:
-                    return "\n".join(files)
-                else:
-                    return "(目录为空)"
-            else:
-                return f"列出失败: {result.get('error', '未知错误')}"
-
-        # 创建包安装工具
-        @tool(name="install_package", description="在沙箱中安装 Python 包")
-        async def install_package(package_name: str) -> str:
-            """
-            安装 Python 包
-
-            Args:
-                package_name: 包名，如 'pandas' 或 'numpy==1.21.0'
-
-            Returns:
-                安装结果
-            """
-            result = await self._sandbox_tools.install_pip_package(package_name)
-            if result.get("success"):
-                return f"包 '{package_name}' 安装成功"
-            else:
-                return f"安装失败: {result.get('error', '未知错误')}"
-
-        # 注册沙箱工具
-        self._registry.register(execute_python)
-        self._registry.register(save_file)
-        self._registry.register(read_file)
-        self._registry.register(list_files)
-        self._registry.register(install_package)
-
-        logger.info(f"已注册 5 个沙箱工具: execute_python, save_file, read_file, list_files, install_package")
+        self._registry.register(self._sandbox_tools.save_file)
+        self._registry.register(self._sandbox_tools.list_files)
+        self._registry.register(self._sandbox_tools.run_shell_command)
+        # self._registry.register(self._sandbox_tools.read_file)
 
     async def run(
             self,
@@ -265,16 +165,19 @@ class ReActAgent(BaseAgent):
                 history=history,
                 tools=tools_schema,
                 is_stream=True,
+                runtime_system_prompt='如果你认为用户的任务已经完成，请直接输出 TASK_FINISHED'
             )
 
             # 记录助手响应
-
             self.memory.add_assistant(content=response)
 
             # 检查是否有工具调用
             if not response.has_tool_calls:
-                # 没有工具调用，返回文本响应
-                return response.content
+                if "TASK_FINISHED" in response.content:
+                    return ""
+                else:
+                    await self.stream.astream_message(content=response.content)
+                    self.memory.add_assistant(content=response.content)
 
             # 执行工具调用
             tool_results = await self._executor.execute(response.tool_calls)
@@ -396,5 +299,28 @@ class ReActStep:
         self.is_final = is_final
 
     def __repr__(self) -> str:
-        return f"ReActStep(iteration={self.iteration}, action='{self.action}', is_final={self.is_final})"
+
+        base_info = f"ReActStep(iteration={self.iteration}, action='{self.action}', is_final={self.is_final})"
+
+        extra_parts = []
+
+        if self.tool_calls:
+            tool_names = [call.get("name", str(call)) for call in self.tool_calls]
+            extra_parts.append(f"工具调用({len(tool_names)})={tool_names}")
+
+        if self.tool_results:
+            result_status = [f"{res.tool_name}[{res.status}]" for res in self.tool_results]
+            extra_parts.append(f"工具结果({len(result_status)})={result_status}")
+
+        content_preview = self.content[:50].replace("\n", " ")
+        if len(self.content) > 50:
+            content_preview += "..."
+        extra_parts.append(f"内容预览='{content_preview}'")
+
+        if extra_parts:
+            return f"{base_info} [{', '.join(extra_parts)}]"
+        return base_info
+
+    # def __repr__(self) -> str:
+    #     return f"ReActStep(iteration={self.iteration}, action='{self.action}', is_final={self.is_final})"
 

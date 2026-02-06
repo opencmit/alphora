@@ -836,6 +836,13 @@ class Sandbox:
             execution_count=self._execution_count,
         )
 
+    def to_host_path(self, path: str) -> Path:
+        """
+        2026-02-06 update
+        转换至宿主机的绝对路径
+        """
+        return self._workspace_path / path.lstrip("/")
+
     # Context Manager
     async def __aenter__(self: T) -> T:
         await self.start()
