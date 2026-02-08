@@ -38,6 +38,7 @@ from alphora.models.llms.types import ToolCall
 from alphora.memory.history_payload import HistoryPayload, is_valid_history_payload
 
 from alphora.debugger import tracer
+from alphora.hooks import HookEvent, HookContext, HookManager, build_manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -98,6 +99,12 @@ class BasePrompt:
                  callback: Optional[DataStreamer] = None,
                  content_type: Optional[str] = None,
                  agent_id: str | None = None,
+                 hooks: Optional[Union[HookManager, Dict[Any, Any]]] = None,
+                 before_build_messages: Optional[Callable] = None,
+                 after_build_messages: Optional[Callable] = None,
+                 before_llm: Optional[Callable] = None,
+                 after_llm: Optional[Callable] = None,
+                 on_stream_chunk: Optional[Callable] = None,
                  **kwargs):
 
         """
@@ -126,6 +133,21 @@ class BasePrompt:
         self.verbose: bool = verbose
         self.content_type = content_type or 'char'
         self.context = kwargs
+        self._hooks = build_manager(
+            hooks,
+            short_map={
+                "before_build_messages": HookEvent.PROMPTER_BEFORE_BUILD_MESSAGES,
+                "after_build_messages": HookEvent.PROMPTER_AFTER_BUILD_MESSAGES,
+                "before_llm": HookEvent.LLM_BEFORE_CALL,
+                "after_llm": HookEvent.LLM_AFTER_CALL,
+                "on_stream_chunk": HookEvent.LLM_ON_STREAM_CHUNK,
+            },
+            before_build_messages=before_build_messages,
+            after_build_messages=after_build_messages,
+            before_llm=before_llm,
+            after_llm=after_llm,
+            on_stream_chunk=on_stream_chunk,
+        )
 
         self._resolved_prompt = None
         self.parser = []
@@ -286,6 +308,22 @@ class BasePrompt:
             TypeError: If the provided `history` object is not a valid `HistoryPayload`.
         """
 
+        before_ctx = HookContext(
+            event=HookEvent.PROMPTER_BEFORE_BUILD_MESSAGES,
+            component="prompter",
+            data={
+                "query": query,
+                "force_json": force_json,
+                "runtime_system_prompt": runtime_system_prompt,
+                "history": history,
+            },
+        )
+        before_ctx = self._hooks.emit_sync(HookEvent.PROMPTER_BEFORE_BUILD_MESSAGES, before_ctx)
+        query = before_ctx.data.get("query", query)
+        force_json = before_ctx.data.get("force_json", force_json)
+        runtime_system_prompt = before_ctx.data.get("runtime_system_prompt", runtime_system_prompt)
+        history = before_ctx.data.get("history", history)
+
         messages = []
 
         # 1. Force JSON 指令
@@ -331,7 +369,16 @@ class BasePrompt:
             user_content = self._render_user_content(query)
             messages.append({"role": "user", "content": user_content})
 
-        return messages
+        after_ctx = HookContext(
+            event=HookEvent.PROMPTER_AFTER_BUILD_MESSAGES,
+            component="prompter",
+            data={
+                "query": query,
+                "messages": messages,
+            },
+        )
+        after_ctx = self._hooks.emit_sync(HookEvent.PROMPTER_AFTER_BUILD_MESSAGES, after_ctx)
+        return after_ctx.data.get("messages", messages)
 
     @staticmethod
     def _get_base_path():
@@ -495,12 +542,36 @@ class BasePrompt:
         )
 
         msg_payload = messages if not multimodal_message else multimodal_message
+        self._hooks.emit_sync(
+            HookEvent.LLM_BEFORE_CALL,
+            HookContext(
+                event=HookEvent.LLM_BEFORE_CALL,
+                component="llm",
+                data={
+                    "messages": msg_payload,
+                    "tools": tools,
+                    "is_stream": is_stream,
+                    "force_json": force_json,
+                    "long_response": long_response,
+                },
+            ),
+        )
 
         # 2. 工具调用 (非流式优先)
         if tools and not is_stream:
-            return self.llm.get_non_stream_response(
+            response = self.llm.get_non_stream_response(
                 message=msg_payload, tools=tools, prompt_id=self.prompt_id
             )
+            after_ctx = HookContext(
+                event=HookEvent.LLM_AFTER_CALL,
+                component="llm",
+                data={
+                    "response": response,
+                    "messages": msg_payload,
+                },
+            )
+            after_ctx = self._hooks.emit_sync(HookEvent.LLM_AFTER_CALL, after_ctx)
+            return after_ctx.data.get("response", response)
 
         # 3. 流式调用
         if is_stream:
@@ -542,6 +613,14 @@ class BasePrompt:
                 reasoning_content = ''
 
                 for ck in generator:
+                    chunk_ctx = HookContext(
+                        event=HookEvent.LLM_ON_STREAM_CHUNK,
+                        component="llm",
+                        data={"chunk": ck},
+                    )
+                    chunk_ctx = self._hooks.emit_sync(HookEvent.LLM_ON_STREAM_CHUNK, chunk_ctx)
+                    ck = chunk_ctx.data.get("chunk", ck)
+
                     content = ck.content
                     ctype = ck.content_type
 
@@ -567,7 +646,17 @@ class BasePrompt:
                 collected_tools = getattr(generator, 'collected_tool_calls', None)
 
                 if tools:
-                    return ToolCall(tool_calls=collected_tools, content=output_str)
+                    response = ToolCall(tool_calls=collected_tools, content=output_str)
+                    after_ctx = HookContext(
+                        event=HookEvent.LLM_AFTER_CALL,
+                        component="llm",
+                        data={
+                            "response": response,
+                            "messages": msg_payload,
+                        },
+                    )
+                    after_ctx = self._hooks.emit_sync(HookEvent.LLM_AFTER_CALL, after_ctx)
+                    return after_ctx.data.get("response", response)
 
                 # if collected_tools:
                 #     return ToolCall(tool_calls=collected_tools, content=output_str)
@@ -578,12 +667,22 @@ class BasePrompt:
                     except Exception:
                         pass
 
-                return PrompterOutput(
+                response = PrompterOutput(
                     content=output_str,
                     reasoning=reasoning_content,
                     finish_reason=getattr(generator, 'finish_reason', ''),
                     continuation_count=getattr(generator, 'continuation_count', 0)
                 )
+                after_ctx = HookContext(
+                    event=HookEvent.LLM_AFTER_CALL,
+                    component="llm",
+                    data={
+                        "response": response,
+                        "messages": msg_payload,
+                    },
+                )
+                after_ctx = self._hooks.emit_sync(HookEvent.LLM_AFTER_CALL, after_ctx)
+                return after_ctx.data.get("response", response)
 
             except Exception as e:
                 raise RuntimeError(f"流式响应错误: {e}")
@@ -592,7 +691,17 @@ class BasePrompt:
             # 4. 非流式
             try:
                 resp = self.llm.invoke(message=msg_payload)
-                return PrompterOutput(content=resp, reasoning="", finish_reason="")
+                response = PrompterOutput(content=resp, reasoning="", finish_reason="")
+                after_ctx = HookContext(
+                    event=HookEvent.LLM_AFTER_CALL,
+                    component="llm",
+                    data={
+                        "response": response,
+                        "messages": msg_payload,
+                    },
+                )
+                after_ctx = self._hooks.emit_sync(HookEvent.LLM_AFTER_CALL, after_ctx)
+                return after_ctx.data.get("response", response)
             except Exception as e:
                 raise RuntimeError(f"非流式响应错误: {e}")
 
@@ -654,13 +763,36 @@ class BasePrompt:
             history=history
         )
         msg_payload = messages if not multimodal_message else multimodal_message
+        await self._hooks.emit(
+            HookEvent.LLM_BEFORE_CALL,
+            HookContext(
+                event=HookEvent.LLM_BEFORE_CALL,
+                component="llm",
+                data={
+                    "messages": msg_payload,
+                    "tools": tools,
+                    "is_stream": is_stream,
+                    "force_json": force_json,
+                    "long_response": long_response,
+                },
+            ),
+        )
 
         # 2. 工具调用 (非流式优先)
         if tools and not is_stream:
             tool_resp = await self.llm.aget_non_stream_response(
                 message=msg_payload, system_prompt=None, tools=tools, prompt_id=self.prompt_id
             )
-            return tool_resp
+            after_ctx = HookContext(
+                event=HookEvent.LLM_AFTER_CALL,
+                component="llm",
+                data={
+                    "response": tool_resp,
+                    "messages": msg_payload,
+                },
+            )
+            after_ctx = await self._hooks.emit(HookEvent.LLM_AFTER_CALL, after_ctx)
+            return after_ctx.data.get("response", tool_resp)
 
         # 3. 流式调用
         if is_stream:
@@ -701,6 +833,14 @@ class BasePrompt:
                 reasoning_content = ''
 
                 async for ck in generator:
+                    chunk_ctx = HookContext(
+                        event=HookEvent.LLM_ON_STREAM_CHUNK,
+                        component="llm",
+                        data={"chunk": ck},
+                    )
+                    chunk_ctx = await self._hooks.emit(HookEvent.LLM_ON_STREAM_CHUNK, chunk_ctx)
+                    ck = chunk_ctx.data.get("chunk", ck)
+
                     content = ck.content
                     ctype = ck.content_type
 
@@ -734,7 +874,17 @@ class BasePrompt:
                 collected_tools = getattr(generator, 'collected_tool_calls', None)
 
                 if tools:
-                    return ToolCall(tool_calls=collected_tools, content=output_str)
+                    response = ToolCall(tool_calls=collected_tools, content=output_str)
+                    after_ctx = HookContext(
+                        event=HookEvent.LLM_AFTER_CALL,
+                        component="llm",
+                        data={
+                            "response": response,
+                            "messages": msg_payload,
+                        },
+                    )
+                    after_ctx = await self._hooks.emit(HookEvent.LLM_AFTER_CALL, after_ctx)
+                    return after_ctx.data.get("response", response)
 
                 # 20260123 注释
                 # if collected_tools:
@@ -746,12 +896,22 @@ class BasePrompt:
                     except:
                         pass
 
-                return PrompterOutput(
+                response = PrompterOutput(
                     content=output_str,
                     reasoning=reasoning_content,
                     finish_reason=getattr(generator, 'finish_reason', ''),
                     continuation_count=getattr(generator, 'continuation_count', 0)
                 )
+                after_ctx = HookContext(
+                    event=HookEvent.LLM_AFTER_CALL,
+                    component="llm",
+                    data={
+                        "response": response,
+                        "messages": msg_payload,
+                    },
+                )
+                after_ctx = await self._hooks.emit(HookEvent.LLM_AFTER_CALL, after_ctx)
+                return after_ctx.data.get("response", response)
 
             except Exception as e:
                 if self.callback:
@@ -762,7 +922,17 @@ class BasePrompt:
             # 4. 非流式
             try:
                 resp = await self.llm.ainvoke(message=msg_payload)
-                return PrompterOutput(content=resp, reasoning="", finish_reason="")
+                response = PrompterOutput(content=resp, reasoning="", finish_reason="")
+                after_ctx = HookContext(
+                    event=HookEvent.LLM_AFTER_CALL,
+                    component="llm",
+                    data={
+                        "response": response,
+                        "messages": msg_payload,
+                    },
+                )
+                after_ctx = await self._hooks.emit(HookEvent.LLM_AFTER_CALL, after_ctx)
+                return after_ctx.data.get("response", response)
             except Exception as e:
                 raise RuntimeError(f"非流式响应错误: {e}")
 

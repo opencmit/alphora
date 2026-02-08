@@ -50,6 +50,7 @@ from alphora.memory.processors import (
     keep_tagged,
     keep_important_and_last,
 )
+from alphora.hooks import HookEvent, HookContext, HookManager, build_manager
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,11 @@ class MemoryManager:
             max_messages: Optional[int] = None,
             enable_undo: bool = True,
             undo_limit: int = 50,
+            hooks: Optional[Union[HookManager, Dict[Any, Any]]] = None,
+            before_add: Optional[Callable] = None,
+            after_add: Optional[Callable] = None,
+            before_build_history: Optional[Callable] = None,
+            after_build_history: Optional[Callable] = None,
     ):
         """
         Args:
@@ -149,6 +155,19 @@ class MemoryManager:
         self._max_messages = max_messages
         self._enable_undo = enable_undo
         self._undo_limit = undo_limit
+        self._hooks = build_manager(
+            hooks,
+            short_map={
+                "before_add": HookEvent.MEMORY_BEFORE_ADD,
+                "after_add": HookEvent.MEMORY_AFTER_ADD,
+                "before_build_history": HookEvent.MEMORY_BEFORE_BUILD_HISTORY,
+                "after_build_history": HookEvent.MEMORY_AFTER_BUILD_HISTORY,
+            },
+            before_add=before_add,
+            after_add=after_add,
+            before_build_history=before_build_history,
+            after_build_history=after_build_history,
+        )
 
         # 初始化存储
         self._storage = self._create_storage(storage_type, storage_path)
@@ -518,6 +537,17 @@ class MemoryManager:
 
     def _add_message(self, message: Message, session_id: str) -> Message:
         """内部添加消息方法"""
+        before_ctx = HookContext(
+            event=HookEvent.MEMORY_BEFORE_ADD,
+            component="memory",
+            data={
+                "message": message,
+                "session_id": session_id,
+            },
+        )
+        before_ctx = self._hooks.emit_sync(HookEvent.MEMORY_BEFORE_ADD, before_ctx)
+        message = before_ctx.data.get("message", message)
+
         self._ensure_session(session_id)
         self._save_undo_state(session_id)
 
@@ -525,6 +555,15 @@ class MemoryManager:
         self._check_auto_compress(session_id)
         self._save_session(session_id)
 
+        after_ctx = HookContext(
+            event=HookEvent.MEMORY_AFTER_ADD,
+            component="memory",
+            data={
+                "message": message,
+                "session_id": session_id,
+            },
+        )
+        self._hooks.emit_sync(HookEvent.MEMORY_AFTER_ADD, after_ctx)
         return message
 
     # 获取消息 API
@@ -704,6 +743,32 @@ class MemoryManager:
             )
         """
         messages = self._cache.get(session_id, [])
+        before_ctx = HookContext(
+            event=HookEvent.MEMORY_BEFORE_BUILD_HISTORY,
+            component="memory",
+            data={
+                "session_id": session_id,
+                "messages": messages,
+                "max_rounds": max_rounds,
+                "max_messages": max_messages,
+                "include_system": include_system,
+                "validate_tool_chain": validate_tool_chain,
+                "processor": processor,
+                "exclude_roles": exclude_roles,
+                "keep_pinned": keep_pinned,
+                "keep_tagged": keep_tagged,
+            },
+        )
+        before_ctx = self._hooks.emit_sync(HookEvent.MEMORY_BEFORE_BUILD_HISTORY, before_ctx)
+        messages = before_ctx.data.get("messages", messages)
+        max_rounds = before_ctx.data.get("max_rounds", max_rounds)
+        max_messages = before_ctx.data.get("max_messages", max_messages)
+        include_system = before_ctx.data.get("include_system", include_system)
+        validate_tool_chain = before_ctx.data.get("validate_tool_chain", validate_tool_chain)
+        processor = before_ctx.data.get("processor", processor)
+        exclude_roles = before_ctx.data.get("exclude_roles", exclude_roles)
+        keep_pinned = before_ctx.data.get("keep_pinned", keep_pinned)
+        keep_tagged = before_ctx.data.get("keep_tagged", keep_tagged)
 
         # 过滤 system 消息 (如果不需要)
         if not include_system:
@@ -755,12 +820,22 @@ class MemoryManager:
         round_count = sum(1 for m in messages if m.role == "user")
 
         # 创建 HistoryPayload
-        return HistoryPayload.create(
+        history_payload = HistoryPayload.create(
             messages=openai_messages,
             session_id=session_id,
             round_count=round_count,
             validate_tool_chain=validate_tool_chain
         )
+        after_ctx = HookContext(
+            event=HookEvent.MEMORY_AFTER_BUILD_HISTORY,
+            component="memory",
+            data={
+                "session_id": session_id,
+                "history": history_payload,
+            },
+        )
+        after_ctx = self._hooks.emit_sync(HookEvent.MEMORY_AFTER_BUILD_HISTORY, after_ctx)
+        return after_ctx.data.get("history", history_payload)
 
     def build_history_unsafe(
             self,

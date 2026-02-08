@@ -8,7 +8,7 @@ import asyncio
 import logging
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Union, Type, TypeVar, TYPE_CHECKING
+from typing import Optional, List, Dict, Any, Union, Type, TypeVar, TYPE_CHECKING, Callable
 from contextlib import asynccontextmanager
 
 from alphora.sandbox.types import (
@@ -32,6 +32,7 @@ from alphora.sandbox.exceptions import (
 )
 
 from alphora.sandbox.storage.base import StorageBackend
+from alphora.hooks import HookEvent, HookContext, HookManager, build_manager
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,15 @@ class Sandbox:
             security_policy: Optional[SecurityPolicy] = None,
             auto_cleanup: bool = False,
             storage: Optional[StorageBackend] = None,
+            hooks: Optional[Union[HookManager, Dict[Any, Any]]] = None,
+            before_start: Optional[Callable] = None,
+            after_start: Optional[Callable] = None,
+            before_stop: Optional[Callable] = None,
+            after_stop: Optional[Callable] = None,
+            before_execute: Optional[Callable] = None,
+            after_execute: Optional[Callable] = None,
+            before_write_file: Optional[Callable] = None,
+            after_write_file: Optional[Callable] = None,
             **kwargs
     ):
         """
@@ -146,6 +156,27 @@ class Sandbox:
 
         # Storage backend support
         self._storage = storage
+        self._hooks = build_manager(
+            hooks,
+            short_map={
+                "before_start": HookEvent.SANDBOX_BEFORE_START,
+                "after_start": HookEvent.SANDBOX_AFTER_START,
+                "before_stop": HookEvent.SANDBOX_BEFORE_STOP,
+                "after_stop": HookEvent.SANDBOX_AFTER_STOP,
+                "before_execute": HookEvent.SANDBOX_BEFORE_EXECUTE,
+                "after_execute": HookEvent.SANDBOX_AFTER_EXECUTE,
+                "before_write_file": HookEvent.SANDBOX_BEFORE_WRITE_FILE,
+                "after_write_file": HookEvent.SANDBOX_AFTER_WRITE_FILE,
+            },
+            before_start=before_start,
+            after_start=after_start,
+            before_stop=before_stop,
+            after_stop=after_stop,
+            before_execute=before_execute,
+            after_execute=after_execute,
+            before_write_file=before_write_file,
+            after_write_file=after_write_file,
+        )
 
         # Determine workspace path
         if storage is not None:
@@ -405,6 +436,17 @@ class Sandbox:
             logger.info(f"Starting sandbox {self._sandbox_id}")
 
             try:
+                await self._hooks.emit(
+                    HookEvent.SANDBOX_BEFORE_START,
+                    HookContext(
+                        event=HookEvent.SANDBOX_BEFORE_START,
+                        component="sandbox",
+                        data={
+                            "sandbox_id": self._sandbox_id,
+                            "backend_type": self._backend_type,
+                        },
+                    ),
+                )
                 # Create workspace directory
                 self._workspace_path.mkdir(parents=True, exist_ok=True)
 
@@ -422,6 +464,18 @@ class Sandbox:
                 self._status = SandboxStatus.RUNNING
                 self._started_at = datetime.now()
                 logger.info(f"Sandbox {self._sandbox_id} started")
+                await self._hooks.emit(
+                    HookEvent.SANDBOX_AFTER_START,
+                    HookContext(
+                        event=HookEvent.SANDBOX_AFTER_START,
+                        component="sandbox",
+                        data={
+                            "sandbox_id": self._sandbox_id,
+                            "backend_type": self._backend_type,
+                            "status": self._status,
+                        },
+                    ),
+                )
                 return self
 
             except Exception as e:
@@ -448,6 +502,17 @@ class Sandbox:
             logger.info(f"Stopping sandbox {self._sandbox_id}")
 
             try:
+                await self._hooks.emit(
+                    HookEvent.SANDBOX_BEFORE_STOP,
+                    HookContext(
+                        event=HookEvent.SANDBOX_BEFORE_STOP,
+                        component="sandbox",
+                        data={
+                            "sandbox_id": self._sandbox_id,
+                            "backend_type": self._backend_type,
+                        },
+                    ),
+                )
                 if self._backend:
                     await self._backend.stop()
 
@@ -458,6 +523,18 @@ class Sandbox:
                     await self._cleanup()
 
                 logger.info(f"Sandbox {self._sandbox_id} stopped")
+                await self._hooks.emit(
+                    HookEvent.SANDBOX_AFTER_STOP,
+                    HookContext(
+                        event=HookEvent.SANDBOX_AFTER_STOP,
+                        component="sandbox",
+                        data={
+                            "sandbox_id": self._sandbox_id,
+                            "backend_type": self._backend_type,
+                            "status": self._status,
+                        },
+                    ),
+                )
 
             except Exception as e:
                 self._status = SandboxStatus.ERROR
@@ -571,8 +648,36 @@ class Sandbox:
         """
         self._ensure_running()
         timeout = timeout or self._resource_limits.timeout_seconds
+        before_ctx = HookContext(
+            event=HookEvent.SANDBOX_BEFORE_EXECUTE,
+            component="sandbox",
+            data={
+                "operation": "execute_code",
+                "code": code,
+                "timeout": timeout,
+                "kwargs": kwargs,
+                "sandbox_id": self._sandbox_id,
+            },
+        )
+        before_ctx = await self._hooks.emit(HookEvent.SANDBOX_BEFORE_EXECUTE, before_ctx)
+        code = before_ctx.data.get("code", code)
+        timeout = before_ctx.data.get("timeout", timeout)
         result = await self._backend.execute_code(code, timeout=timeout, **kwargs)
         self._execution_count += 1
+        await self._hooks.emit(
+            HookEvent.SANDBOX_AFTER_EXECUTE,
+            HookContext(
+                event=HookEvent.SANDBOX_AFTER_EXECUTE,
+                component="sandbox",
+                data={
+                    "operation": "execute_code",
+                    "code": code,
+                    "timeout": timeout,
+                    "result": result,
+                    "sandbox_id": self._sandbox_id,
+                },
+            ),
+        )
         return result
 
     async def execute_file(
@@ -596,8 +701,39 @@ class Sandbox:
         """
         self._ensure_running()
         timeout = timeout or self._resource_limits.timeout_seconds
+        before_ctx = HookContext(
+            event=HookEvent.SANDBOX_BEFORE_EXECUTE,
+            component="sandbox",
+            data={
+                "operation": "execute_file",
+                "file_path": file_path,
+                "args": args,
+                "timeout": timeout,
+                "kwargs": kwargs,
+                "sandbox_id": self._sandbox_id,
+            },
+        )
+        before_ctx = await self._hooks.emit(HookEvent.SANDBOX_BEFORE_EXECUTE, before_ctx)
+        file_path = before_ctx.data.get("file_path", file_path)
+        args = before_ctx.data.get("args", args)
+        timeout = before_ctx.data.get("timeout", timeout)
         result = await self._backend.execute_file(file_path, args=args, timeout=timeout, **kwargs)
         self._execution_count += 1
+        await self._hooks.emit(
+            HookEvent.SANDBOX_AFTER_EXECUTE,
+            HookContext(
+                event=HookEvent.SANDBOX_AFTER_EXECUTE,
+                component="sandbox",
+                data={
+                    "operation": "execute_file",
+                    "file_path": file_path,
+                    "args": args,
+                    "timeout": timeout,
+                    "result": result,
+                    "sandbox_id": self._sandbox_id,
+                },
+            ),
+        )
         return result
 
     async def execute_shell(
@@ -619,8 +755,36 @@ class Sandbox:
         """
         self._ensure_running()
         timeout = timeout or self._resource_limits.timeout_seconds
+        before_ctx = HookContext(
+            event=HookEvent.SANDBOX_BEFORE_EXECUTE,
+            component="sandbox",
+            data={
+                "operation": "execute_shell",
+                "command": command,
+                "timeout": timeout,
+                "kwargs": kwargs,
+                "sandbox_id": self._sandbox_id,
+            },
+        )
+        before_ctx = await self._hooks.emit(HookEvent.SANDBOX_BEFORE_EXECUTE, before_ctx)
+        command = before_ctx.data.get("command", command)
+        timeout = before_ctx.data.get("timeout", timeout)
         result = await self._backend.execute_shell(command, timeout=timeout, **kwargs)
         self._execution_count += 1
+        await self._hooks.emit(
+            HookEvent.SANDBOX_AFTER_EXECUTE,
+            HookContext(
+                event=HookEvent.SANDBOX_AFTER_EXECUTE,
+                component="sandbox",
+                data={
+                    "operation": "execute_shell",
+                    "command": command,
+                    "timeout": timeout,
+                    "result": result,
+                    "sandbox_id": self._sandbox_id,
+                },
+            ),
+        )
         return result
 
     async def run(self, code: str, timeout: Optional[int] = None) -> ExecutionResult:
@@ -650,12 +814,60 @@ class Sandbox:
     async def write_file(self, path: str, content: str) -> None:
         """Write text content to file."""
         self._ensure_running()
+        before_ctx = HookContext(
+            event=HookEvent.SANDBOX_BEFORE_WRITE_FILE,
+            component="sandbox",
+            data={
+                "path": path,
+                "content": content,
+                "sandbox_id": self._sandbox_id,
+            },
+        )
+        before_ctx = await self._hooks.emit(HookEvent.SANDBOX_BEFORE_WRITE_FILE, before_ctx)
+        path = before_ctx.data.get("path", path)
+        content = before_ctx.data.get("content", content)
         await self._backend.write_file(path, content)
+        await self._hooks.emit(
+            HookEvent.SANDBOX_AFTER_WRITE_FILE,
+            HookContext(
+                event=HookEvent.SANDBOX_AFTER_WRITE_FILE,
+                component="sandbox",
+                data={
+                    "path": path,
+                    "size": len(content.encode("utf-8")),
+                    "sandbox_id": self._sandbox_id,
+                },
+            ),
+        )
 
     async def write_file_bytes(self, path: str, content: bytes) -> None:
         """Write binary content to file."""
         self._ensure_running()
+        before_ctx = HookContext(
+            event=HookEvent.SANDBOX_BEFORE_WRITE_FILE,
+            component="sandbox",
+            data={
+                "path": path,
+                "content": content,
+                "sandbox_id": self._sandbox_id,
+            },
+        )
+        before_ctx = await self._hooks.emit(HookEvent.SANDBOX_BEFORE_WRITE_FILE, before_ctx)
+        path = before_ctx.data.get("path", path)
+        content = before_ctx.data.get("content", content)
         await self._backend.write_file_bytes(path, content)
+        await self._hooks.emit(
+            HookEvent.SANDBOX_AFTER_WRITE_FILE,
+            HookContext(
+                event=HookEvent.SANDBOX_AFTER_WRITE_FILE,
+                component="sandbox",
+                data={
+                    "path": path,
+                    "size": len(content),
+                    "sandbox_id": self._sandbox_id,
+                },
+            ),
+        )
 
     async def save_file(self, path: str, content: str) -> FileInfo:
         """
@@ -669,14 +881,40 @@ class Sandbox:
             FileInfo: File information
         """
         self._ensure_running()
+        before_ctx = HookContext(
+            event=HookEvent.SANDBOX_BEFORE_WRITE_FILE,
+            component="sandbox",
+            data={
+                "path": path,
+                "content": content,
+                "sandbox_id": self._sandbox_id,
+            },
+        )
+        before_ctx = await self._hooks.emit(HookEvent.SANDBOX_BEFORE_WRITE_FILE, before_ctx)
+        path = before_ctx.data.get("path", path)
+        content = before_ctx.data.get("content", content)
         await self._backend.write_file(path, content)
 
-        return FileInfo(
+        file_info = FileInfo(
             name=Path(path).name,
             path=path,
             size=len(content.encode("utf-8")),
             file_type=FileType.from_extension(path),
         )
+        await self._hooks.emit(
+            HookEvent.SANDBOX_AFTER_WRITE_FILE,
+            HookContext(
+                event=HookEvent.SANDBOX_AFTER_WRITE_FILE,
+                component="sandbox",
+                data={
+                    "path": path,
+                    "size": len(content.encode("utf-8")),
+                    "file_info": file_info,
+                    "sandbox_id": self._sandbox_id,
+                },
+            ),
+        )
+        return file_info
 
     async def delete_file(self, path: str) -> bool:
         """Delete a file or directory."""

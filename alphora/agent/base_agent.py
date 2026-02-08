@@ -17,6 +17,7 @@ from alphora.agent.stream import Stream
 from pydantic import BaseModel
 
 from alphora.memory import MemoryManager
+from alphora.hooks import HookManager, build_manager
 
 from alphora.debugger import tracer
 
@@ -54,6 +55,7 @@ class BaseAgent(object):
                  debugger_port: int = 9527,
                  config: Optional[Dict[str, Any]] = None,
                  memory: Optional[MemoryManager] = None,
+                 hooks: Optional[HookManager] = None,
                  **kwargs):
 
         self.callback = callback
@@ -71,6 +73,7 @@ class BaseAgent(object):
         self.config: Dict[str, Any] = config if config is not None else {}
 
         self.stream = Stream(callback=self.callback)
+        self._hooks = build_manager(hooks)
 
         self.init_params = {
             "llm": self.llm,

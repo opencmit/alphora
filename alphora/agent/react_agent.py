@@ -26,7 +26,7 @@ ReAct Agent - 支持自动工具调用循环的智能体
         response = await agent.run("用 Python 分析这个数据")
 """
 
-from typing import Callable, List, Union, Optional, AsyncIterator, TYPE_CHECKING
+from typing import Callable, List, Union, Optional, AsyncIterator, TYPE_CHECKING, Dict, Any
 import logging
 
 from .base_agent import BaseAgent
@@ -36,6 +36,7 @@ from alphora.tools.registry import ToolRegistry
 from alphora.tools.executor import ToolExecutor
 from alphora.memory import MemoryManager
 from alphora.sandbox import Sandbox, SandboxTools
+from alphora.hooks import HookEvent, HookContext, HookManager, build_manager
 
 logger = logging.getLogger(__name__)
 
@@ -86,9 +87,27 @@ class ReActAgent(BaseAgent):
             max_iterations: int = 100,
             sandbox: Optional[Sandbox] = None,
             memory: Optional[MemoryManager] = None,
+            hooks: Optional[Union[HookManager, Dict[Any, Any]]] = None,
+            before_run: Optional[Callable] = None,
+            after_run: Optional[Callable] = None,
+            before_iteration: Optional[Callable] = None,
+            after_iteration: Optional[Callable] = None,
             **kwargs
     ):
-        super().__init__(llm=llm, memory=memory, **kwargs)
+        hook_manager = build_manager(
+            hooks,
+            short_map={
+                "before_run": HookEvent.AGENT_BEFORE_RUN,
+                "after_run": HookEvent.AGENT_AFTER_RUN,
+                "before_iteration": HookEvent.AGENT_BEFORE_ITERATION,
+                "after_iteration": HookEvent.AGENT_AFTER_ITERATION,
+            },
+            before_run=before_run,
+            after_run=after_run,
+            before_iteration=before_iteration,
+            after_iteration=after_iteration,
+        )
+        super().__init__(llm=llm, memory=memory, hooks=hook_manager, **kwargs)
 
         self._registry = ToolRegistry()
         self._sandbox = sandbox
@@ -147,6 +166,18 @@ class ReActAgent(BaseAgent):
         Returns:
             最终响应文本
         """
+        await self._hooks.emit(
+            HookEvent.AGENT_BEFORE_RUN,
+            HookContext(
+                event=HookEvent.AGENT_BEFORE_RUN,
+                component="agent",
+                data={
+                    "query": query,
+                    "agent_type": self.agent_type,
+                    "agent_id": self.agent_id,
+                },
+            ),
+        )
         # 添加用户消息到记忆
 
         self.memory.add_user(content=query)
@@ -158,6 +189,18 @@ class ReActAgent(BaseAgent):
 
             # 构建历史
             history = self.memory.build_history()
+            await self._hooks.emit(
+                HookEvent.AGENT_BEFORE_ITERATION,
+                HookContext(
+                    event=HookEvent.AGENT_BEFORE_ITERATION,
+                    component="agent",
+                    data={
+                        "iteration": iteration + 1,
+                        "history": history,
+                        "query": query,
+                    },
+                ),
+            )
 
             # 调用 LLM
             response = await self._prompt.acall(
@@ -174,15 +217,50 @@ class ReActAgent(BaseAgent):
             # 检查是否有工具调用
             if not response.has_tool_calls:
                 if "TASK_FINISHED" in response.content:
+                    await self._hooks.emit(
+                        HookEvent.AGENT_AFTER_RUN,
+                        HookContext(
+                            event=HookEvent.AGENT_AFTER_RUN,
+                            component="agent",
+                            data={
+                                "result": "",
+                                "iteration": iteration + 1,
+                            },
+                        ),
+                    )
                     return ""
                 else:
                     await self.stream.astream_message(content=response.content)
                     self.memory.add_assistant(content=response.content)
+                    await self._hooks.emit(
+                        HookEvent.AGENT_AFTER_ITERATION,
+                        HookContext(
+                            event=HookEvent.AGENT_AFTER_ITERATION,
+                            component="agent",
+                            data={
+                                "iteration": iteration + 1,
+                                "response": response,
+                                "tool_results": None,
+                            },
+                        ),
+                    )
 
             # 执行工具调用
             tool_results = await self._executor.execute(response.tool_calls)
 
             self.memory.add_tool_result(result=tool_results)
+            await self._hooks.emit(
+                HookEvent.AGENT_AFTER_ITERATION,
+                HookContext(
+                    event=HookEvent.AGENT_AFTER_ITERATION,
+                    component="agent",
+                    data={
+                        "iteration": iteration + 1,
+                        "response": response,
+                        "tool_results": tool_results,
+                    },
+                ),
+            )
 
             if self.verbose:
                 for result in tool_results:
@@ -191,7 +269,19 @@ class ReActAgent(BaseAgent):
 
         # 达到最大迭代次数
         logger.warning(f"ReAct 达到最大迭代次数 ({self._max_iterations})")
-        return "抱歉，我无法在限定步骤内完成这个任务。"
+        result = "抱歉，我无法在限定步骤内完成这个任务。"
+        await self._hooks.emit(
+            HookEvent.AGENT_AFTER_RUN,
+            HookContext(
+                event=HookEvent.AGENT_AFTER_RUN,
+                component="agent",
+                data={
+                    "result": result,
+                    "iteration": self._max_iterations,
+                },
+            ),
+        )
+        return result
 
     async def run_steps(
             self,
@@ -209,12 +299,36 @@ class ReActAgent(BaseAgent):
             ReActStep: 每一步的执行结果
         """
 
+        await self._hooks.emit(
+            HookEvent.AGENT_BEFORE_RUN,
+            HookContext(
+                event=HookEvent.AGENT_BEFORE_RUN,
+                component="agent",
+                data={
+                    "query": query,
+                    "agent_type": self.agent_type,
+                    "agent_id": self.agent_id,
+                },
+            ),
+        )
         self.memory.add_user(content=query)
 
         tools_schema = self._registry.get_openai_tools_schema()
 
         for iteration in range(self._max_iterations):
             history = self.memory.build_history()
+            await self._hooks.emit(
+                HookEvent.AGENT_BEFORE_ITERATION,
+                HookContext(
+                    event=HookEvent.AGENT_BEFORE_ITERATION,
+                    component="agent",
+                    data={
+                        "iteration": iteration + 1,
+                        "history": history,
+                        "query": query,
+                    },
+                ),
+            )
 
             response = await self._prompt.acall(
                 query=query if iteration == 0 else None,
@@ -226,6 +340,18 @@ class ReActAgent(BaseAgent):
             self.memory.add_assistant(content=response)
 
             if not response.has_tool_calls:
+                await self._hooks.emit(
+                    HookEvent.AGENT_AFTER_ITERATION,
+                    HookContext(
+                        event=HookEvent.AGENT_AFTER_ITERATION,
+                        component="agent",
+                        data={
+                            "iteration": iteration + 1,
+                            "response": response,
+                            "tool_results": None,
+                        },
+                    ),
+                )
                 yield ReActStep(
                     iteration=iteration + 1,
                     action="respond",
@@ -234,11 +360,34 @@ class ReActAgent(BaseAgent):
                     tool_results=None,
                     is_final=True,
                 )
+                await self._hooks.emit(
+                    HookEvent.AGENT_AFTER_RUN,
+                    HookContext(
+                        event=HookEvent.AGENT_AFTER_RUN,
+                        component="agent",
+                        data={
+                            "result": response.content,
+                            "iteration": iteration + 1,
+                        },
+                    ),
+                )
                 return
 
             tool_results = await self._executor.execute(response.tool_calls)
 
             self.memory.add_tool_result(result=tool_results)
+            await self._hooks.emit(
+                HookEvent.AGENT_AFTER_ITERATION,
+                HookContext(
+                    event=HookEvent.AGENT_AFTER_ITERATION,
+                    component="agent",
+                    data={
+                        "iteration": iteration + 1,
+                        "response": response,
+                        "tool_results": tool_results,
+                    },
+                ),
+            )
 
             yield ReActStep(
                 iteration=iteration + 1,
@@ -256,6 +405,17 @@ class ReActAgent(BaseAgent):
             tool_calls=None,
             tool_results=None,
             is_final=True,
+        )
+        await self._hooks.emit(
+            HookEvent.AGENT_AFTER_RUN,
+            HookContext(
+                event=HookEvent.AGENT_AFTER_RUN,
+                component="agent",
+                data={
+                    "result": "达到最大迭代次数",
+                    "iteration": self._max_iterations,
+                },
+            ),
         )
 
     @property

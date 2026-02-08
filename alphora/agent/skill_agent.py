@@ -45,6 +45,7 @@ from alphora.tools.registry import ToolRegistry
 from alphora.tools.executor import ToolExecutor
 from alphora.memory import MemoryManager
 from alphora.skills import SkillManager, create_skill_tools, create_filesystem_skill_tools
+from alphora.hooks import HookEvent, HookContext, HookManager, build_manager
 
 if TYPE_CHECKING:
     from alphora.sandbox import Sandbox
@@ -111,9 +112,27 @@ class SkillAgent(BaseAgent):
         sandbox: Optional["Sandbox"] = None,
         filesystem_mode: bool = False,
         memory: Optional[MemoryManager] = None,
+        hooks: Optional[Union[HookManager, Dict[Any, Any]]] = None,
+        before_run: Optional[Callable] = None,
+        after_run: Optional[Callable] = None,
+        before_iteration: Optional[Callable] = None,
+        after_iteration: Optional[Callable] = None,
         **kwargs,
     ):
-        super().__init__(llm=llm, memory=memory, **kwargs)
+        hook_manager = build_manager(
+            hooks,
+            short_map={
+                "before_run": HookEvent.AGENT_BEFORE_RUN,
+                "after_run": HookEvent.AGENT_AFTER_RUN,
+                "before_iteration": HookEvent.AGENT_BEFORE_ITERATION,
+                "after_iteration": HookEvent.AGENT_AFTER_ITERATION,
+            },
+            before_run=before_run,
+            after_run=after_run,
+            before_iteration=before_iteration,
+            after_iteration=after_iteration,
+        )
+        super().__init__(llm=llm, memory=memory, hooks=hook_manager, **kwargs)
 
         # ── Skill Manager ──
 
@@ -240,6 +259,18 @@ class SkillAgent(BaseAgent):
         Returns:
             最终响应文本
         """
+        await self._hooks.emit(
+            HookEvent.AGENT_BEFORE_RUN,
+            HookContext(
+                event=HookEvent.AGENT_BEFORE_RUN,
+                component="agent",
+                data={
+                    "query": query,
+                    "agent_type": self.agent_type,
+                    "agent_id": self.agent_id,
+                },
+            ),
+        )
         self.memory.add_user(content=query)
 
         tools_schema = self._registry.get_openai_tools_schema()
@@ -250,6 +281,18 @@ class SkillAgent(BaseAgent):
             )
 
             history = self.memory.build_history()
+            await self._hooks.emit(
+                HookEvent.AGENT_BEFORE_ITERATION,
+                HookContext(
+                    event=HookEvent.AGENT_BEFORE_ITERATION,
+                    component="agent",
+                    data={
+                        "iteration": iteration + 1,
+                        "history": history,
+                        "query": query,
+                    },
+                ),
+            )
 
             # 调用 LLM
             response = await self._prompt.acall(
@@ -267,11 +310,46 @@ class SkillAgent(BaseAgent):
 
             # 没有工具调用 → 任务完成
             if not response.has_tool_calls:
+                await self._hooks.emit(
+                    HookEvent.AGENT_AFTER_ITERATION,
+                    HookContext(
+                        event=HookEvent.AGENT_AFTER_ITERATION,
+                        component="agent",
+                        data={
+                            "iteration": iteration + 1,
+                            "response": response,
+                            "tool_results": None,
+                        },
+                    ),
+                )
+                await self._hooks.emit(
+                    HookEvent.AGENT_AFTER_RUN,
+                    HookContext(
+                        event=HookEvent.AGENT_AFTER_RUN,
+                        component="agent",
+                        data={
+                            "result": response.content,
+                            "iteration": iteration + 1,
+                        },
+                    ),
+                )
                 return response.content
 
             # 执行工具调用
             tool_results = await self._executor.execute(response.tool_calls)
             self.memory.add_tool_result(result=tool_results)
+            await self._hooks.emit(
+                HookEvent.AGENT_AFTER_ITERATION,
+                HookContext(
+                    event=HookEvent.AGENT_AFTER_ITERATION,
+                    component="agent",
+                    data={
+                        "iteration": iteration + 1,
+                        "response": response,
+                        "tool_results": tool_results,
+                    },
+                ),
+            )
 
             if self.verbose:
                 for result in tool_results:
@@ -283,7 +361,19 @@ class SkillAgent(BaseAgent):
         logger.warning(
             f"SkillAgent reached max iterations ({self._max_iterations})"
         )
-        return "抱歉，我无法在限定步骤内完成这个任务。"
+        result = "抱歉，我无法在限定步骤内完成这个任务。"
+        await self._hooks.emit(
+            HookEvent.AGENT_AFTER_RUN,
+            HookContext(
+                event=HookEvent.AGENT_AFTER_RUN,
+                component="agent",
+                data={
+                    "result": result,
+                    "iteration": self._max_iterations,
+                },
+            ),
+        )
+        return result
 
     async def run_steps(self, query: str) -> AsyncIterator["SkillAgentStep"]:
         """
@@ -297,12 +387,36 @@ class SkillAgent(BaseAgent):
         Yields:
             SkillAgentStep: 每一步的执行详情
         """
+        await self._hooks.emit(
+            HookEvent.AGENT_BEFORE_RUN,
+            HookContext(
+                event=HookEvent.AGENT_BEFORE_RUN,
+                component="agent",
+                data={
+                    "query": query,
+                    "agent_type": self.agent_type,
+                    "agent_id": self.agent_id,
+                },
+            ),
+        )
         self.memory.add_user(content=query)
 
         tools_schema = self._registry.get_openai_tools_schema()
 
         for iteration in range(self._max_iterations):
             history = self.memory.build_history()
+            await self._hooks.emit(
+                HookEvent.AGENT_BEFORE_ITERATION,
+                HookContext(
+                    event=HookEvent.AGENT_BEFORE_ITERATION,
+                    component="agent",
+                    data={
+                        "iteration": iteration + 1,
+                        "history": history,
+                        "query": query,
+                    },
+                ),
+            )
 
             response = await self._prompt.acall(
                 query=query if iteration == 0 else None,
@@ -314,16 +428,51 @@ class SkillAgent(BaseAgent):
             self.memory.add_assistant(content=response)
 
             if not response.has_tool_calls:
+                await self._hooks.emit(
+                    HookEvent.AGENT_AFTER_ITERATION,
+                    HookContext(
+                        event=HookEvent.AGENT_AFTER_ITERATION,
+                        component="agent",
+                        data={
+                            "iteration": iteration + 1,
+                            "response": response,
+                            "tool_results": None,
+                        },
+                    ),
+                )
                 yield SkillAgentStep(
                     iteration=iteration + 1,
                     action="respond",
                     content=response.content,
                     is_final=True,
                 )
+                await self._hooks.emit(
+                    HookEvent.AGENT_AFTER_RUN,
+                    HookContext(
+                        event=HookEvent.AGENT_AFTER_RUN,
+                        component="agent",
+                        data={
+                            "result": response.content,
+                            "iteration": iteration + 1,
+                        },
+                    ),
+                )
                 return
 
             tool_results = await self._executor.execute(response.tool_calls)
             self.memory.add_tool_result(result=tool_results)
+            await self._hooks.emit(
+                HookEvent.AGENT_AFTER_ITERATION,
+                HookContext(
+                    event=HookEvent.AGENT_AFTER_ITERATION,
+                    component="agent",
+                    data={
+                        "iteration": iteration + 1,
+                        "response": response,
+                        "tool_results": tool_results,
+                    },
+                ),
+            )
 
             # 检测是否有 Skill 激活
             activated_skills = [
@@ -347,6 +496,17 @@ class SkillAgent(BaseAgent):
             action="max_iterations",
             content="达到最大迭代次数",
             is_final=True,
+        )
+        await self._hooks.emit(
+            HookEvent.AGENT_AFTER_RUN,
+            HookContext(
+                event=HookEvent.AGENT_AFTER_RUN,
+                component="agent",
+                data={
+                    "result": "达到最大迭代次数",
+                    "iteration": self._max_iterations,
+                },
+            ),
         )
 
     # ─────────────────────────────────────────────
