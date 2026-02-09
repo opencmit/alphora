@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="#docs/ARCHITECTURE.md">Docs</a> •
+  <a href="docs/ARCHITECTURE.md">Docs</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#examples">Examples</a> •
   <a href="README.cn.md">中文</a>
@@ -107,11 +107,26 @@ Alphora is packed with features for building sophisticated AI agents:
 - **Multiple Backends** — In-memory, JSON file, SQLite storage options.
 - **TTL Support** — Automatic session cleanup with time-to-live.
 
+### Skills (agentskills.io compatible)
+
+- **Progressive Disclosure** — 3-phase loading (metadata → instructions → resources) to optimize token budget.
+- **Ecosystem Ready** — Use community skills published for Anthropic / OpenAI / Copilot style workflows.
+- **Safe Resource Access** — Path traversal detection and file-size limits by default.
+- **SkillAgent Ready** — Works out-of-the-box with `SkillAgent` or can be plugged into `ReActAgent`.
+
+### Hooks (Extension & Governance)
+
+- **Unified Events** — One hook system across tools, memory, prompter/LLM, sandbox, and agent lifecycle.
+- **Stable Defaults** — Fail-open by default (hook failures won’t break the main flow).
+- **Operational Controls** — Ordering, timeout, error policy (fail-open / fail-close), and basic metrics/audit patterns.
+
 ###  Sandbox
 
 - **Secure Execution** — Run agent-generated code in isolated environments.
-- **File Isolation** — Sandboxed file system for safe file operations.
-- **Resource Tracking** — Monitor and limit compute resources.
+- **Local / Docker Backends** — Fast local runs or stronger container isolation in production.
+- **File & Workspace Ops** — Read/write/list/copy/move files with optional persistent workspace mounting.
+- **Package Management** — Install/uninstall/query pip packages inside the sandbox runtime.
+- **Security & Limits** — Resource limits (CPU/mem/disk/time) and configurable security policies.
 
 ### Deployment
 
@@ -250,10 +265,10 @@ history = memory.build_history(session_id="user_123")
 ### 8. Deploy as API
 
 ```python
-from alphora.server import publish_agent_api, APIPublisherConfig
+from alphora.server.quick_api import publish_agent_api, APIPublisherConfig
 
 config = APIPublisherConfig(
-    path="/chat",
+    path="/alphadata",
     api_title="My Agent API",
     memory_ttl=3600
 )
@@ -264,9 +279,38 @@ app = publish_agent_api(agent=agent, method="run", config=config)
 ```
 
 ```bash
-curl -X POST http://localhost:8000/chat/v1/chat/completions \
+curl -X POST http://localhost:8000/alphadata/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"messages": [{"role": "user", "content": "Hello!"}], "stream": true}'
+```
+
+### 9. Skills (Community & Standard)
+
+```python
+from alphora.agent import SkillAgent
+from alphora.models import OpenAILike
+
+# Bundled community skills live under ./alphora_community/skills
+agent = SkillAgent(
+    llm=OpenAILike(model_name="gpt-4"),
+    skill_paths=["./alphora_community/skills"],
+    system_prompt="You are a helpful assistant."
+)
+
+result = await agent.run("Help me do a deep research on a topic.")
+```
+
+### 10. Hooks (Observability / Policy)
+
+```python
+from alphora.tools import ToolRegistry, ToolExecutor
+
+def log_after(ctx):
+    # ctx.data may include tool_name, tool_args, elapsed_ms, etc.
+    print("after tool:", ctx.data.get("tool_name"))
+
+registry = ToolRegistry()
+executor = ToolExecutor(registry, after_execute=log_after)
 ```
 
 ---
@@ -279,6 +323,13 @@ curl -X POST http://localhost:8000/chat/v1/chat/completions \
 | [RAG Agent](./examples/rag-agent)           | Retrieval-augmented generation with vector search |
 | [Multi-Agent](./examples/multi-agent)       | Hierarchical agents with tool-as-agent pattern |
 | [Streaming Chat](./examples/streaming-chat) | Real-time chat with thinking mode |
+
+### Community Skills
+
+This repo ships with a small set of community skills under `alphora_community/skills`, for example:
+
+- `deep-research`: deep research workflow (search, dedupe, evidence aggregation, report output)
+- `data-quality-audit`: CSV profiling, schema checks, anomaly detection, and Markdown report generation
 
 ---
 
@@ -328,6 +379,8 @@ For detailed system design, component relationships, and implementation patterns
 | [Sandbox](docs/components/cn/sandbox_readme.md)         | Secure code execution environment |
 | [Server](docs/components/cn/server_readme.md)           | API publishing, SSE streaming |
 | [Postprocess](docs/components/cn/postprocess_readme.md) | Stream transformation pipeline |
+| [Skills](docs/components/cn/skill_readme.md)            | agentskills.io compatible skills, SkillAgent integration |
+| [Hooks](docs/components/cn/hooks_readme.md)             | Extension & governance via unified hook events |
 
 
 ---
