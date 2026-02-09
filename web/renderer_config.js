@@ -40,12 +40,14 @@ const RENDERER_CONFIG = {
   table:{label:"表格",component:"table",layout:"inline",atoms:["text-sm","font-sans","color-primary"],style:{}},
   html:{label:"HTML",component:"html",layout:"inline",maxHeight:"500px",atoms:[],style:{}},
   image:{label:"图片",component:"image",layout:"inline",atoms:["rounded-lg"],style:{maxWidth:"100%"}},
+  file:{label:"文件",component:"file",layout:"inline",icon:"",atoms:["text-sm","font-sans","color-primary","bg-gray-50","p-3","rounded-md","border"],style:{},filePreview:{kind:"auto",source:"auto",mode:"drawer",title:"文件预览"}},
+  file_excel_base64:{label:"Excel(Base64)",component:"file",layout:"inline",icon:"",atoms:["text-sm","font-sans","color-primary","bg-gray-50","p-3","rounded-md","border"],style:{},filePreview:{kind:"excel",source:"base64",mode:"drawer",title:"Excel 预览"}},
+  file_excel_url:{label:"Excel(URL)",component:"file",layout:"inline",icon:"",atoms:["text-sm","font-sans","color-primary","bg-gray-50","p-3","rounded-md","border"],style:{},filePreview:{kind:"excel",source:"url",mode:"drawer",title:"Excel 预览"}},
   tool_call:{label:"工具调用",component:"code",layout:"inline",icon:"",collapsible:true,defaultCollapsed:true,preset:"工具调用",atoms:["text-sm","font-mono","color-primary","bg-purple-50","border-l-purple","p-4","rounded-md","leading-tight"],style:{}},
   tool_result:{label:"工具结果",component:"code",layout:"inline",icon:"",collapsible:true,defaultCollapsed:true,preset:"成功",atoms:["text-sm","font-mono","color-primary","bg-green-50","border-l-green","p-4","rounded-md","leading-tight"],style:{}},
   status:{label:"状态",component:"text",layout:"inline",icon:"",preset:"淡蓝信息",atoms:["text-sm","font-sans","color-accent","bg-blue-50","border-l-blue","p-4","rounded-md","leading-normal"],style:{}},
   error:{label:"错误",component:"text",layout:"inline",icon:"",preset:"错误",atoms:["text-sm","font-sans","color-danger","bg-red-50","border-l-red","p-4","rounded-md","leading-normal"],style:{}},
-  warning:{label:"警告",component:"text",layout:"inline",icon:"",preset:"警告",atoms:["text-sm","font-sans","color-warning","bg-amber-50","border-l-amber","p-4","rounded-md","leading-normal"],style:{}},
-  file:{label:"文件",component:"text",layout:"inline",icon:"",atoms:["text-sm","font-sans","color-primary","bg-gray-50","p-3","rounded-md","border"],style:{}}
+  warning:{label:"警告",component:"text",layout:"inline",icon:"",preset:"警告",atoms:["text-sm","font-sans","color-warning","bg-amber-50","border-l-amber","p-4","rounded-md","leading-normal"],style:{}}
 };
 function resolveAtoms(n){var r={};if(!Array.isArray(n))return r;n.forEach(function(k){if(STYLE_ATOMS[k])Object.assign(r,STYLE_ATOMS[k])});return r}
 function resolveStyle(c){return Object.assign(resolveAtoms(c.atoms||[]),c.style||{})}
