@@ -1,5 +1,6 @@
 # Copyright 2026 China Mobile Information Technology Co., Ltd.
 # SPDX-License-Identifier: Apache-2.0
+# Author: Tian Tian (tiantianit@chinamobile.com)
 
 """
 SkillAgent - 支持 Agent Skills 标准的智能体
@@ -134,7 +135,7 @@ class SkillAgent(BaseAgent):
         )
         super().__init__(llm=llm, memory=memory, hooks=hook_manager, **kwargs)
 
-        # ── Skill Manager ──
+        # Skill Manager
 
         if skill_manager is not None:
             self._skill_manager = skill_manager
@@ -146,13 +147,11 @@ class SkillAgent(BaseAgent):
         else:
             self._skill_manager = SkillManager(auto_discover=False)
 
-        # ── Sandbox ──
-
+        # Sandbox
         self._sandbox = sandbox
         self._filesystem_mode = filesystem_mode
 
-        # ── Tool Registry ──
-
+        # Tool Registry
         self._registry = ToolRegistry()
 
         # 注册用户自定义工具
@@ -175,8 +174,7 @@ class SkillAgent(BaseAgent):
 
         self._executor = ToolExecutor(self._registry)
 
-        # ── Prompt ──
-
+        # Prompt
         full_system_prompt = self._build_system_prompt(system_prompt)
         self._system_prompt = full_system_prompt
         self._prompt = self.create_prompt(system_prompt=full_system_prompt)
@@ -238,10 +236,7 @@ class SkillAgent(BaseAgent):
         except ImportError:
             logger.debug("Sandbox module not available, skipping sandbox tools")
 
-    # ─────────────────────────────────────────────
     # 执行
-    # ─────────────────────────────────────────────
-
     async def run(self, query: str) -> str:
         """
         执行完整的 Skill + 工具调用循环
@@ -308,7 +303,7 @@ class SkillAgent(BaseAgent):
             # 记录助手响应
             self.memory.add_assistant(content=response)
 
-            # 没有工具调用 → 任务完成
+            # 没有工具调用则任务完成
             if not response.has_tool_calls:
                 await self._hooks.emit(
                     HookEvent.AGENT_AFTER_ITERATION,
@@ -509,10 +504,7 @@ class SkillAgent(BaseAgent):
             ),
         )
 
-    # ─────────────────────────────────────────────
     # Skill 管理（便捷代理方法）
-    # ─────────────────────────────────────────────
-
     def add_skill_path(self, path: Union[str, Path]) -> "SkillAgent":
         """
         动态添加 Skill 搜索路径并重新发现
