@@ -50,10 +50,10 @@ async def main() -> None:
                     print(f"- {f.path}")
 
     # Docker sandbox (requires docker & image)
-    # sandbox = Sandbox.create_docker(docker_image="alphora-sandbox:latest")
-    # async with sandbox:
-    #     result = await sandbox.execute_code("print('docker sandbox')")
-    #     print(result.stdout.strip())
+    sandbox = Sandbox.create_docker(docker_image="alphora-sandbox:latest")
+    async with sandbox:
+        result = await sandbox.execute_code("print('docker sandbox')")
+        print(result.stdout.strip())
 
 
 if __name__ == "__main__":
