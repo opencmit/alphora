@@ -677,14 +677,29 @@ function buildUrl(){
 function send(){
   var t=uIn.value.trim();if((!t&&!fls.length)||strm)return;uIn.value='';uIn.style.height='auto';
   var c=cC();if(!c)c=nC();var mf=fls.slice();fls=[];rF();uD(t,mf);
-  c.messages.push({role:'user',content:t,files:mf.map(function(f){return f.name})});
+  c.messages.push({role:'user',content:t});
   if(c.title==='新对话'&&t)c.title=t.slice(0,30);sV();rH();
   var url=buildUrl(),mod=cfgModel.value.trim(),st=cfgStream.value==='true';
-  var am=c.messages.map(function(m){return{role:m.role,content:m.content}});
-  var body=JSON.stringify({model:mod,messages:am,stream:st});
+  var am=[{role:'user',content:t}];
   strm=true;setSendBtn(true);abortCtrl=new AbortController();var bub=cBub(),bks={};
-  var opts={method:'POST',headers:{'Content-Type':'application/json'},body:body,signal:abortCtrl.signal};
-  (st?doSSE(url,opts,bub,bks):doJSON(url,opts,bub,bks)).catch(function(err){if(err.name!=='AbortError'){var b=gB(bub,'error',bks);pC(b,'请求失败: '+err.message,false)}else{var ld=bub.querySelector('.loading-dots');if(ld)ld.remove()}}).finally(function(){strm=false;setSendBtn(false);abortCtrl=null;clC(bub);var full='';Object.keys(bks).forEach(function(k){if(!bks[k].panel)full+=bks[k].buf+'\n'});full=full.trim();if(full){c.messages.push({role:'assistant',content:full});sV()}});
+  function doReq(){
+    var body=JSON.stringify({model:mod,messages:am,stream:st});
+    var opts={method:'POST',headers:{'Content-Type':'application/json'},body:body,signal:abortCtrl.signal};
+    return (st?doSSE(url,opts,bub,bks):doJSON(url,opts,bub,bks)).catch(function(err){
+      if(err.name!=='AbortError'){var b=gB(bub,'error',bks);pC(b,'请求失败: '+err.message,false)}else{var ld=bub.querySelector('.loading-dots');if(ld)ld.remove()}
+    }).finally(function(){
+      strm=false;setSendBtn(false);abortCtrl=null;clC(bub);var full='';Object.keys(bks).forEach(function(k){if(!bks[k].panel)full+=bks[k].buf+'\n'});full=full.trim();if(full){c.messages.push({role:'assistant',content:full});sV()}
+    });
+  }
+  if(!mf.length)return doReq();
+  return Promise.all(mf.map(function(f){return b64(f)})).then(function(bs){
+    var fms=mf.map(function(f,i){return{role:f.name,content:bs[i]}});
+    am=fms.concat([{role:'user',content:t}]);
+    return doReq();
+  }).catch(function(err){
+    var b=gB(bub,'error',bks);pC(b,'文件读取失败: '+err.message,false);
+    strm=false;setSendBtn(false);abortCtrl=null;clC(bub);
+  });
 }
 function doSSE(url,opts,bub,bks){
   return fetch(url,opts).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);var rd=r.body.getReader(),dc=new TextDecoder(),bf='';

@@ -2,11 +2,10 @@
 Alphora API Mock 示例
 
 启动：
-    python -m examples.api_mock.mock --host 0.0.0.0 --port 8000
+    python mock.py
 
 前端联调：
-    Endpoint: /api/v1/chat/completions
-    兼容路径: /alphadata/chat/completions
+    Endpoint: /v1/chat/completions
 """
 
 import asyncio
