@@ -26,6 +26,7 @@ from alphora.sandbox.exceptions import (
     ContainerNotFoundError,
     FileNotFoundError as SandboxFileNotFoundError,
     ExecutionTimeoutError,
+    PathTraversalError,
 )
 
 logger = logging.getLogger(__name__)
@@ -305,6 +306,40 @@ class DockerBackend(ExecutionBackend):
             container_config["user"] = config.user
         
         return container_config
+
+    def _resolve_path(self, path: str) -> Path:
+        """
+        Resolve file path within workspace with safety checks.
+
+        Supports:
+        - relative paths (relative to workspace)
+        - absolute host paths (must be inside workspace)
+        - container paths like /workspace/xxx (mapped to workspace)
+        """
+        if not path:
+            return self._workspace_path.resolve()
+
+        path_str = str(path)
+        container_prefix = self._container_workspace.rstrip("/") + "/"
+        if path_str.startswith(container_prefix):
+            path_str = path_str[len(self._container_workspace):]
+
+        if path_str.startswith("/"):
+            full_path = Path(path_str)
+        else:
+            full_path = self._workspace_path / path_str.lstrip("/")
+
+        try:
+            resolved = full_path.resolve()
+        except Exception:
+            raise PathTraversalError(f"Invalid path: {path}")
+
+        try:
+            resolved.relative_to(self._workspace_path.resolve())
+        except ValueError:
+            raise PathTraversalError(f"Path escapes workspace: {path}")
+
+        return resolved
     
     async def _wait_for_ready(self, timeout: int = 30) -> None:
         """Wait for container to be ready"""
@@ -427,22 +462,37 @@ class DockerBackend(ExecutionBackend):
     # File Operations
     async def read_file(self, path: str) -> str:
         """Read file from container workspace"""
-        full_path = self._workspace_path / path.lstrip("/")
+        full_path = self._resolve_path(path)
         
         if not full_path.exists():
             raise SandboxFileNotFoundError(path)
         
         return full_path.read_text(encoding="utf-8")
+
+    async def read_file_bytes(self, path: str) -> bytes:
+        """Read file as bytes from container workspace"""
+        full_path = self._resolve_path(path)
+
+        if not full_path.exists():
+            raise SandboxFileNotFoundError(path)
+
+        return full_path.read_bytes()
     
     async def write_file(self, path: str, content: str) -> None:
         """Write file to container workspace"""
-        full_path = self._workspace_path / path.lstrip("/")
+        full_path = self._resolve_path(path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content, encoding="utf-8")
+
+    async def write_file_bytes(self, path: str, content: bytes) -> None:
+        """Write bytes to file in container workspace"""
+        full_path = self._resolve_path(path)
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_bytes(content)
     
     async def delete_file(self, path: str) -> bool:
         """Delete file from container workspace"""
-        full_path = self._workspace_path / path.lstrip("/")
+        full_path = self._resolve_path(path)
         
         if not full_path.exists():
             return False
@@ -457,7 +507,10 @@ class DockerBackend(ExecutionBackend):
     
     async def file_exists(self, path: str) -> bool:
         """Check if file exists in workspace"""
-        full_path = self._workspace_path / path.lstrip("/")
+        try:
+            full_path = self._resolve_path(path)
+        except PathTraversalError:
+            return False
         return full_path.exists()
     
     async def list_directory(
@@ -466,7 +519,7 @@ class DockerBackend(ExecutionBackend):
         recursive: bool = False
     ) -> List[Dict[str, Any]]:
         """List directory contents"""
-        full_path = self._workspace_path / path.lstrip("/") if path else self._workspace_path
+        full_path = self._resolve_path(path) if path else self._workspace_path
         
         if not full_path.exists():
             return []

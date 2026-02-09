@@ -16,7 +16,7 @@ from alphora.server.openai_request_body import OpenAIRequest
 
 from alphora_community.tools import FileViewer
 
-from .prompts import control_prompt, thinking_prompt
+from examples.chat_excel.prompts import control_prompt, thinking_prompt
 
 
 class ExecuteCodeStep(BaseAgent):
@@ -137,7 +137,7 @@ class ChatExcel(BaseAgent):
     async def excel_answering(self, request: OpenAIRequest) -> ...:
         """处理Excel数据分析查询"""
         # 解析请求
-        query, files, session_id, enable_thinking = self._parse_request(request)
+        query, files, session_id = self._parse_request(request)
 
         # 空查询处理
         if not query:
@@ -189,17 +189,6 @@ class ChatExcel(BaseAgent):
         )
 
         history = mm.build_history(session_id=session_id)
-        if enable_thinking:
-            thinking_result = await thinking_prompter.acall(
-                query=query,
-                is_stream=False,
-                history=history
-            )
-            thinking_result = getattr(thinking_result, "content", str(thinking_result))
-        else:
-            thinking_result = "（已跳过思考步骤，直接进入执行。）"
-
-        control_prompter.update_placeholder(thinking_result=thinking_result)
 
         for step in range(20):
 
@@ -266,11 +255,11 @@ class ChatExcel(BaseAgent):
             if tc_resp.has_tool_calls:
                 tool_return = await tool_executor.execute(tool_calls=tc_resp)
                 mm.add_tool_result(result=tool_return,
-                                   session_id=session_id, )
+                                   session_id=session_id)
 
             else:
                 mm.add_assistant(content=tc_resp,
-                                 session_id=session_id, )
+                                 session_id=session_id)
 
         return "None"
 
@@ -292,10 +281,10 @@ class ChatExcel(BaseAgent):
 
         # 上传文件到沙箱
         for file_name, file_content in files.items():
-            safe_name = self._safe_sandbox_path(file_name)
-            file_bytes = self._decode_file_content(file_content)
-            await sandbox.write_file_bytes(safe_name, file_bytes)
-
+            if isinstance(file_content, bytes):
+                await sandbox.write_file_bytes(path=file_name, content=file_content)
+            else:
+                await sandbox.upload_file_base64(path=file_name, base64_data=file_content)
         return sandbox
 
     def _parse_request(self, request: OpenAIRequest) -> tuple:
@@ -325,7 +314,6 @@ class ChatExcel(BaseAgent):
     @staticmethod
     def today():
         from datetime import datetime
-        # 获取当前时间并格式化为「年-月-日 时:分:秒」
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         return now_str
 
@@ -337,3 +325,35 @@ class ChatExcel(BaseAgent):
             await self.stream.astop(stop_reason=str(e))
 
         await self.stream.astop(stop_reason='end')
+
+
+if __name__ == "__main__":
+
+    import uvicorn
+    from alphora.server.quick_api import publish_agent_api, APIPublisherConfig
+    from alphora.models.llms import OpenAILike
+
+    llm = OpenAILike(
+        max_tokens=8000
+    )
+
+    # 初始化一个Agent
+    agent = ChatExcel(llm=llm)
+
+    # API发布配置信息
+    config = APIPublisherConfig(
+        path='/chatexcel'
+    )
+
+    # 4. 发布 API
+    app = publish_agent_api(
+        agent=agent,
+        method="run_logic",
+        config=config
+    )
+
+    uvicorn.run(
+        app,
+        host='127.0.0.1',
+        port=8001
+    )

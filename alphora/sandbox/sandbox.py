@@ -6,6 +6,8 @@ Main sandbox class providing unified interface for code execution.
 import uuid
 import asyncio
 import logging
+import base64
+import binascii
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Union, Type, TypeVar, TYPE_CHECKING, Callable
@@ -889,6 +891,49 @@ class Sandbox:
             ),
         )
 
+    async def upload_file_base64(self, path: str, base64_data: str) -> FileInfo:
+        """
+        Upload a file using Base64-encoded content.
+
+        Supports raw Base64 strings and data URLs (data:*;base64,...).
+
+        Args:
+            path: File path (relative to workspace)
+            base64_data: Base64-encoded content (raw or data URL)
+
+        Returns:
+            FileInfo: File information
+        """
+        self._ensure_running()
+        if not base64_data:
+            raise ValueError("base64_data is empty")
+
+        host_path = self.to_host_path(path=path)
+
+        try:
+            base64_str = base64_data
+            # 处理可能包含的前缀（如 data:image/jpeg;base64,）
+            if ',' in base64_data:
+                base64_str = base64_data.split(',')[1]
+
+            # 对 Base64 字符串进行解码
+            # urlsafe_b64decode 兼容标准 Base64 和 URL 安全的 Base64 编码
+            decoded_data = base64.urlsafe_b64decode(base64_str)
+
+            # 将解码后的二进制数据写入文件
+            with open(host_path, 'wb') as file:
+                file.write(decoded_data)
+
+            return FileInfo(
+                name=Path(path).name,
+                path=path,
+                size=len(base64_str),
+                file_type=FileType.from_extension(path),
+            )
+
+        except Exception as e:
+            raise e
+
     async def save_file(self, path: str, content: str) -> FileInfo:
         """
         Save file and return file info.
@@ -1099,7 +1144,10 @@ class Sandbox:
         2026-02-06 update
         转换至宿主机的绝对路径
         """
-        return self._workspace_path / path.lstrip("/")
+        path_obj = Path(path)
+        if path_obj.is_absolute():
+            return path_obj
+        return (self._workspace_path / str(path_obj).lstrip("/")).resolve()
 
     # Context Manager
     async def __aenter__(self: T) -> T:
