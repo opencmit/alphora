@@ -15,6 +15,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from alphora.sandbox.backends.base import ExecutionBackend, BackendFactory
+from alphora.sandbox.path_resolver import PathResolver
 from alphora.sandbox.types import (
     ExecutionResult,
     ResourceLimits,
@@ -23,6 +24,7 @@ from alphora.sandbox.types import (
     FileInfo,
     FileType,
 )
+from alphora.sandbox.workspace import Workspace
 from alphora.sandbox.exceptions import (
     FileNotFoundError as SandboxFileNotFoundError,
     PathTraversalError,
@@ -99,41 +101,11 @@ class LocalBackend(ExecutionBackend):
         self._env_vars: Dict[str, str] = {}
         self._python_path = python_path or sys.executable
         self._process_pool: List[asyncio.subprocess.Process] = []
+        self._path_resolver = PathResolver(Workspace(host_root=self._workspace_path))
     
     def _validate_path(self, path: str) -> Path:
-        """
-        Validate and resolve a file path.
-        
-        Ensures the path is within the workspace directory.
-        
-        Args:
-            path: File path (absolute or relative)
-        
-        Returns:
-            Path: Resolved absolute path
-        
-        Raises:
-            PathTraversalError: If path escapes workspace
-        """
-        # Handle absolute and relative paths
-        if path.startswith("/"):
-            full_path = Path(path)
-        else:
-            full_path = self._workspace_path / path
-        
-        # Resolve to absolute path
-        try:
-            resolved = full_path.resolve()
-        except Exception:
-            raise PathTraversalError(f"Invalid path: {path}")
-        
-        # Security check: ensure within workspace
-        try:
-            resolved.relative_to(self._workspace_path.resolve())
-        except ValueError:
-            raise PathTraversalError(f"Path escapes workspace: {path}")
-        
-        return resolved
+        """Validate and resolve file path within workspace."""
+        return self._path_resolver.to_host(path)
     
     def _get_execution_env(self) -> Dict[str, str]:
         """Get environment variables for execution"""

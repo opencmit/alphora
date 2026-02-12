@@ -26,6 +26,8 @@ from alphora.sandbox.types import (
 )
 from alphora.sandbox.backends.base import ExecutionBackend, BackendFactory
 from alphora.sandbox.config import SandboxConfig
+from alphora.sandbox.path_resolver import PathResolver
+from alphora.sandbox.workspace import Workspace
 from alphora.sandbox.exceptions import (
     SandboxError,
     SandboxNotRunningError,
@@ -198,6 +200,7 @@ class Sandbox:
             self._base_path = Path(base_path)
             self._workspace_path = self._base_path / self._sandbox_id
             self._using_storage = False
+        self._path_resolver = PathResolver(Workspace(host_root=self._workspace_path))
 
         # State
         self._status = SandboxStatus.CREATED
@@ -1144,10 +1147,7 @@ class Sandbox:
         2026-02-06 update
         转换至宿主机的绝对路径
         """
-        path_obj = Path(path)
-        if path_obj.is_absolute():
-            return path_obj
-        return (self._workspace_path / str(path_obj).lstrip("/")).resolve()
+        return self._path_resolver.to_host(path)
 
     # Context Manager
     async def __aenter__(self: T) -> T:

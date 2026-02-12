@@ -61,6 +61,8 @@ Multi-Sandbox Management:
 from alphora.sandbox.sandbox import Sandbox
 from alphora.sandbox.manager import SandboxManager
 from alphora.sandbox.agent_tools import SandboxTools
+from alphora.sandbox.path_resolver import PathResolver
+from alphora.sandbox.workspace import Workspace
 
 from alphora.sandbox.types import (
     BackendType,
@@ -126,6 +128,8 @@ __all__ = [
     "Sandbox",
     "SandboxManager",
     "SandboxTools",
+    "Workspace",
+    "PathResolver",
     "BackendType",
     "StorageType",
     "SandboxStatus",

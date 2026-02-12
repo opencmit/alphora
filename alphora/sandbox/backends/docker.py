@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from alphora.sandbox.backends.base import ExecutionBackend, BackendFactory
+from alphora.sandbox.path_resolver import PathResolver
 from alphora.sandbox.types import (
     ExecutionResult,
     ResourceLimits,
@@ -19,6 +20,7 @@ from alphora.sandbox.types import (
     FileInfo,
     FileType,
 )
+from alphora.sandbox.workspace import Workspace
 from alphora.sandbox.config import DockerConfig
 from alphora.sandbox.exceptions import (
     DockerError,
@@ -118,6 +120,9 @@ class DockerBackend(ExecutionBackend):
         self._client = None
         self._container_workspace = "/workspace"
         self._env_vars: Dict[str, str] = {}
+        self._path_resolver = PathResolver(
+            Workspace(host_root=self._workspace_path, sandbox_root=self._container_workspace)
+        )
     
     @property
     def container_id(self) -> Optional[str]:
@@ -308,38 +313,8 @@ class DockerBackend(ExecutionBackend):
         return container_config
 
     def _resolve_path(self, path: str) -> Path:
-        """
-        Resolve file path within workspace with safety checks.
-
-        Supports:
-        - relative paths (relative to workspace)
-        - absolute host paths (must be inside workspace)
-        - container paths like /workspace/xxx (mapped to workspace)
-        """
-        if not path:
-            return self._workspace_path.resolve()
-
-        path_str = str(path)
-        container_prefix = self._container_workspace.rstrip("/") + "/"
-        if path_str.startswith(container_prefix):
-            path_str = path_str[len(self._container_workspace):]
-
-        if path_str.startswith("/"):
-            full_path = Path(path_str)
-        else:
-            full_path = self._workspace_path / path_str.lstrip("/")
-
-        try:
-            resolved = full_path.resolve()
-        except Exception:
-            raise PathTraversalError(f"Invalid path: {path}")
-
-        try:
-            resolved.relative_to(self._workspace_path.resolve())
-        except ValueError:
-            raise PathTraversalError(f"Path escapes workspace: {path}")
-
-        return resolved
+        """Resolve file path to host path inside workspace boundaries."""
+        return self._path_resolver.to_host(path)
     
     async def _wait_for_ready(self, timeout: int = 30) -> None:
         """Wait for container to be ready"""
@@ -392,7 +367,7 @@ class DockerBackend(ExecutionBackend):
         timeout = timeout or self.resource_limits.timeout_seconds
         
         # Build command
-        container_path = f"{self._container_workspace}/{file_path.lstrip('/')}"
+        container_path = self._path_resolver.to_sandbox(file_path)
         cmd = f"python {container_path}"
         if args:
             cmd += " " + " ".join(args)

@@ -12,7 +12,7 @@ FileViewerAgent - 通用文件查看器 Agent
 import os
 from typing import Optional
 
-from alphora.sandbox import Sandbox
+from alphora.sandbox import Sandbox, PathTraversalError
 
 from .viewers.tabular import TabularViewer
 from .viewers.document import DocumentViewer
@@ -146,7 +146,10 @@ class FileViewer:
         """
 
         if self._sandbox:
-            file_path = self._sandbox.to_host_path(path=file_path)
+            try:
+                file_path = self._sandbox.to_host_path(path=file_path)
+            except PathTraversalError:
+                return "路径越界：只允许访问当前 workspace 内的文件。"
         else:
             file_path = file_path
 

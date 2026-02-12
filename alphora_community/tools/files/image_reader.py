@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from alphora.models import OpenAILike
 from alphora.models.message import Message
-from alphora.sandbox import Sandbox
+from alphora.sandbox import Sandbox, PathTraversalError
 
 
 class ImageAnalysisInput(BaseModel):
@@ -89,7 +89,10 @@ class ImageReader:
             ValueError: 不支持的图片格式
         """
         if self._sandbox:
-            path = self._sandbox.to_host_path(image_path)
+            try:
+                path = self._sandbox.to_host_path(image_path)
+            except PathTraversalError as exc:
+                raise ValueError("路径越界：只允许访问当前 workspace 内的图片。") from exc
         else:
             path = image_path
 
