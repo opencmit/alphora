@@ -272,9 +272,11 @@ class ChatExcel(BaseAgent):
         workspace_dir = "./chatexcel_workspace"
         sandbox_base_path = os.path.join(workspace_dir, "sandbox")
 
-        sandbox = Sandbox.create_docker(
-            base_path=sandbox_base_path,
-            sandbox_id=session_id
+        sandbox = Sandbox(
+            workspace_root=sandbox_base_path,
+            runtime="docker",
+            sandbox_id=session_id,
+            allow_network=True,
         )
         await sandbox.start()
         print(f'沙箱已初始化{sandbox.workspace_path}')

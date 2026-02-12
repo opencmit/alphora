@@ -17,7 +17,7 @@ SkillAgent - 支持 Agent Skills 标准的智能体
     response = await agent.run("帮我处理这个 PDF 文件")
 
 带额外工具和沙箱：
-    async with Sandbox.create_local() as sandbox:
+    async with Sandbox(runtime="local") as sandbox:
         agent = SkillAgent(
             llm=OpenAILike(),
             skill_paths=["./skills"],

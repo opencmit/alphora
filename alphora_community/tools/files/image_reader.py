@@ -443,14 +443,17 @@ class ImageReader:
 
 if __name__ == "__main__":
     from alphora.models import OpenAILike
-    from alphora.sandbox import Sandbox, StorageConfig, LocalStorage
+    from alphora.sandbox import Sandbox
     import asyncio
 
     async def main():
         llm = OpenAILike(model_name='qwen-vl-plus', is_multimodal=True)
-        sb_storage_config = StorageConfig(local_path='/Users/tiantiantian/临时/sandbox/my_sandbox')
-        sb_storage = LocalStorage(config=sb_storage_config)
-        sb = Sandbox.create_docker(base_path='/Users/tiantiantian/临时/sandbox', storage=sb_storage, sandbox_id='123456')
+        sb = Sandbox(
+            workspace_root='/Users/tiantiantian/临时/sandbox',
+            runtime='docker',
+            sandbox_id='123456',
+            allow_network=True,
+        )
 
         await sb.start()
 

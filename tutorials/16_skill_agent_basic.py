@@ -66,7 +66,7 @@ async def main() -> None:
         print("\nSkip SkillAgent run (missing env vars).")
         return
 
-    sandbox = Sandbox.create_docker()
+    sandbox = Sandbox(runtime="docker")
 
     await sandbox.start()
 

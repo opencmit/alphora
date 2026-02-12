@@ -5,7 +5,6 @@ A production-ready sandbox component for executing code in isolated environments
 
 Features:
     - Multiple execution backends (Local, Docker)
-    - Storage backends (Local, S3, MinIO)
     - Resource limits and security policies
     - AI Agent tool integrations
     - Async context manager support
@@ -14,7 +13,7 @@ Quick Start:
     ```python
     from alphora.sandbox import Sandbox
     
-    async with Sandbox.create_local() as sandbox:
+    async with Sandbox(runtime="local") as sandbox:
         result = await sandbox.run("print('Hello, World!')")
         print(result.stdout)  # Hello, World!
     ```
@@ -23,7 +22,7 @@ Docker Backend:
     ```python
     from alphora.sandbox import Sandbox
     
-    async with Sandbox.create_docker(docker_image="python:3.11") as sandbox:
+    async with Sandbox(runtime="docker", image="python:3.11") as sandbox:
         result = await sandbox.run("import sys; print(sys.version)")
         print(result.stdout)
     ```
@@ -32,7 +31,7 @@ With AI Agent Tools:
     ```python
     from alphora.sandbox import Sandbox, SandboxTools
     
-    async with Sandbox.create_local() as sandbox:
+    async with Sandbox(runtime="local") as sandbox:
         tools = SandboxTools(sandbox)
         
         # Get tool definitions for OpenAI/Anthropic

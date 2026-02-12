@@ -10,8 +10,7 @@ import base64
 import binascii
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Union, Type, TypeVar, TYPE_CHECKING, Callable
-from contextlib import asynccontextmanager
+from typing import Optional, List, Dict, Any, Union, TypeVar, Callable, Literal
 
 from alphora.sandbox.types import (
     BackendType,
@@ -25,17 +24,13 @@ from alphora.sandbox.types import (
     SandboxInfo,
 )
 from alphora.sandbox.backends.base import ExecutionBackend, BackendFactory
-from alphora.sandbox.config import SandboxConfig
 from alphora.sandbox.path_resolver import PathResolver
 from alphora.sandbox.workspace import Workspace
 from alphora.sandbox.exceptions import (
     SandboxError,
     SandboxNotRunningError,
     SandboxAlreadyRunningError,
-    ConfigurationError,
 )
-
-from alphora.sandbox.storage.base import StorageBackend
 from alphora.hooks import HookEvent, HookContext, HookManager, build_manager
 
 logger = logging.getLogger(__name__)
@@ -56,11 +51,14 @@ class Sandbox:
         - Environment variable management
         - Resource monitoring
         - Async context manager support
-        - Storage backend mounting for persistent workspaces
 
     Usage - Direct:
         ```python
-        sandbox = Sandbox.create_local("/data/sandboxes")
+        sandbox = Sandbox(
+            workspace_root="/data/sandboxes",
+            runtime="local",
+            allow_network=False,
+        )
         await sandbox.start()
         result = await sandbox.execute_code("print('Hello')")
         print(result.stdout)  # Hello
@@ -69,32 +67,9 @@ class Sandbox:
 
     Usage - Context Manager:
         ```python
-        async with Sandbox.create_local() as sandbox:
+        async with Sandbox(workspace_root="/tmp/sandboxes", runtime="local") as sandbox:
             result = await sandbox.execute_code("print('Hello')")
             print(result.stdout)
-        ```
-
-    Usage - From Config:
-        ```python
-        config = SandboxConfig.docker(image="python:3.11")
-        async with Sandbox.from_config(config) as sandbox:
-            result = await sandbox.run("print('Hello')")
-        ```
-
-    Usage - With Storage Backend (Persistent Workspace):
-        ```python
-        from alphora.sandbox.storage import LocalStorage, StorageConfig
-
-        # Create storage backend
-        storage_config = StorageConfig.local("/data/storage")
-        storage = LocalStorage(storage_config)
-
-        # Create sandbox with mounted storage
-        async with storage:
-            sandbox = Sandbox.create_local(storage=storage)
-            async with sandbox:
-                # Files are stored in /data/storage/<sandbox_id>/
-                await sandbox.write_file("data.txt", "persistent data")
         ```
 
     Extensibility - Subclass:
@@ -103,22 +78,22 @@ class Sandbox:
             async def my_custom_method(self):
                 return await self.execute_code("print('custom')")
 
-        sandbox = MySandbox.create_local()
+        sandbox = MySandbox(runtime="local")
         ```
     """
 
     def __init__(
             self,
-            backend_type: Union[str, BackendType] = BackendType.LOCAL,
+            workspace_root: str = "/tmp/sandboxes",
+            mount_mode: Literal["direct", "isolated"] = "direct",
+            runtime: Union[str, BackendType] = BackendType.LOCAL,
+            image: str = "alphora-sandbox:latest",
+            allow_network: bool = True,
             sandbox_id: Optional[str] = None,
             name: Optional[str] = None,
-            base_path: str = "/tmp/sandboxes",
-            docker_image: str = "python:3.11-slim",
             resource_limits: Optional[ResourceLimits] = None,
             security_policy: Optional[SecurityPolicy] = None,
             auto_cleanup: bool = False,
-            storage: Optional[StorageBackend] = None,
-            network_enabled: Optional[bool] = None,
             hooks: Optional[Union[HookManager, Dict[Any, Any]]] = None,
             before_start: Optional[Callable] = None,
             after_start: Optional[Callable] = None,
@@ -134,40 +109,39 @@ class Sandbox:
         Initialize sandbox.
 
         Args:
-            backend_type: Backend type ("local" or "docker")
+            workspace_root: Host path used as workspace mount root/path
+            mount_mode: "direct" uses workspace_root directly, "isolated" uses workspace_root/<sandbox_id>
+            runtime: Execution runtime ("local" or "docker")
+            image: Docker image when backend is docker
+            allow_network: Enable outbound network access
             sandbox_id: Unique identifier (auto-generated if not provided)
             name: Human-readable name
-            base_path: Base path for sandbox workspaces (ignored if storage is provided)
-            docker_image: Docker image (for Docker backend)
             resource_limits: Resource limits configuration
             security_policy: Security policy configuration
             auto_cleanup: Cleanup workspace on stop
-            storage: Storage backend for persistent workspace. When provided,
-                     workspace will be at storage_path/<sandbox_id>/
-            network_enabled: Enable/disable network access. When provided,
-                     overrides the value in resource_limits and security_policy.
             **kwargs: Additional backend-specific options
         """
-        # Handle backend type
-        if isinstance(backend_type, str):
-            backend_type = BackendType(backend_type.lower())
+        # Handle runtime type
+        if isinstance(runtime, str):
+            runtime = BackendType(runtime.lower())
 
-        self._backend_type = backend_type
+        if mount_mode not in ("direct", "isolated"):
+            raise ValueError(f"Invalid mount_mode: {mount_mode}. Expected 'direct' or 'isolated'.")
+
+        self._backend_type = runtime
         self._sandbox_id = sandbox_id or str(uuid.uuid4())[:8]
         self._name = name or f"sandbox-{self._sandbox_id}"
-        self._docker_image = docker_image
+        self._mount_mode = mount_mode
+        self._docker_image = image
         self._resource_limits = resource_limits or ResourceLimits()
         self._security_policy = security_policy or SecurityPolicy()
 
-        # Apply network_enabled override if explicitly provided
-        if network_enabled is not None:
-            self._resource_limits.network_enabled = network_enabled
-            self._security_policy.allow_network = network_enabled
+        # Simple and explicit: network flag always mirrors into limits + policy
+        self._resource_limits.network_enabled = allow_network
+        self._security_policy.allow_network = allow_network
         self._auto_cleanup = auto_cleanup
         self._extra_kwargs = kwargs
 
-        # Storage backend support
-        self._storage = storage
         self._hooks = build_manager(
             hooks,
             short_map={
@@ -190,16 +164,11 @@ class Sandbox:
             after_write_file=after_write_file,
         )
 
-        # Determine workspace path
-        if storage is not None:
-            # Use storage backend's path as workspace base
-            self._base_path = storage.base_path if hasattr(storage, 'base_path') else Path(storage._config.local_path or "/tmp/sandboxes")
-            self._workspace_path = self._base_path / self._sandbox_id
-            self._using_storage = True
+        self._base_path = Path(workspace_root)
+        if self._mount_mode == "direct":
+            self._workspace_path = self._base_path
         else:
-            self._base_path = Path(base_path)
             self._workspace_path = self._base_path / self._sandbox_id
-            self._using_storage = False
         self._path_resolver = PathResolver(Workspace(host_root=self._workspace_path))
 
         # State
@@ -210,182 +179,6 @@ class Sandbox:
         self._started_at: Optional[datetime] = None
         self._stopped_at: Optional[datetime] = None
         self._execution_count = 0
-
-    # Factory Methods
-    @classmethod
-    def create_local(
-            cls: Type[T],
-            base_path: str = "/tmp/sandboxes",
-            resource_limits: Optional[ResourceLimits] = None,
-            security_policy: Optional[SecurityPolicy] = None,
-            storage: Optional["StorageBackend"] = None,
-            network_enabled: Optional[bool] = None,
-            **kwargs
-    ) -> T:
-        """
-        Create a local sandbox.
-
-        Args:
-            base_path: Base path for sandbox workspace (ignored if storage is provided)
-            resource_limits: Resource limits
-            security_policy: Security policy
-            storage: Optional storage backend for persistent workspace
-            network_enabled: Enable/disable network access (overrides resource_limits)
-            **kwargs: Additional options
-
-        Returns:
-            Sandbox: Local sandbox instance
-
-        Example with storage:
-            ```python
-            from alphora.sandbox.storage import LocalStorage, StorageConfig
-
-            storage = LocalStorage(StorageConfig.local("/data/storage"))
-            async with storage:
-                sandbox = Sandbox.create_local(storage=storage)
-                async with sandbox:
-                    await sandbox.write_file("test.txt", "hello")
-                    # File persists at /data/storage/<sandbox_id>/test.txt
-            ```
-        """
-        return cls(
-            backend_type=BackendType.LOCAL,
-            base_path=base_path,
-            resource_limits=resource_limits,
-            security_policy=security_policy,
-            storage=storage,
-            network_enabled=network_enabled,
-            **kwargs
-        )
-
-    @classmethod
-    def create_docker(
-            cls: Type[T],
-            base_path: str = "/tmp/sandboxes",
-            docker_image: str = "alphora-sandbox:latest",
-            resource_limits: Optional[ResourceLimits] = None,
-            security_policy: Optional[SecurityPolicy] = None,
-            storage: Optional["StorageBackend"] = None,
-            network_enabled: Optional[bool] = None,
-            **kwargs
-    ) -> T:
-        """
-        Create a Docker sandbox.
-
-        Args:
-            base_path: Base path for sandbox workspace (ignored if storage is provided)
-            docker_image: Docker image to use
-            resource_limits: Resource limits
-            security_policy: Security policy
-            storage: Optional storage backend for persistent workspace
-            network_enabled: Enable/disable network access (overrides resource_limits)
-            **kwargs: Additional options
-
-        Returns:
-            Sandbox: Docker sandbox instance
-        """
-        return cls(
-            backend_type=BackendType.DOCKER,
-            base_path=base_path,
-            docker_image=docker_image,
-            resource_limits=resource_limits,
-            security_policy=security_policy,
-            storage=storage,
-            network_enabled=network_enabled,
-            **kwargs
-        )
-
-    @classmethod
-    def from_config(cls: Type[T], config: SandboxConfig, storage: Optional["StorageBackend"] = None, network_enabled: Optional[bool] = None, **kwargs) -> T:
-        """
-        Create sandbox from configuration.
-
-        Args:
-            config: Sandbox configuration
-            storage: Optional storage backend (overrides config.storage)
-            network_enabled: Enable/disable network access (overrides config)
-            **kwargs: Override options
-
-        Returns:
-            Sandbox: Configured sandbox instance
-        """
-        return cls(
-            backend_type=config.backend_type,
-            base_path=config.base_path,
-            docker_image=config.docker.image if config.docker else "python:3.11-slim",
-            resource_limits=config.resource_limits,
-            security_policy=config.security_policy,
-            auto_cleanup=config.auto_cleanup,
-            storage=storage,
-            network_enabled=network_enabled,
-            **kwargs
-        )
-
-    @classmethod
-    @asynccontextmanager
-    async def create(
-            cls: Type[T],
-            backend_type: Union[str, BackendType] = BackendType.LOCAL,
-            network_enabled: Optional[bool] = None,
-            **kwargs
-    ):
-        """
-        Create sandbox as async context manager.
-
-        Args:
-            backend_type: Backend type
-            network_enabled: Enable/disable network access
-            **kwargs: Sandbox options
-
-        Yields:
-            Sandbox: Running sandbox instance
-        """
-        sandbox = cls(backend_type=backend_type, network_enabled=network_enabled, **kwargs)
-        try:
-            await sandbox.start()
-            yield sandbox
-        finally:
-            await sandbox.stop()
-
-    @classmethod
-    @asynccontextmanager
-    async def create_with_storage(
-            cls: Type[T],
-            storage: "StorageBackend",
-            backend_type: Union[str, BackendType] = BackendType.LOCAL,
-            network_enabled: Optional[bool] = None,
-            **kwargs
-    ):
-        """
-        Create sandbox with storage backend as async context manager.
-
-        This is a convenience method that ensures storage is properly initialized.
-
-        Args:
-            storage: Storage backend (must be initialized)
-            backend_type: Backend type
-            network_enabled: Enable/disable network access
-            **kwargs: Sandbox options
-
-        Yields:
-            Sandbox: Running sandbox instance with mounted storage
-
-        Example:
-            ```python
-            from alphora.sandbox.storage import LocalStorage, StorageConfig
-
-            storage = LocalStorage(StorageConfig.local("/data/storage"))
-            async with storage:
-                async with Sandbox.create_with_storage(storage) as sandbox:
-                    await sandbox.write_file("data.txt", "persistent!")
-            ```
-        """
-        sandbox = cls(backend_type=backend_type, storage=storage, network_enabled=network_enabled, **kwargs)
-        try:
-            await sandbox.start()
-            yield sandbox
-        finally:
-            await sandbox.stop()
 
     @property
     def sandbox_id(self) -> str:
@@ -418,6 +211,11 @@ class Sandbox:
         return self._workspace_path
 
     @property
+    def mount_mode(self) -> str:
+        """Get workspace mount mode."""
+        return self._mount_mode
+
+    @property
     def resource_limits(self) -> ResourceLimits:
         """Get resource limits"""
         return self._resource_limits
@@ -431,16 +229,6 @@ class Sandbox:
     def backend(self) -> Optional[ExecutionBackend]:
         """Get execution backend"""
         return self._backend
-
-    @property
-    def storage(self) -> Optional["StorageBackend"]:
-        """Get associated storage backend (if any)"""
-        return self._storage
-
-    @property
-    def using_storage(self) -> bool:
-        """Check if sandbox is using a storage backend"""
-        return self._using_storage
 
     # Lifecycle Management
     async def start(self) -> "Sandbox":
@@ -475,10 +263,6 @@ class Sandbox:
                 # Create workspace directory
                 self._workspace_path.mkdir(parents=True, exist_ok=True)
 
-                # If using storage, ensure the sandbox directory exists in storage
-                if self._using_storage and self._storage:
-                    await self._ensure_storage_directory()
-
                 # Create backend
                 self._backend = self._create_backend()
 
@@ -507,15 +291,6 @@ class Sandbox:
                 self._status = SandboxStatus.ERROR
                 logger.error(f"Failed to start sandbox: {e}")
                 raise
-
-    async def _ensure_storage_directory(self) -> None:
-        """Ensure sandbox directory exists in storage backend"""
-        if self._storage and hasattr(self._storage, 'create_directory'):
-            try:
-                await self._storage.create_directory(self._sandbox_id)
-            except Exception:
-                # Directory might already exist or method not supported
-                pass
 
     async def stop(self) -> None:
         """Stop the sandbox."""
@@ -585,9 +360,8 @@ class Sandbox:
 
     async def _cleanup(self) -> None:
         """Clean up workspace directory"""
-        # Skip cleanup if using storage backend (files should persist)
-        if self._using_storage:
-            logger.debug(f"Skipping cleanup for storage-backed sandbox {self._sandbox_id}")
+        # Never remove user-provided workspace root in direct mode.
+        if self._mount_mode == "direct":
             return
 
         import shutil
@@ -596,39 +370,6 @@ class Sandbox:
                 shutil.rmtree(self._workspace_path)
             except Exception as e:
                 logger.warning(f"Failed to cleanup workspace: {e}")
-
-    async def cleanup_storage(self, force: bool = False) -> bool:
-        """
-        Explicitly cleanup files in storage backend.
-
-        This method is only effective when using a storage backend.
-        Use with caution as it will delete all sandbox files from storage.
-
-        Args:
-            force: Force cleanup even if sandbox is running
-
-        Returns:
-            bool: True if cleanup was performed
-        """
-        if not self._using_storage:
-            logger.warning("cleanup_storage called but sandbox is not using storage backend")
-            return False
-
-        if self._status == SandboxStatus.RUNNING and not force:
-            logger.warning("Cannot cleanup storage while sandbox is running. Use force=True to override.")
-            return False
-
-        if self._storage:
-            try:
-                deleted = await self._storage.delete(self._sandbox_id + "/")
-                if deleted:
-                    logger.info(f"Cleaned up storage for sandbox {self._sandbox_id}")
-                return deleted
-            except Exception as e:
-                logger.error(f"Failed to cleanup storage: {e}")
-                return False
-
-        return False
 
     def _create_backend(self) -> ExecutionBackend:
         """Create execution backend instance"""
@@ -996,7 +737,7 @@ class Sandbox:
 
     async def list_files(
             self,
-            path: str = "",
+            path: Optional[str] = None,
             recursive: bool = False,
             pattern: Optional[str] = None
     ) -> List[FileInfo]:
@@ -1004,7 +745,7 @@ class Sandbox:
         List files in directory.
 
         Args:
-            path: Directory path
+            path: Directory path. If None, list all files recursively from workspace root.
             recursive: Include subdirectories
             pattern: Filename pattern filter (glob)
 
@@ -1012,6 +753,10 @@ class Sandbox:
             List of FileInfo objects
         """
         self._ensure_running()
+
+        if path is None:
+            path = ""
+            recursive = True
 
         files = await self._backend.list_directory(path, recursive=recursive)
 
@@ -1119,8 +864,8 @@ class Sandbox:
             "status": self._status.value,
             "backend_type": self._backend_type.value,
             "is_running": self.is_running,
+            "mount_mode": self._mount_mode,
             "workspace_path": str(self._workspace_path),
-            "using_storage": self._using_storage,
             "created_at": self._created_at.isoformat(),
             "started_at": self._started_at.isoformat() if self._started_at else None,
             "execution_count": self._execution_count,
@@ -1158,6 +903,5 @@ class Sandbox:
         await self.stop()
 
     def __repr__(self) -> str:
-        storage_info = ", storage=True" if self._using_storage else ""
-        return f"Sandbox(id={self._sandbox_id!r}, backend={self._backend_type.value!r}, status={self._status.value!r}{storage_info})"
+        return f"Sandbox(id={self._sandbox_id!r}, runtime={self._backend_type.value!r}, mount_mode={self._mount_mode!r}, status={self._status.value!r})"
 

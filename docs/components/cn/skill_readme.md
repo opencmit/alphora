@@ -229,7 +229,7 @@ agent = SkillAgent(
 ```python
 from alphora.sandbox import Sandbox
 
-async with Sandbox.create_local() as sandbox:
+async with Sandbox(runtime="local") as sandbox:
     agent = SkillAgent(
         llm=llm,
         skill_paths=["./skills"],

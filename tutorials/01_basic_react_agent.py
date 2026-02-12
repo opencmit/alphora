@@ -52,7 +52,7 @@ async def main() -> None:
         )
 
     print("\n=== ReAct + Sandbox (auto tool registration) ===")
-    async with Sandbox.create_local() as sandbox:
+    async with Sandbox(runtime="local") as sandbox:
         sandbox_agent = ReActAgent(
             llm=llm,
             tools=[add],

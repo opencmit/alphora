@@ -21,7 +21,7 @@ import sys
 import os
 
 from alphora.models import OpenAILike
-from alphora.sandbox import Sandbox, StorageConfig, LocalStorage
+from alphora.sandbox import Sandbox
 
 from examples.mini_claw.engine import EvolutionEngine
 
@@ -32,14 +32,12 @@ async def main(query):
     llm = OpenAILike(model_name="qwen-max")
     reviewer_llm = OpenAILike(model_name="qwen-max")
 
-    storage_path = "/Users/tiantiantian/临时/sandbox/my_sandbox"
-    os.makedirs(storage_path, exist_ok=True)
-
-    storage_config = StorageConfig(local_path=storage_path)
-    storage = LocalStorage(config=storage_config)
-
-    sandbox = Sandbox.create_docker(
-        storage=storage,
+    sandbox_root = "/Users/tiantiantian/临时/sandbox/my_sandbox"
+    os.makedirs(sandbox_root, exist_ok=True)
+    sandbox = Sandbox(
+        workspace_root=sandbox_root,
+        runtime="docker",
+        allow_network=True,
     )
 
     try:

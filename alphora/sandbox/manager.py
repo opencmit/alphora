@@ -17,7 +17,6 @@ from alphora.sandbox.types import (
     SecurityPolicy,
     SandboxInfo,
 )
-from alphora.sandbox.config import SandboxConfig
 from alphora.sandbox.exceptions import (
     SandboxNotFoundError,
     SandboxAlreadyExistsError,
@@ -162,10 +161,12 @@ class SandboxManager:
         self,
         name: Optional[str] = None,
         sandbox_id: Optional[str] = None,
-        backend_type: Optional[BackendType] = None,
+        mount_mode: str = "isolated",
+        runtime: Optional[Union[str, BackendType]] = None,
         resource_limits: Optional[ResourceLimits] = None,
         security_policy: Optional[SecurityPolicy] = None,
-        docker_image: str = "python:3.11-slim",
+        image: str = "alphora-sandbox:latest",
+        allow_network: bool = False,
         auto_start: bool = True,
         **kwargs
     ) -> Sandbox:
@@ -175,10 +176,12 @@ class SandboxManager:
         Args:
             name: Human-readable name
             sandbox_id: Unique ID (auto-generated if not provided)
-            backend_type: Backend type (uses default if not specified)
+            mount_mode: "direct" uses manager base_path directly, "isolated" uses base_path/<sandbox_id>
+            runtime: Runtime type (local/docker, uses default if not specified)
             resource_limits: Resource limits (uses default if not specified)
             security_policy: Security policy (uses default if not specified)
-            docker_image: Docker image for Docker backend
+            image: Docker image for Docker backend
+            allow_network: Enable network access
             auto_start: Automatically start the sandbox
             **kwargs: Additional sandbox options
         
@@ -195,11 +198,13 @@ class SandboxManager:
             
             # Create sandbox
             sandbox = Sandbox(
-                backend_type=backend_type or self._default_backend,
+                runtime=runtime or self._default_backend,
                 sandbox_id=sandbox_id,
                 name=name,
-                base_path=str(self._base_path),
-                docker_image=docker_image,
+                workspace_root=str(self._base_path),
+                mount_mode=mount_mode,
+                image=image,
+                allow_network=allow_network,
                 resource_limits=resource_limits or self._default_limits,
                 security_policy=security_policy or self._default_policy,
                 auto_cleanup=self._auto_cleanup,
@@ -221,32 +226,6 @@ class SandboxManager:
             logger.info(f"Created sandbox: {sandbox.sandbox_id}")
             
             return sandbox
-    
-    async def create_local_sandbox(
-        self,
-        name: Optional[str] = None,
-        **kwargs
-    ) -> Sandbox:
-        """Create a local sandbox."""
-        return await self.create_sandbox(
-            name=name,
-            backend_type=BackendType.LOCAL,
-            **kwargs
-        )
-    
-    async def create_docker_sandbox(
-        self,
-        name: Optional[str] = None,
-        docker_image: str = "python:3.11-slim",
-        **kwargs
-    ) -> Sandbox:
-        """Create a Docker sandbox."""
-        return await self.create_sandbox(
-            name=name,
-            backend_type=BackendType.DOCKER,
-            docker_image=docker_image,
-            **kwargs
-        )
     
     async def get_or_create(
         self,

@@ -58,14 +58,13 @@
 ```python
 import asyncio
 from alphora.models import OpenAILike
-from alphora.sandbox import Sandbox, StorageConfig, LocalStorage
+from alphora.sandbox import Sandbox
 from alphora_evo import EvolutionEngine
 
 async def main():
     llm = OpenAILike(model_name="qwen-max")
     
-    storage = LocalStorage(StorageConfig(local_path="/tmp/evo/storage"))
-    sandbox = Sandbox.create_docker(base_path="/tmp/evo", storage=storage)
+    sandbox = Sandbox(workspace_root="/tmp/evo", runtime="docker", allow_network=True)
     
     async with sandbox:
         engine = EvolutionEngine(llm=llm, sandbox=sandbox)

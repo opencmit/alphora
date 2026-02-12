@@ -28,7 +28,7 @@ class SandboxTools:
         ```python
         from alphora.sandbox import Sandbox, SandboxTools
         
-        async with Sandbox.create_local() as sandbox:
+        async with Sandbox(runtime="local") as sandbox:
             tools = SandboxTools(sandbox)
             
             # Execute code

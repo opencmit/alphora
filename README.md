@@ -43,7 +43,12 @@ def search_database(query: str) -> str:
     return f"Found 3 results for: {query}"
 
 
-sandbox = Sandbox.create_docker()
+sandbox = Sandbox(
+    workspace_root="/tmp/alphora-workspace",
+    mount_mode="direct",
+    runtime="docker",
+    allow_network=True,
+)
 
 agent = ReActAgent(
     llm=OpenAILike(model_name="gpt-4"),

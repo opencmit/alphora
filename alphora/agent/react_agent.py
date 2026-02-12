@@ -16,7 +16,7 @@ ReAct Agent - 支持自动工具调用循环的智能体
     response = await agent.run("今天北京天气怎么样？")
 
 带 Sandbox 的用法：
-    async with Sandbox.create_local() as sandbox:
+    async with Sandbox(runtime="local") as sandbox:
         agent = ReActAgent(
             llm=OpenAILike(),
             tools=[get_weather],
@@ -67,7 +67,7 @@ class ReActAgent(BaseAgent):
         result = await agent.run("北京今天天气怎么样？")
 
         # 带 Sandbox
-        async with Sandbox.create_local() as sandbox:
+        async with Sandbox(runtime="local") as sandbox:
             agent = ReActAgent(
                 llm=llm,
                 tools=[read_csv],
