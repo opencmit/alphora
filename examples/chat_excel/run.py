@@ -1,21 +1,5 @@
 """
 ChatExcel (Skill-based)
-
-Rewrite of the ChatExcel agent using the Skill architecture.
-Instead of hard-coded prompts, analysis knowledge lives in
-skills/data-analysis/SKILL.md and its helper scripts.
-
-The SkillAgent handles:
-  - Auto-discovering skills from the skills/ directory
-  - Injecting skill metadata into the system prompt
-  - Providing read_skill / read_skill_resource tools for the LLM
-  - Auto-wiring sandbox skill_host_path from skill_paths
-  - Auto-starting the sandbox on run()
-
-Usage:
-    python -m examples.chat_excel.run
-    python -m examples.chat_excel.run --query "帮我分析sales.csv"
-    python -m examples.chat_excel.run --runtime local --file data.csv
 """
 
 import asyncio
