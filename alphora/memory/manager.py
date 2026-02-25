@@ -837,6 +837,29 @@ class MemoryManager:
         after_ctx = self._hooks.emit_sync(HookEvent.MEMORY_AFTER_BUILD_HISTORY, after_ctx)
         return after_ctx.data.get("history", history_payload)
 
+    def count_length(
+            self,
+            session_id: str = DEFAULT_SESSION,
+            mode: Literal["chars", "tokens"] = "chars",
+            tokenizer: Optional[Callable[[str], int]] = None,
+            **build_history_kwargs
+    ) -> int:
+        """
+        统计当前上下文的字数，用于判断是否需要记忆压缩。
+        Args:
+            session_id: 会话 ID
+            mode: 统计模式
+                - "chars": 字符数（快速，无需额外依赖）
+                - "tokens": token 数（精确，用于 LLM 上下文限制，需传入 tokenizer）
+            tokenizer: token 计数函数，mode="tokens" 时必传。
+                例如: ``lambda s: len(tiktoken.encoding_for_model("gpt-4").encode(s))``
+
+        Returns:
+            字数（字符数或 token 数）
+        """
+
+        return self.build_history(session_id=session_id, **build_history_kwargs).count_context_length(mode=mode, tokenizer=tokenizer)
+
     def build_history_unsafe(
             self,
             session_id: str = DEFAULT_SESSION,
@@ -1584,7 +1607,7 @@ class MemoryManager:
                 "✓" if stats.get('tool_chain_valid', True)
                 else f"✗ ({stats.get('pending_tool_calls', 0)} pending)"
             )
-            pin_info = f", 📌{stats.get('pinned_count', 0)}" if stats.get('pinned_count') else ""
+            pin_info = f", {stats.get('pinned_count', 0)}" if stats.get('pinned_count') else ""
             lines.append(
                 f"  [{session_id}]: {stats['total_messages']} msgs, "
                 f"{stats['rounds']} rounds, tools: {tool_status}{pin_info}"

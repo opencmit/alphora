@@ -21,7 +21,7 @@ Key Features:
         has a corresponding `tool` response, preventing LLM context errors.
 """
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Set, Tuple
 from dataclasses import dataclass, field
 import time
 import hashlib
@@ -237,6 +237,40 @@ class HistoryPayload:
     def is_empty(self) -> bool:
         """是否为空"""
         return self.message_count == 0
+
+    def count_context_length(
+            self,
+            mode: Literal["chars", "tokens"] = "chars",
+            tokenizer: Optional[Callable[[str], int]] = None
+    ) -> int:
+        """
+        统计当前上下文的字数，用于判断是否需要记忆压缩
+        在 ReACT 循环中，可在每次迭代前调用此方法判断上下文是否过长
+        Args:
+            mode: 统计模式
+                - "chars": 字符数（快速，无需额外依赖）
+                - "tokens": token 数（精确，用于 LLM 上下文限制，需传入 tokenizer）
+            tokenizer: token 计数函数，接收字符串返回 token 数。
+                mode="tokens" 时必传。可使用 tiktoken:
+                ``enc = tiktoken.encoding_for_model("gpt-4"); tokenizer=lambda s: len(enc.encode(s))``
+        Returns:
+            字数（字符数或 token 数）
+        """
+        if mode == "tokens" and tokenizer is None:
+            raise ValueError(
+                "mode='tokens' requires a tokenizer function. "
+                "Example: tokenizer=lambda s: len(tiktoken.encoding_for_model('gpt-4').encode(s))"
+            )
+
+        total = 0
+        for msg in self.messages:
+            text = json.dumps(msg, ensure_ascii=False)
+            if mode == "chars":
+                total += len(text)
+            else:
+                total += tokenizer(text)
+
+        return total
 
     def __len__(self) -> int:
         return self.message_count
