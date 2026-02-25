@@ -29,9 +29,6 @@ def log_event(prefix: str):
 
 
 async def main() -> None:
-    if not os.getenv("LLM_API_KEY") or not os.getenv("LLM_BASE_URL") or not os.getenv("DEFAULT_LLM"):
-        print("Missing env vars. Please set LLM_API_KEY, LLM_BASE_URL, DEFAULT_LLM.")
-        return
 
     hooks = HookManager(default_timeout=1.0)
     hooks.register(HookEvent.AGENT_BEFORE_RUN, log_event("agent"))
@@ -39,7 +36,6 @@ async def main() -> None:
     hooks.register(HookEvent.TOOLS_BEFORE_EXECUTE, log_event("tools"))
     hooks.register(HookEvent.TOOLS_AFTER_EXECUTE, log_event("tools"))
 
-    # Priority and conditional execution
     def high_priority(ctx):
         print("[high_priority] before run")
         return None

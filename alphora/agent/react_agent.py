@@ -241,6 +241,9 @@ class ReActAgent(BaseAgent):
                                 "iteration": iteration + 1,
                                 "response": response,
                                 "tool_results": None,
+                                "memory": self.memory,
+                                "sandbox": self._sandbox,
+                                "llm": self.llm,
                             },
                         ),
                     )
@@ -258,6 +261,9 @@ class ReActAgent(BaseAgent):
                         "iteration": iteration + 1,
                         "response": response,
                         "tool_results": tool_results,
+                        "memory": self.memory,
+                        "sandbox": self._sandbox,
+                        "llm": self.llm,
                     },
                 ),
             )
@@ -349,6 +355,9 @@ class ReActAgent(BaseAgent):
                             "iteration": iteration + 1,
                             "response": response,
                             "tool_results": None,
+                            "memory": self.memory,
+                            "sandbox": self._sandbox,
+                            "llm": self.llm,
                         },
                     ),
                 )
@@ -385,6 +394,9 @@ class ReActAgent(BaseAgent):
                         "iteration": iteration + 1,
                         "response": response,
                         "tool_results": tool_results,
+                        "memory": self.memory,
+                        "sandbox": self._sandbox,
+                        "llm": self.llm,
                     },
                 ),
             )

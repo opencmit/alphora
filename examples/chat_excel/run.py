@@ -11,6 +11,8 @@ from pathlib import Path
 from alphora.models import OpenAILike
 from alphora.sandbox import Sandbox
 from alphora.agent import SkillAgent
+from alphora.hooks import HookManager, HookEvent
+from alphora.hooks.builtins import make_memory_compressor
 
 
 SKILLS_DIR = str(Path(__file__).parent / "skills")
@@ -61,6 +63,13 @@ async def main(
         shutil.copy2(file_to_copy, dest)
         print(f"[setup] Copied {file_to_copy} -> {dest}")
 
+    hooks = HookManager()
+    hooks.register(
+        HookEvent.AGENT_AFTER_ITERATION,
+        make_memory_compressor(threshold=100000),
+        timeout=120,
+    )
+
     sandbox = Sandbox(
         workspace_root=workspace,
         runtime=runtime,
@@ -73,6 +82,7 @@ async def main(
         sandbox=sandbox,
         system_prompt=SYSTEM_PROMPT,
         max_iterations=30,
+        hooks=hooks,
     )
 
     print(f"[info] Skills dir     : {SKILLS_DIR}")

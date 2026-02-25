@@ -85,7 +85,7 @@ class SkillAgent(BaseAgent):
     Example:
         # 最简用法
         agent = SkillAgent(
-            llm=OpenAILike(model_name="gpt-4"),
+            llm=OpenAILike(model_name="qwen-plus"),
             skill_paths=["./skills"],
         )
         result = await agent.run("帮我创建一份 PDF 报告")
@@ -291,9 +291,12 @@ class SkillAgent(BaseAgent):
                     "query": query,
                     "agent_type": self.agent_type,
                     "agent_id": self.agent_id,
+                    "memory": self.memory,
+                    "sandbox": self.sandbox
                 },
             ),
         )
+
         self.memory.add_user(content=query)
 
         tools_schema = self._registry.get_openai_tools_schema()
@@ -304,6 +307,7 @@ class SkillAgent(BaseAgent):
             )
 
             history = self.memory.build_history()
+
             await self._hooks.emit(
                 HookEvent.AGENT_BEFORE_ITERATION,
                 HookContext(
@@ -342,6 +346,9 @@ class SkillAgent(BaseAgent):
                             "iteration": iteration + 1,
                             "response": response,
                             "tool_results": None,
+                            "memory": self.memory,
+                            "sandbox": self._sandbox,
+                            "llm": self.llm,
                         },
                     ),
                 )
@@ -370,6 +377,9 @@ class SkillAgent(BaseAgent):
                         "iteration": iteration + 1,
                         "response": response,
                         "tool_results": tool_results,
+                        "memory": self.memory,
+                        "sandbox": self._sandbox,
+                        "llm": self.llm,
                     },
                 ),
             )
@@ -462,6 +472,9 @@ class SkillAgent(BaseAgent):
                             "iteration": iteration + 1,
                             "response": response,
                             "tool_results": None,
+                            "memory": self.memory,
+                            "sandbox": self._sandbox,
+                            "llm": self.llm,
                         },
                     ),
                 )
@@ -495,6 +508,9 @@ class SkillAgent(BaseAgent):
                         "iteration": iteration + 1,
                         "response": response,
                         "tool_results": tool_results,
+                        "memory": self.memory,
+                        "sandbox": self._sandbox,
+                        "llm": self.llm,
                     },
                 ),
             )
