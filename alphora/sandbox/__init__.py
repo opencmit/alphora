@@ -79,6 +79,8 @@ from alphora.sandbox.types import (
 )
 
 from alphora.sandbox.config import (
+    SANDBOX_WORKSPACE,
+    SANDBOX_SKILLS_MOUNT,
     SandboxConfig,
     StorageConfig,
     DockerConfig,
@@ -141,6 +143,8 @@ __all__ = [
     "PackageInfo",
     "SandboxInfo",
     "ResourceUsage",
+    "SANDBOX_WORKSPACE",
+    "SANDBOX_SKILLS_MOUNT",
     "SandboxConfig",
     "StorageConfig",
     "DockerConfig",

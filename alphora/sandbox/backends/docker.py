@@ -21,7 +21,7 @@ from alphora.sandbox.types import (
     FileType,
 )
 from alphora.sandbox.workspace import Workspace
-from alphora.sandbox.config import DockerConfig
+from alphora.sandbox.config import DockerConfig, SANDBOX_SKILLS_MOUNT
 from alphora.sandbox.exceptions import (
     DockerError,
     ContainerError,
@@ -89,6 +89,7 @@ class DockerBackend(ExecutionBackend):
         security_policy: Optional[SecurityPolicy] = None,
         docker_image: str = "alphora-sandbox:latest",
         docker_config: Optional[DockerConfig] = None,
+        skill_host_path: Optional[str] = None,
         **kwargs
     ):
         """
@@ -101,6 +102,7 @@ class DockerBackend(ExecutionBackend):
             security_policy: Security policy configuration
             docker_image: Docker image to use
             docker_config: Docker-specific configuration
+            skill_host_path: Host path to skills directory (mounted read-only at /mnt/skills)
             **kwargs: Additional options
         """
         super().__init__(
@@ -113,12 +115,13 @@ class DockerBackend(ExecutionBackend):
 
         self._docker_image = docker_image
         self._docker_config = docker_config or DockerConfig(image=docker_image)
+        self._skill_host_path = Path(skill_host_path) if skill_host_path else None
 
         self._docker_dir = Path(__file__).parent.parent / "docker"
 
         self._container = None
         self._client = None
-        self._container_workspace = "/workspace"
+        self._container_workspace = self._docker_config.working_dir
         self._env_vars: Dict[str, str] = {}
         self._path_resolver = PathResolver(
             Workspace(host_root=self._workspace_path, sandbox_root=self._container_workspace)
@@ -288,12 +291,7 @@ class DockerBackend(ExecutionBackend):
             "read_only": config.read_only_root,
             
             # Volumes
-            "volumes": {
-                str(self._workspace_path.resolve()): {
-                    "bind": self._container_workspace,
-                    "mode": "rw"
-                }
-            },
+            "volumes": self._build_volumes(),
             
             # Environment
             "environment": {
@@ -311,6 +309,21 @@ class DockerBackend(ExecutionBackend):
             container_config["user"] = config.user
         
         return container_config
+
+    def _build_volumes(self) -> Dict[str, Dict[str, str]]:
+        """Build volume mount configuration."""
+        volumes = {
+            str(self._workspace_path.resolve()): {
+                "bind": self._container_workspace,
+                "mode": "rw",
+            }
+        }
+        if self._skill_host_path and self._skill_host_path.is_dir():
+            volumes[str(self._skill_host_path.resolve())] = {
+                "bind": SANDBOX_SKILLS_MOUNT,
+                "mode": "ro",
+            }
+        return volumes
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve file path to host path inside workspace boundaries."""

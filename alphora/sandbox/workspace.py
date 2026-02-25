@@ -16,7 +16,7 @@ class Workspace:
     """
 
     host_root: Path
-    sandbox_root: str = "/workspace"
+    sandbox_root: str = "/mnt/workspace"
 
     def __post_init__(self) -> None:
         host_root = Path(self.host_root).resolve()
@@ -27,7 +27,7 @@ class Workspace:
     @staticmethod
     def _normalize_sandbox_root(path: str) -> str:
         if not path:
-            return "/workspace"
+            return "/mnt/workspace"
         normalized = str(path).replace("\\", "/").strip()
         if not normalized.startswith("/"):
             normalized = f"/{normalized}"

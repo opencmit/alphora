@@ -14,7 +14,7 @@ class PathResolver:
     Supports three input styles:
     - workspace-relative path, e.g. "src/main.py"
     - host absolute path, must stay inside workspace root
-    - sandbox absolute path, e.g. "/workspace/src/main.py"
+    - sandbox absolute path, e.g. "/mnt/workspace/src/main.py"
     """
 
     def __init__(self, workspace: Workspace):

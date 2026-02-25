@@ -94,6 +94,7 @@ class Sandbox:
             resource_limits: Optional[ResourceLimits] = None,
             security_policy: Optional[SecurityPolicy] = None,
             auto_cleanup: bool = False,
+            skill_host_path: Optional[str] = None,
             hooks: Optional[Union[HookManager, Dict[Any, Any]]] = None,
             before_start: Optional[Callable] = None,
             after_start: Optional[Callable] = None,
@@ -119,6 +120,7 @@ class Sandbox:
             resource_limits: Resource limits configuration
             security_policy: Security policy configuration
             auto_cleanup: Cleanup workspace on stop
+            skill_host_path: Host path to skills directory, mounted read-only at /mnt/skills in Docker
             **kwargs: Additional backend-specific options
         """
         # Handle runtime type
@@ -139,6 +141,7 @@ class Sandbox:
         # Simple and explicit: network flag always mirrors into limits + policy
         self._resource_limits.network_enabled = allow_network
         self._security_policy.allow_network = allow_network
+        self._skill_host_path = Path(skill_host_path) if skill_host_path else None
         self._auto_cleanup = auto_cleanup
         self._extra_kwargs = kwargs
 
@@ -209,6 +212,11 @@ class Sandbox:
     def workspace_path(self) -> Path:
         """Get workspace directory path"""
         return self._workspace_path
+
+    @property
+    def skill_host_path(self) -> Optional[Path]:
+        """Get host path to skills directory (None if not configured)"""
+        return self._skill_host_path
 
     @property
     def mount_mode(self) -> str:
@@ -382,6 +390,8 @@ class Sandbox:
 
         if self._backend_type == BackendType.DOCKER:
             backend_kwargs["docker_image"] = self._docker_image
+            if self._skill_host_path:
+                backend_kwargs["skill_host_path"] = str(self._skill_host_path)
 
         backend_kwargs.update(self._extra_kwargs)
 

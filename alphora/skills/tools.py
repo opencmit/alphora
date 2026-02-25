@@ -10,11 +10,12 @@ Skill 内置工具集
 - read_skill: 加载 Skill 完整指令（Phase 2）
 - read_skill_resource: 读取资源文件（Phase 3）
 - list_skill_resources: 列出资源目录
-- run_skill_script: 执行脚本（需 Sandbox）
+
+Skill 脚本的执行由 LLM 自主完成：LLM 读取 SKILL.md 后，
+结合沙箱路径约定，通过 run_shell_command 直接执行。
 
 工具创建方式：
     tools = create_skill_tools(manager)
-    tools = create_skill_tools(manager, sandbox=sandbox)
 
 与 ToolRegistry 集成：
     for t in create_skill_tools(manager):
@@ -26,7 +27,6 @@ import logging
 
 from .manager import SkillManager
 from .exceptions import SkillError
-from alphora.sandbox import Sandbox
 from alphora.tools.decorators import Tool
 
 logger = logging.getLogger(__name__)
@@ -34,17 +34,18 @@ logger = logging.getLogger(__name__)
 
 def create_skill_tools(
     manager: SkillManager,
-    sandbox: Optional[Sandbox] = None,
 ) -> list:
     """
     创建 Skill 交互工具集
 
-    根据传入的 SkillManager 和可选的 Sandbox，生成一组可被 LLM 调用的工具。
+    生成一组可被 LLM 调用的工具，用于发现和读取 Skills。
     这些工具会被注册到 ToolRegistry，通过 OpenAI Function Calling 协议暴露给 LLM。
+
+    Skill 脚本的执行不由这些工具负责——LLM 读取 SKILL.md 后，
+    自主推理出沙箱内路径并通过 run_shell_command 执行。
 
     Args:
         manager: SkillManager 实例，提供 Skill 数据访问
-        sandbox: 可选的 Sandbox 实例，传入后会额外生成脚本执行工具
 
     Returns:
         Tool 实例列表，可直接注册到 ToolRegistry
@@ -135,67 +136,7 @@ def create_skill_tools(
         except SkillError as e:
             return f"Error: {e}"
 
-    tools = [read_skill, read_skill_resource, list_skill_resources]
-
-    # Tool 4: 执行脚本（仅在有 Sandbox 时可用）
-    if sandbox is not None:
-        @tool(
-            name="run_skill_script",
-            description=(
-                "Execute a script from a skill's scripts/ directory in a sandbox environment. "
-                "Use this when skill instructions tell you to run a specific script. "
-                "The script runs in an isolated sandbox with its output returned."
-            )
-        )
-        async def run_skill_script(
-            skill_name: str,
-            script_path: str,
-            args: str = "",
-        ) -> str:
-            """
-            在沙箱中执行 Skill 的脚本。
-
-            Args:
-                skill_name: Skill 名称
-                script_path: 脚本路径（如 'extract.py' 或 'scripts/extract.py'）
-                args: 传递给脚本的命令行参数
-
-            Returns:
-                脚本执行的标准输出和标准错误
-            """
-            try:
-                full_path = manager.get_script_path(skill_name, script_path)
-
-                # 根据文件扩展名决定执行方式
-                suffix = full_path.suffix.lower()
-                if suffix == ".py":
-                    cmd = f"python {full_path} {args}".strip()
-                elif suffix == ".sh":
-                    cmd = f"bash {full_path} {args}".strip()
-                elif suffix == ".js":
-                    cmd = f"node {full_path} {args}".strip()
-                else:
-                    cmd = f"{full_path} {args}".strip()
-
-                result = await sandbox.run_shell_command(cmd)
-
-                # 组合输出
-                output_parts = []
-                if hasattr(result, 'stdout') and result.stdout:
-                    output_parts.append(result.stdout)
-                if hasattr(result, 'stderr') and result.stderr:
-                    output_parts.append(f"[stderr] {result.stderr}")
-
-                return "\n".join(output_parts) if output_parts else "(no output)"
-
-            except SkillError as e:
-                return f"Error: {e}"
-            except Exception as e:
-                return f"Script execution failed: {e}"
-
-        tools.append(run_skill_script)
-
-    return tools
+    return [read_skill, read_skill_resource, list_skill_resources]
 
 
 def create_filesystem_skill_tools(manager: SkillManager) -> list:

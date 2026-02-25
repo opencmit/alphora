@@ -46,6 +46,7 @@ from alphora.tools.registry import ToolRegistry
 from alphora.tools.executor import ToolExecutor
 from alphora.memory import MemoryManager
 from alphora.skills import SkillManager, create_skill_tools, create_filesystem_skill_tools
+from alphora.sandbox.config import SANDBOX_SKILLS_MOUNT
 from alphora.hooks import HookEvent, HookContext, HookManager, build_manager
 
 if TYPE_CHECKING:
@@ -150,6 +151,26 @@ class SkillAgent(BaseAgent):
         self._sandbox = sandbox
         self._filesystem_mode = filesystem_mode
 
+        # Auto-wire: if sandbox exists but has no skill_host_path,
+        # infer it from the SkillManager's first search path so the
+        # developer doesn't have to specify the same path twice.
+        if (
+            sandbox is not None
+            and not getattr(sandbox, "skill_host_path", None)
+            and self._skill_manager.search_paths
+        ):
+            sandbox._skill_host_path = self._skill_manager.search_paths[0]
+            logger.info(
+                f"Auto-configured sandbox skill_host_path: "
+                f"{sandbox._skill_host_path}"
+            )
+
+        # When a Docker sandbox with skills is configured, tell SkillManager
+        # to output sandbox-internal paths in the prompt so LLM can reason
+        # about in-container paths correctly.
+        if sandbox is not None and getattr(sandbox, "skill_host_path", None):
+            self._skill_manager.sandbox_skill_root = SANDBOX_SKILLS_MOUNT
+
         # Tool Registry
         self._registry = ToolRegistry()
 
@@ -162,7 +183,7 @@ class SkillAgent(BaseAgent):
         if filesystem_mode:
             skill_tools = create_filesystem_skill_tools(self._skill_manager)
         else:
-            skill_tools = create_skill_tools(self._skill_manager, sandbox=sandbox)
+            skill_tools = create_skill_tools(self._skill_manager)
 
         for t in skill_tools:
             self._registry.register(t)
@@ -229,11 +250,17 @@ class SkillAgent(BaseAgent):
                 try:
                     self._registry.register(t)
                 except Exception:
-                    # 如果已注册同名工具（如 run_skill_script 与 run_shell_command），跳过
+                    # 跳过已注册的同名工具
                     pass
 
         except ImportError:
             logger.debug("Sandbox module not available, skipping sandbox tools")
+
+    async def _ensure_sandbox_ready(self) -> None:
+        """Auto-start sandbox if configured but not yet running."""
+        if self._sandbox is not None and not self._sandbox.is_running:
+            logger.info("Sandbox not running, auto-starting...")
+            await self._sandbox.start()
 
     # 执行
     async def run(self, query: str) -> str:
@@ -253,6 +280,8 @@ class SkillAgent(BaseAgent):
         Returns:
             最终响应文本
         """
+        await self._ensure_sandbox_ready()
+
         await self._hooks.emit(
             HookEvent.AGENT_BEFORE_RUN,
             HookContext(
@@ -381,6 +410,8 @@ class SkillAgent(BaseAgent):
         Yields:
             SkillAgentStep: 每一步的执行详情
         """
+        await self._ensure_sandbox_ready()
+
         await self._hooks.emit(
             HookEvent.AGENT_BEFORE_RUN,
             HookContext(

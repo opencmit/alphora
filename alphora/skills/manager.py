@@ -76,6 +76,7 @@ class SkillManager:
         self,
         skill_paths: Optional[List[Union[str, Path]]] = None,
         auto_discover: bool = True,
+        sandbox_skill_root: Optional[str] = None,
     ):
         # 搜索路径列表
         self._search_paths: List[Path] = []
@@ -88,6 +89,10 @@ class SkillManager:
 
         # 记录发现过程中遇到的错误（不中断整体流程）
         self._discovery_errors: List[str] = []
+
+        # When set, to_prompt() outputs sandbox-internal paths instead of host
+        # paths, enabling LLM to construct valid commands for in-sandbox execution.
+        self._sandbox_skill_root: Optional[str] = sandbox_skill_root
 
         if skill_paths:
             for p in skill_paths:
@@ -131,6 +136,15 @@ class SkillManager:
     def search_paths(self) -> List[Path]:
         """当前配置的搜索路径列表"""
         return list(self._search_paths)
+
+    @property
+    def sandbox_skill_root(self) -> Optional[str]:
+        """Sandbox-internal skill mount path (e.g. '/mnt/skills'), or None for host paths."""
+        return self._sandbox_skill_root
+
+    @sandbox_skill_root.setter
+    def sandbox_skill_root(self, value: Optional[str]) -> None:
+        self._sandbox_skill_root = value
 
     #  Discovery
     def discover(self) -> List[SkillProperties]:
@@ -507,6 +521,13 @@ class SkillManager:
         else:
             raise ValueError(f"Unsupported prompt format: '{format}'. Use 'xml' or 'markdown'.")
 
+    def _skill_location(self, props: SkillProperties) -> str:
+        """Return the display location for a skill (sandbox path or host path)."""
+        if self._sandbox_skill_root:
+            root = self._sandbox_skill_root.rstrip("/")
+            return f"{root}/{props.name}/SKILL.md"
+        return str(props.skill_md_path)
+
     def _to_xml_prompt(self) -> str:
         """生成 XML 格式的 available_skills 提示词（agentskills.io 推荐）"""
         lines = ["<available_skills>"]
@@ -515,7 +536,7 @@ class SkillManager:
             lines.append("<skill>")
             lines.append(f"<name>{props.name}</name>")
             lines.append(f"<description>{props.description}</description>")
-            lines.append(f"<location>{props.skill_md_path}</location>")
+            lines.append(f"<location>{self._skill_location(props)}</location>")
             lines.append("</skill>")
 
         lines.append("</available_skills>")
@@ -526,8 +547,9 @@ class SkillManager:
         lines = ["## Available Skills", ""]
 
         for props in self._discovered.values():
+            location = self._skill_location(props)
             lines.append(f"- **{props.name}**: {props.description}")
-            lines.append(f"  Location: `{props.skill_md_path}`")
+            lines.append(f"  Location: `{location}`")
 
         return "\n".join(lines)
 

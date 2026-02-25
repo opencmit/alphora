@@ -13,7 +13,7 @@ setup(
     license="CLA",
     packages=find_packages(include=[
         "alphora", "alphora.*",
-        "alphora_community", "alphora_community.*"
+        # "alphora_community", "alphora_community.*"
     ]),
     include_package_data=True,
     python_requires=">=3.9",

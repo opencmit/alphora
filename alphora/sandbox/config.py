@@ -21,6 +21,10 @@ from alphora.sandbox.exceptions import (
     MissingConfigError,
 )
 
+# ── Sandbox-internal path conventions (fixed, do not change) ─────────────────
+SANDBOX_WORKSPACE = "/mnt/workspace"
+SANDBOX_SKILLS_MOUNT = "/mnt/skills"
+
 
 # ============================ <<< Storage Configuration >>> =================================================
 @dataclass
@@ -139,7 +143,7 @@ class DockerConfig:
     auto_remove: bool = True
     privileged: bool = False
     user: Optional[str] = "1000:1000"
-    working_dir: str = "/workspace"
+    working_dir: str = SANDBOX_WORKSPACE
     
     # Resource limits
     memory_limit: str = "512m"
