@@ -12,45 +12,33 @@ from alphora.models import OpenAILike
 from alphora.sandbox import Sandbox
 from alphora.agent import SkillAgent
 from alphora.hooks import HookManager, HookEvent
-from alphora.hooks.builtins import make_memory_compressor
+from alphora.hooks.builtins import make_memory_compressor, make_checkpoint_saver
 
 
 SKILLS_DIR = str(Path(__file__).parent / "skills")
 
 SYSTEM_PROMPT = """\
-你是一个专业的数据分析助手。用户会上传数据文件并提出分析需求。
+你是一位资深数据分析专家，擅长从原始数据中提取有价值的洞察。
 
-## 你的工作方式
+## 工作方式
 
-1. 首先使用 read_skill 工具加载「data-analysis」技能，获取完整的操作指南
-2. 严格按照技能指南中的工作流程（5 个阶段）执行任务
-3. 在沙箱环境中执行代码，所有文件操作都在沙箱内完成
+1. 收到任务后，选择最合适的skill作为操作指南
+2. 严格按照技能中的SOP工作流执行，先探查数据再编码
+3. 代码必须分段执行：每段只做一个目标、每段都打印验证输出
+4. 所有代码在沙箱环境中执行，文件操作在 /mnt/workspace/ 下完成
 
-## 行为准则
+## 交互协议
+- 每步操作前简述目的（一句话即可）
+- 任务完成后总结关键发现，列出所有生成的文件
 
-- 循证：一切结论必须有据可查，绝不编造
-- 渐进：复杂任务分层推进，先探查后执行
-- 协作：遇到歧义主动澄清，关键决策交给用户
-- 透明：展示完整推理过程，让用户理解你的思考
-
-## 执行协议
-
-进入任务后，遵循 Thought → Action → Observation 循环：
-- 每次调用工具之前，先用一两句话告诉用户你在做什么
-- 工具调用之前，用一段话描述你将要进行的操作
-- 工具调用结果返回后，评估结果并决定下一步
-- 任务完成后，总结关键发现并列出生成的文件
-
-## 关键提醒
-
-- 如果缺少依赖包，使用清华镜像源安装：pip install <pkg> -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
-- matplotlib 画图时必须配置中文字体（详见技能指南）
-- 所有列名必须来自实际的数据探查结果，严禁猜测
+## 环境须知
+- 依赖缺失时用清华源安装：pip install <pkg> -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+- matplotlib 画图必须配置中文字体（技能指南中有详细说明）
 """
 
 
 async def main(
-    query: str = "请分析工作目录中的数据文件",
+    query: str = "你好",
     runtime: str = "docker",
     workspace: str = "/Users/tiantiantian/其他/sandbox",
     file_to_copy: str = None,
@@ -64,10 +52,16 @@ async def main(
         print(f"[setup] Copied {file_to_copy} -> {dest}")
 
     hooks = HookManager()
+
     hooks.register(
         HookEvent.AGENT_AFTER_ITERATION,
         make_memory_compressor(threshold=100000),
         timeout=120,
+    )
+
+    hooks.register(
+        HookEvent.AGENT_AFTER_ITERATION,
+        make_checkpoint_saver(),
     )
 
     sandbox = Sandbox(
@@ -114,9 +108,9 @@ async def main(
 
 def cli():
     parser = argparse.ArgumentParser(description="ChatExcel (Skill-based)")
-    parser.add_argument("--query", default="分析广东的各项指标，并给我一个报告", help="User query")
+    parser.add_argument("--query", default="分析家宽指标，并给我一个报告", help="User query")
     parser.add_argument("--runtime", default="docker", choices=["local", "docker"])
-    parser.add_argument("--workspace", default="/Users/tiantiantian/其他/sandbox", help="Workspace directory")
+    parser.add_argument("--workspace", default="/Users/tiantiantian/其他/sandbox/new", help="Workspace directory")
     parser.add_argument("--file", default=None, help="Copy a data file into the workspace before running")
     parser.add_argument("--network", action="store_true", default=True, help="Allow network in sandbox")
     args = parser.parse_args()

@@ -78,7 +78,6 @@ class SkillProperties(BaseModel):
         description="Pre-approved tools (experimental)"
     )
 
-    # ── 内部字段 ──
     path: Path = Field(
         ...,
         description="Absolute path to skill directory",

@@ -88,25 +88,9 @@ class ReActAgent(BaseAgent):
             sandbox: Optional[Sandbox] = None,
             memory: Optional[MemoryManager] = None,
             hooks: Optional[Union[HookManager, Dict[Any, Any]]] = None,
-            before_run: Optional[Callable] = None,
-            after_run: Optional[Callable] = None,
-            before_iteration: Optional[Callable] = None,
-            after_iteration: Optional[Callable] = None,
             **kwargs
     ):
-        hook_manager = build_manager(
-            hooks,
-            short_map={
-                "before_run": HookEvent.AGENT_BEFORE_RUN,
-                "after_run": HookEvent.AGENT_AFTER_RUN,
-                "before_iteration": HookEvent.AGENT_BEFORE_ITERATION,
-                "after_iteration": HookEvent.AGENT_AFTER_ITERATION,
-            },
-            before_run=before_run,
-            after_run=after_run,
-            before_iteration=before_iteration,
-            after_iteration=after_iteration,
-        )
+        hook_manager = build_manager(hooks)
         super().__init__(llm=llm, memory=memory, hooks=hook_manager, **kwargs)
 
         self._registry = ToolRegistry()

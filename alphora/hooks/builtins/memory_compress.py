@@ -16,6 +16,8 @@ import logging
 from datetime import datetime
 from typing import Callable, Optional
 
+from alphora.memory import MemoryManager
+
 from alphora.hooks.context import HookContext
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,7 @@ def make_memory_compressor(
         threshold: int = 20000,
         summary_file: str = "memory_{ts}.md",
         summary_system_prompt: Optional[str] = None,
+        keep_recent_messages: int = 8,
 ) -> Callable[[HookContext], None]:
     """
     创建记忆压缩钩子，注册到 AGENT_AFTER_ITERATION。
@@ -40,7 +43,7 @@ def make_memory_compressor(
     _summarizer = {}
 
     async def _hook(ctx: HookContext) -> None:
-        memory = ctx.get("memory")
+        memory: MemoryManager = ctx.get("memory")
         sandbox = ctx.get("sandbox")
         llm = ctx.get("llm")
 
@@ -88,12 +91,14 @@ def make_memory_compressor(
                 query=f"请总结以下对话：\n\n{conversation}",
                 is_stream=False,
             ))
+
         except Exception as e:
             logger.error(f"[memory_compress] LLM summarization failed: {e}")
             summary = f"（总结失败）{len(history.messages)} 条消息, {chars} 字符"
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = summary_file.replace("{ts}", ts)
+
         try:
             await sandbox.write_file(filename, f"# 对话摘要 {ts}\n\n{summary}\n")
             logger.info(f"[memory_compress] Saved summary -> {filename}")
@@ -101,14 +106,32 @@ def make_memory_compressor(
             logger.error(f"[memory_compress] write_file failed: {e}")
 
         from alphora.memory import Message
+
+        # 先移除工具调用链，避免后续裁剪导致工具链不完整
         memory.remove(lambda m: m.role == "tool")
         memory.remove(lambda m: m.role == "assistant" and m.has_tool_calls)
 
-        injected = [
-            Message.user(f"[上下文已压缩，完整记录见 {filename}]"),
-            Message.assistant(f"好的，工作摘要：\n\n{summary}"),
-        ]
-        memory.inject(injected, position="start")
+        # 保留最近窗口，删除更早的 user/assistant 明细，降低噪声并保持近端连续性
+        non_system_messages = [m for m in memory.get_messages() if m.role != "system"]
+        keep_n = max(0, keep_recent_messages)
+        keep_ids = {m.id for m in non_system_messages[-keep_n:]} if keep_n > 0 else set()
+        memory.remove(lambda m: m.role != "system" and m.id not in keep_ids)
+
+        # 清理旧的压缩标记，避免多次压缩时重复堆叠
+        memory.remove(
+            lambda m: m.role == "system"
+            and (m.content or "").startswith("[MEMORY_COMPRESSED]")
+        )
+
+        memory_pointer = (
+            "[MEMORY_COMPRESSED]\n"
+            f"- summary_file: {filename}\n"
+            f"- compressed_at: {ts}\n"
+            f"- kept_recent_messages: {keep_n}\n"
+            "- note: 较早历史已持久化到 summary_file，不再内联在上下文中。\n"
+            "- instruction: 若需要更早细节，请读取 summary_file 后再继续推理。"
+        )
+        memory.inject(Message.system(memory_pointer), position="start")
 
         new_chars = memory.build_history().count_context_length(mode="chars")
         logger.info(f"[memory_compress] {chars} -> {new_chars} chars")

@@ -9,11 +9,12 @@ Generates a comprehensive profile of a tabular data file including:
 - Numeric column distribution characteristics (skewness, kurtosis)
 
 Usage:
-    python profile_data.py <file_path> [--output report.json] [--encoding ENC]
+    python profile_data.py <file_path> [--output report.json] [--encoding ENC] [--sheet SHEET]
 
 Examples:
     python profile_data.py /mnt/workspace/sales.csv
     python profile_data.py /mnt/workspace/data.xlsx --output /mnt/workspace/profile.json
+    python profile_data.py /mnt/workspace/data.xlsx --sheet 明细
 """
 
 import argparse
@@ -21,6 +22,15 @@ import json
 import os
 import sys
 from pathlib import Path
+
+
+def get_excel_sheet_names(filepath: str):
+    from openpyxl import load_workbook
+
+    wb = load_workbook(filepath, read_only=True, data_only=True)
+    names = wb.sheetnames
+    wb.close()
+    return names
 
 
 def detect_encoding(filepath: str) -> str:
@@ -34,7 +44,46 @@ def detect_encoding(filepath: str) -> str:
         return "utf-8"
 
 
-def load_dataframe(filepath: str, encoding: str):
+def resolve_sheet(filepath: str, sheet):
+    """
+    Resolve sheet argument for Excel files.
+    Returns (sheet_for_pandas, resolved_sheet_name_for_display).
+    """
+    sheet_names = get_excel_sheet_names(filepath)
+    if not sheet_names:
+        raise ValueError("Excel 文件没有可用工作表。")
+
+    if sheet is None:
+        return 0, sheet_names[0]
+
+    if str(sheet) == "__all__":
+        raise ValueError(
+            "profile_data.py 不支持 --sheet __all__（避免大输出）。"
+            f"请指定单个 sheet，当前可用: {sheet_names}"
+        )
+
+    try:
+        sheet_idx = int(sheet)
+        if sheet_idx < 0 or sheet_idx >= len(sheet_names):
+            raise ValueError(
+                f"Sheet 索引越界: {sheet_idx}。可用范围: 0..{len(sheet_names)-1}，可用 sheet: {sheet_names}"
+            )
+        return sheet_idx, sheet_names[sheet_idx]
+    except (TypeError, ValueError):
+        pass
+
+    if sheet in sheet_names:
+        return sheet, str(sheet)
+
+    sheet_lower = str(sheet).lower()
+    for name in sheet_names:
+        if sheet_lower in name.lower():
+            return name, name
+
+    raise ValueError(f"找不到工作表 '{sheet}'。可用 sheet: {sheet_names}")
+
+
+def load_dataframe(filepath: str, encoding: str, sheet=None):
     import pandas as pd
 
     ext = Path(filepath).suffix.lower()
@@ -52,7 +101,8 @@ def load_dataframe(filepath: str, encoding: str):
             else:
                 raise ValueError("Cannot decode CSV with any known encoding")
     elif ext in (".xlsx", ".xls"):
-        df = pd.read_excel(filepath, engine="openpyxl")
+        resolved_sheet, _ = resolve_sheet(filepath, sheet)
+        df = pd.read_excel(filepath, sheet_name=resolved_sheet, engine="openpyxl")
     elif ext == ".json":
         df = pd.read_json(filepath, encoding=encoding)
     elif ext == ".parquet":
@@ -207,6 +257,7 @@ def main():
     parser.add_argument("filepath", help="Path to the data file")
     parser.add_argument("--output", type=str, default=None, help="Save profile as JSON")
     parser.add_argument("--encoding", type=str, default=None, help="Force file encoding")
+    parser.add_argument("--sheet", "--sheet-name", type=str, default=None, help="Excel sheet name/index (single sheet only)")
     args = parser.parse_args()
 
     if not os.path.exists(args.filepath):
@@ -214,10 +265,20 @@ def main():
         sys.exit(1)
 
     encoding = args.encoding or detect_encoding(args.filepath)
-    print(f"Loading {args.filepath} (encoding: {encoding})...")
+    ext = Path(args.filepath).suffix.lower()
+    sheet_info = ""
+    if ext in (".xlsx", ".xls"):
+        try:
+            _, resolved_name = resolve_sheet(args.filepath, args.sheet)
+            sheet_info = f", sheet: {resolved_name}"
+        except Exception as e:
+            print(f"[ERROR] Failed to resolve sheet: {e}")
+            sys.exit(1)
+
+    print(f"Loading {args.filepath} (encoding: {encoding}{sheet_info})...")
 
     try:
-        df = load_dataframe(args.filepath, encoding)
+        df = load_dataframe(args.filepath, encoding, sheet=args.sheet)
     except Exception as e:
         print(f"[ERROR] Failed to load file: {e}")
         sys.exit(1)

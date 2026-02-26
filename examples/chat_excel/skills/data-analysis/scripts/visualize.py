@@ -53,7 +53,7 @@ def setup_chinese_fonts():
     return plt
 
 
-def load_data(filepath: str, encoding: str = None):
+def load_data(filepath: str, encoding: str = None, sheet=0):
     import pandas as pd
 
     ext = Path(filepath).suffix.lower()
@@ -61,12 +61,13 @@ def load_data(filepath: str, encoding: str = None):
         encoding = "utf-8"
 
     if ext in (".csv", ".tsv", ".txt"):
+        sep = "\t" if ext == ".tsv" else ","
         try:
-            return pd.read_csv(filepath, encoding=encoding)
+            return pd.read_csv(filepath, encoding=encoding, sep=sep)
         except UnicodeDecodeError:
-            return pd.read_csv(filepath, encoding="gbk")
+            return pd.read_csv(filepath, encoding="gbk", sep=sep)
     elif ext in (".xlsx", ".xls"):
-        return pd.read_excel(filepath, engine="openpyxl")
+        return pd.read_excel(filepath, sheet_name=sheet, engine="openpyxl")
     elif ext == ".json":
         return pd.read_json(filepath, encoding=encoding)
     elif ext == ".parquet":
@@ -244,6 +245,7 @@ def main():
     parser.add_argument("--dpi", type=int, default=150, help="Output DPI")
     parser.add_argument("--bins", type=int, default=30, help="Number of bins for histogram")
     parser.add_argument("--encoding", default=None, help="File encoding")
+    parser.add_argument("--sheet", default=0, help="Sheet name or index for Excel files (default: first sheet)")
     args = parser.parse_args()
 
     if not os.path.exists(args.data):
@@ -261,8 +263,13 @@ def main():
         print(f"[ERROR] --y is required for chart type '{chart_type}'")
         sys.exit(1)
 
-    df = load_data(args.data, args.encoding)
-    print(f"Loaded {len(df)} rows from {args.data}")
+    sheet = args.sheet
+    try:
+        sheet = int(sheet)
+    except (ValueError, TypeError):
+        pass
+    df = load_data(args.data, args.encoding, sheet=sheet)
+    print(f"Loaded {len(df)} rows, {len(df.columns)} columns from {args.data}")
 
     if args.x and args.x not in df.columns:
         print(f"[ERROR] Column '{args.x}' not found. Available: {list(df.columns)}")

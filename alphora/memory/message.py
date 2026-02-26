@@ -171,6 +171,15 @@ class Message:
         new_metadata = {**self.metadata, **kwargs}
         return self._copy_with(metadata=new_metadata)
 
+    def change_role(self, new_role: str) -> "Message":
+        """
+        更换角色
+
+        Args:
+            new_role: 新角色
+        """
+        return self._copy_with(role=new_role)
+
     def with_tags(self, *tags: str, replace: bool = False) -> "Message":
         """
         返回添加标签后的新消息

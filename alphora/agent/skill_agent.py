@@ -35,7 +35,7 @@ SkillAgent - 支持 Agent Skills 标准的智能体
     )
 """
 
-from typing import Callable, List, Union, Optional, Dict, Any, AsyncIterator, TYPE_CHECKING
+from typing import List, Union, Optional, Dict, Any, AsyncIterator, Callable, TYPE_CHECKING
 from pathlib import Path
 import logging
 
@@ -115,25 +115,9 @@ class SkillAgent(BaseAgent):
         filesystem_mode: bool = False,
         memory: Optional[MemoryManager] = None,
         hooks: Optional[Union[HookManager, Dict[Any, Any]]] = None,
-        before_run: Optional[Callable] = None,
-        after_run: Optional[Callable] = None,
-        before_iteration: Optional[Callable] = None,
-        after_iteration: Optional[Callable] = None,
         **kwargs,
     ):
-        hook_manager = build_manager(
-            hooks,
-            short_map={
-                "before_run": HookEvent.AGENT_BEFORE_RUN,
-                "after_run": HookEvent.AGENT_AFTER_RUN,
-                "before_iteration": HookEvent.AGENT_BEFORE_ITERATION,
-                "after_iteration": HookEvent.AGENT_AFTER_ITERATION,
-            },
-            before_run=before_run,
-            after_run=after_run,
-            before_iteration=before_iteration,
-            after_iteration=after_iteration,
-        )
+        hook_manager = build_manager(hooks)
         super().__init__(llm=llm, memory=memory, hooks=hook_manager, **kwargs)
 
         # Skill Manager
