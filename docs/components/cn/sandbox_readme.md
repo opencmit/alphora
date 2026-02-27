@@ -7,6 +7,7 @@ Sandbox 是为 AI Agent 设计的安全执行环境，支持本地与 Docker 两
 ## 特性
 
 -  **双运行时** - 支持 `local` 与 `docker`，按场景选择执行隔离级别
+-  **远程 Docker** - 通过 `docker_host` 连接远程 TCP Docker daemon，支持镜像校验、Skills 自动同步、容器内文件操作
 -  **挂载模式** - 支持 `direct` 直接挂载已有目录，或 `isolated` 子目录隔离
 -  **代码执行** - 提供 Python 代码、脚本文件、Shell 命令执行能力
 -  **文件管理** - 提供读写、复制、移动、删除、列表等完整文件操作
@@ -43,6 +44,8 @@ async with Sandbox(
 - [基础用法](#基础用法)
 - [挂载模式](#挂载模式)
 - [执行后端](#执行后端)
+- [容器内路径结构](#容器内路径结构)
+- [远程 Docker (TCP)](#远程-docker-tcp)
 - [代码执行](#代码执行)
 - [文件操作](#文件操作)
 - [包管理](#包管理)
@@ -178,6 +181,69 @@ if is_docker_available():
 
 ---
 
+## 容器内路径结构
+
+沙箱创建时自动在容器内建立以下目录结构（对齐 OpenAI Code Interpreter 等主流平台）：
+
+```
+/mnt/workspace/           # 工作目录 (cwd)，Agent 代码在此执行
+├── uploads/              # 用户上传的文件
+├── outputs/              # 输出文件（返回给用户的结果）
+└── ...                   # Agent 自由创建的其他文件
+/mnt/skills/              # 技能定义（只读挂载）
+```
+
+Agent 使用相对路径即可访问：
+```python
+result = await sandbox.execute_code("""
+import pandas as pd
+df = pd.read_csv('uploads/data.csv')
+df.describe().to_csv('outputs/summary.csv')
+print('Done')
+""")
+```
+
+---
+
+## 远程 Docker (TCP)
+
+通过 `docker_host` 参数连接远程 Docker daemon，实现远程代码执行：
+
+```python
+async with Sandbox(
+    runtime="docker",
+    docker_host="tcp://your-server:2375",
+    workspace_root="/data/sandboxes",         # 远程服务器上的绝对路径
+    skill_host_path="/local/path/to/skills",  # 本地路径，自动同步到远程容器
+    image="alphora-sandbox:latest",
+) as sb:
+    result = await sb.execute_code("print('Hello from remote!')")
+```
+
+### 远程模式行为
+
+| 行为 | 本地 Docker | 远程 Docker (TCP) |
+|------|------------|------------------|
+| 镜像不存在 | 自动 build 或 pull | 报错并列出远程可用镜像 |
+| workspace 目录 | 本地自动创建 | 要求远程绝对路径，跳过本地 mkdir |
+| uploads/outputs | 本地 mkdir | 容器内以 root 创建后 chown |
+| skills | 本地 bind mount (只读) | 本地文件打包后复制到容器内 |
+| 文件操作 (read/write/delete) | 直接读写本地文件系统 | 通过 Docker API 在容器内操作 |
+
+### 远程镜像校验
+
+远程模式下，镜像不存在时会列出远程可用镜像并给出友好提示：
+
+```
+DockerError: Image 'alphora-sandbox:latest' not found on remote Docker daemon tcp://...
+
+Available images:
+  - python:3.11-slim
+  - ubuntu:22.04
+```
+
+---
+
 ## 代码执行
 
 ```python
@@ -287,7 +353,7 @@ async with SandboxManager(base_path="/tmp/sandboxes") as manager:
 
 | 参数 | 说明 |
 |------|------|
-| `workspace_root` | 宿主机工作目录根路径 |
+| `workspace_root` | Docker daemon 所在机器的工作目录路径。本地 Docker 为本地路径，远程 Docker 为远程服务器绝对路径 |
 | `mount_mode` | 挂载模式：`direct` 或 `isolated` |
 | `runtime` | 运行时：`local` 或 `docker` |
 | `image` | Docker 镜像（`runtime="docker"` 时生效） |
@@ -297,6 +363,8 @@ async with SandboxManager(base_path="/tmp/sandboxes") as manager:
 | `resource_limits` | 资源限制配置 |
 | `security_policy` | 安全策略配置 |
 | `auto_cleanup` | 停止后是否清理工作目录 |
+| `skill_host_path` | 技能目录路径，Docker 中挂载为 `/mnt/skills`（只读）。远程模式下自动将本地目录同步到容器 |
+| `docker_host` | Docker daemon 连接地址，如 `tcp://host:2375`。不设置时使用本地默认 |
 
 ### Sandbox 属性
 

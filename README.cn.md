@@ -28,56 +28,42 @@
 
 ## 什么是 Alphora?
 
-Alphora 是一个用于构建生产级 AI Agent 的全栈框架。它提供了一切你所需要的核心功能：Agent 编排、提示词工程、工具执行、记忆管理、流式输出以及部署——所有功能都采用异步优先、兼容 OpenAI 的设计。
+Alphora 是一个用于构建生产级 AI Agent 的全栈框架。它提供了你所需要的一切核心能力——Agent 编排、工具执行、记忆管理、安全代码沙箱、Skills 生态、流式输出以及部署——所有功能都采用异步优先、兼容 OpenAI 的设计。
 
 ```python
 from alphora.agent import ReActAgent
 from alphora.models import OpenAILike
-from alphora.sandbox import Sandbox
 from alphora.tools import tool
 
 @tool
-def search_database(query: str) -> str:
-    """查询产品数据库。"""
-    return f"为 {query} 找到了 3 条结果"
-
-
-sandbox = Sandbox(
-    workspace_root="/tmp/alphora-workspace",
-    mount_mode="direct",
-    runtime="docker",
-    allow_network=True,
-)
+def get_weather(city: str) -> str:
+    """获取指定城市的当前天气。"""
+    return f"{city} 的天气：22°C, 晴"
 
 agent = ReActAgent(
     llm=OpenAILike(model_name="gpt-4"),
-    tools=[search_database],
+    tools=[get_weather],
     system_prompt="你是一个得力的助手。",
-    sandbox=sandbox
 )
 
-response = await agent.run("查找 1000 美元以下的笔记本电脑")
-
+result = await agent.run("北京的天气怎么样？")
 ```
 
 ## 安装
 
 ```bash
 pip install alphora
-
 ```
 
 ---
 
 ## 核心特性
 
-Alphora 为构建复杂的 AI Agent 提供了丰富的功能：
-
 ### Agent 系统
 
-* **Agent 派生** — 子 Agent 继承父级的 LLM、记忆和配置。构建可共享上下文的层级结构。
 * **ReAct 循环** — 内置推理-动作循环，具备自动工具编排、重试逻辑和迭代控制。
-* **流式优先** — 原生异步流式传输，采用 OpenAI SSE 格式。支持多种内容类型：`char`（字符）、`think`（思考）、`result`（结果）、`sql`、`chart`（图表）。
+* **Agent 派生** — 子 Agent 继承父级的 LLM、记忆和配置。构建可共享上下文的层级结构。
+* **流式优先** — 原生异步流式传输，采用 OpenAI SSE 格式。支持多种内容类型：`char`、`think`、`result`、`sql`、`chart`。
 * **调试追踪** — 内置可视化调试器，用于追踪 Agent 执行流、LLM 调用和工具调用。
 
 ### 模型层
@@ -113,11 +99,26 @@ Alphora 为构建复杂的 AI Agent 提供了丰富的功能：
 * **多种后端** — 提供内存、JSON 文件、SQLite 存储选项。
 * **TTL 支持** — 自动清理过期会话，支持生存时间设置。
 
+### Skills（兼容 [agentskills.io](https://agentskills.io)）
+
+* **渐进式加载** — 三阶段加载（元数据 → 指令 → 资源），优化 Token 预算。
+* **生态兼容** — 使用为 Anthropic / OpenAI / Copilot 工作流发布的社区 Skills。
+* **安全资源访问** — 内置路径遍历检测和文件大小限制。
+* **SkillAgent** — 与 `SkillAgent` 开箱即用，也可插入 `ReActAgent`。
+
 ### 沙箱
 
-* **安全执行** — 在隔离环境中运行 Agent 生成的代码。
-* **文件隔离** — 沙箱化文件系统，确保文件操作安全。
-* **资源监控** — 监控并限制计算资源使用。
+* **安全执行** — 在隔离环境中运行 Agent 生成的代码，支持资源限制和安全策略。
+* **本地 / Docker 后端** — 本地快速运行用于开发，容器隔离用于生产。
+* **远程 Docker (TCP)** — 通过 `docker_host="tcp://..."` 连接远程 Docker daemon。自动镜像校验、本地 Skills 同步、容器内文件操作。
+* **Agent 友好路径** — `uploads/` 和 `outputs/` 作为工作目录子目录（对齐 OpenAI Code Interpreter 规范），Agent 使用相对路径即可。
+* **文件与包管理** — 完整文件操作（读写/列表/复制/移动/删除）和沙箱内 pip 包管理。
+
+### Hooks（扩展与治理）
+
+* **统一事件** — 一套 Hook 系统覆盖工具、记忆、提示词/LLM、沙箱和 Agent 全生命周期。
+* **稳定默认** — 默认 fail-open（Hook 失败不会阻断主流程）。
+* **运维控制** — 执行顺序、超时、错误策略（fail-open / fail-close）和基础指标/审计模式。
 
 ### 部署
 
@@ -130,27 +131,12 @@ Alphora 为构建复杂的 AI Agent 提供了丰富的功能：
 
 ## 快速上手
 
-### 1. 基础 Agent
+### 1. ReAct Agent + 工具
 
 ```python
-from alphora.agent import BaseAgent
+from alphora.agent import ReActAgent
 from alphora.models import OpenAILike
-
-agent = BaseAgent(llm=OpenAILike(model_name="gpt-4"))
-
-prompt = agent.create_prompt(
-    system_prompt="你是一个得力的助手。",
-    user_prompt="{{query}}"
-)
-
-response = await prompt.acall(query="什么是 Python?")
-
-```
-
-### 2. 使用 @tool 装饰器定义工具
-
-```python
-from alphora.tools import tool, ToolRegistry, ToolExecutor
+from alphora.tools import tool
 
 @tool
 def get_weather(city: str, unit: str = "celsius") -> str:
@@ -162,126 +148,105 @@ async def search_docs(query: str, limit: int = 5) -> list:
     """搜索内部文档。"""
     return [{"title": "结果 1", "score": 0.95}]
 
-registry = ToolRegistry()
-registry.register(get_weather)
-registry.register(search_docs)
-
-# 获取兼容 OpenAI 的工具 Schema
-tools_schema = registry.get_openai_tools_schema()
-
-```
-
-### 3. ReAct Agent (自动工具循环)
-
-```python
-from alphora.agent import ReActAgent
-
 agent = ReActAgent(
-    llm=llm,
+    llm=OpenAILike(model_name="gpt-4"),
     tools=[get_weather, search_docs],
     system_prompt="你是一个得力的助手。",
-    max_iterations=10
+    max_iterations=10,
 )
 
-# Agent 自动处理工具调用循环
 result = await agent.run("东京的天气怎么样？")
-
 ```
 
-### 4. Agent 派生 (共享上下文)
+### 2. 沙箱（安全代码执行）
 
 ```python
-from alphora.agent import BaseAgent
-from alphora.memory import MemoryManager
+from alphora.sandbox import Sandbox
 
-# 拥有共享资源的父级
-parent = BaseAgent(
-    llm=llm,
-    memory=MemoryManager(),
-    config={"project": "demo"}
+async with Sandbox(
+    runtime="docker",
+    workspace_root="/data/workspace",
+    image="alphora-sandbox:latest",
+) as sandbox:
+    result = await sandbox.execute_code("print(6 * 7)")
+    print(result.stdout)  # 42
+
+    await sandbox.write_file("outputs/result.txt", "done")
+    files = await sandbox.list_files()
+```
+
+远程 Docker：
+
+```python
+async with Sandbox(
+    runtime="docker",
+    docker_host="tcp://your-server:2375",
+    workspace_root="/data/sandboxes",
+    skill_host_path="./local-skills",
+    image="alphora-sandbox:latest",
+) as sandbox:
+    result = await sandbox.execute_code("print('Hello from remote!')")
+```
+
+### 3. Skills（社区与标准）
+
+```python
+from alphora.agent import SkillAgent
+from alphora.models import OpenAILike
+
+agent = SkillAgent(
+    llm=OpenAILike(model_name="gpt-4"),
+    skill_paths=["./alphora_community/skills"],
+    system_prompt="你是一个得力的助手。",
 )
 
-# 子级继承 llm, memory, config
-researcher = parent.derive(ResearchAgent)
-analyst = parent.derive(AnalysisAgent)
-
-# 所有 Agent 共享同一个记忆库
-parent.memory.add_user(session_id="s1", content="你好")
-# researcher 和 analyst 都能看到这条消息
-
+result = await agent.run("帮我做一个关于 AI Agent 的深度调研。")
 ```
 
-### 5. 多模态消息
-
-```python
-from alphora.models.message import Message
-
-# 创建多模态消息
-msg = Message()
-msg.add_text("这张图片里有什么？")
-msg.add_image(base64_data, format="png")
-
-response = await llm.ainvoke(msg)
-
-```
-
-### 6. 负载均衡
-
-```python
-# 主 LLM
-llm1 = OpenAILike(model_name="gpt-4", api_key="key1", base_url="https://api1.com/v1")
-
-# 备用 LLM
-llm2 = OpenAILike(model_name="gpt-4", api_key="key2", base_url="https://api2.com/v1")
-
-# 合合并并自动实现负载均衡
-llm = llm1 + llm2
-
-response = await llm.ainvoke("你好")  # 自动轮询执行
-
-```
-
-### 7. 记忆管理
+### 4. 记忆管理
 
 ```python
 from alphora.memory import MemoryManager
 
 memory = MemoryManager()
 
-# 添加对话
 memory.add_user(session_id="user_123", content="你好")
 memory.add_assistant(session_id="user_123", content="你好！")
 
-# 添加工具结果
-memory.add_tool_result(session_id="user_123", result=tool_output)
-
-# 为 LLM 构建历史记录
 history = memory.build_history(session_id="user_123")
-
 ```
 
-### 8. 部署为 API
+### 5. 负载均衡
 
 ```python
-from alphora.server import publish_agent_api, APIPublisherConfig
+llm1 = OpenAILike(model_name="gpt-4", api_key="key1", base_url="https://api1.com/v1")
+llm2 = OpenAILike(model_name="gpt-4", api_key="key2", base_url="https://api2.com/v1")
+
+llm = llm1 + llm2  # 自动轮询负载均衡
+
+response = await llm.ainvoke("你好")
+```
+
+### 6. 部署为 API
+
+```python
+from alphora.server.quick_api import publish_agent_api, APIPublisherConfig
 
 config = APIPublisherConfig(
-    path="/chat",
+    path="/alphadata",
     api_title="我的 Agent API",
-    memory_ttl=3600
+    memory_ttl=3600,
 )
 
 app = publish_agent_api(agent=agent, method="run", config=config)
 
 # 运行: uvicorn main:app --port 8000
-
 ```
 
 ```bash
-curl -X POST http://localhost:8000/chat/v1/chat/completions \
+curl -X POST http://localhost:8000/alphadata/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"messages": [{"role": "user", "content": "你好！"}], "stream": true}'
-
 ```
 
 ---
@@ -289,18 +254,18 @@ curl -X POST http://localhost:8000/chat/v1/chat/completions \
 ## 示例
 
 | 示例 | 描述 |
-| --- | --- |
-| [ChatExcel](https://www.google.com/search?q=./examples/chatexcel) | 具备沙箱代码执行能力的数据分析 Agent |
-| [RAG Agent](https://www.google.com/search?q=./examples/rag-agent) | 结合向量搜索的检索增强生成 Agent |
-| [多 Agent](https://www.google.com/search?q=./examples/multi-agent) | 采用 Agent-as-tool 模式的分层 Agent |
-| [流式对话](https://www.google.com/search?q=./examples/streaming-chat) | 具备思考模式的实时对话 |
+|------|------|
+| [ChatExcel](./examples/chatexcel)           | 具备沙箱代码执行能力的数据分析 Agent |
+| [RAG Agent](./examples/rag-agent)           | 结合向量搜索的检索增强生成 Agent |
+| [多 Agent](./examples/multi-agent)          | 采用 Agent-as-tool 模式的分层 Agent |
+| [流式对话](./examples/streaming-chat)       | 具备思考模式的实时对话 |
+
 
 ---
 
 ## 配置
 
 ```bash
-# 环境变量
 export LLM_API_KEY="your-api-key"
 export LLM_BASE_URL="https://api.openai.com/v1"
 export DEFAULT_LLM="gpt-4"
@@ -308,11 +273,9 @@ export DEFAULT_LLM="gpt-4"
 # 可选：Embedding
 export EMBEDDING_API_KEY="your-key"
 export EMBEDDING_BASE_URL="https://api.openai.com/v1"
-
 ```
 
 ```python
-# 编程式配置
 from alphora.models import OpenAILike
 
 llm = OpenAILike(
@@ -321,28 +284,31 @@ llm = OpenAILike(
     base_url="https://api.openai.com/v1",
     temperature=0.7,
     max_tokens=4096,
-    is_multimodal=True  # 启用视觉能力
+    is_multimodal=True,
 )
-
 ```
+
+---
 
 ## 文档
 
-关于系统设计、组件关系和实现模式的详细信息，请参阅 [架构指南](https://www.google.com/search?q=./docs/ARCHITECTURE.md)。
+关于系统设计、组件关系和实现模式的详细信息，请参阅 [架构指南](./docs/ARCHITECTURE.md)。
 
 ### 组件概览
 
 | 组件 | 描述 |
-| --- | --- |
-| [Agent](https://www.google.com/search?q=docs/components/cn/agent_readme.md) | 核心 Agent 生命周期、派生、ReAct 循环 |
-| [Prompter](https://www.google.com/search?q=docs/components/cn/prompter_readme.md) | Jinja2 模板、LLM 调用、流式传输 |
-| [Models](https://www.google.com/search?q=docs/components/cn/model_readme.md) | LLM 接口、多模态、负载均衡 |
-| [Tools](https://www.google.com/search?q=docs/components/cn/tool_readme.md) | tool 装饰器、注册表、并行执行 |
-| [Memory](https://www.google.com/search?q=docs/components/cn/memory_readme.md) | 会话管理、历史记录、置顶/标签系统 |
-| [Storage](https://www.google.com/search?q=docs/components/cn/storage_readme.md) | 持久化后端 (内存, JSON, SQLite) |
-| [Sandbox](https://www.google.com/search?q=docs/components/cn/sandbox_readme.md) | 安全的代码执行环境 |
-| [Server](https://www.google.com/search?q=docs/components/cn/server_readme.md) | API 发布、SSE 流式传输 |
-| [Postprocess](https://www.google.com/search?q=docs/components/cn/postprocess_readme.md) | 流式转换流水线 |
+|------|------|
+| [Agent](docs/components/cn/agent_readme.md)              | 核心 Agent 生命周期、派生、ReAct 循环 |
+| [Prompter](docs/components/cn/prompter_readme.md)        | Jinja2 模板、LLM 调用、流式传输 |
+| [Models](docs/components/cn/model_readme.md)             | LLM 接口、多模态、负载均衡 |
+| [Tools](docs/components/cn/tool_readme.md)               | tool 装饰器、注册表、并行执行 |
+| [Memory](docs/components/cn/memory_readme.md)            | 会话管理、历史记录、置顶/标签系统 |
+| [Storage](docs/components/cn/storage_readme.md)          | 持久化后端 (内存, JSON, SQLite) |
+| [Sandbox](docs/components/cn/sandbox_readme.md)          | 安全代码执行、本地/Docker/远程 |
+| [Skills](docs/components/cn/skill_readme.md)             | agentskills.io 兼容、SkillAgent 集成 |
+| [Hooks](docs/components/cn/hooks_readme.md)              | 通过统一 Hook 事件进行扩展与治理 |
+| [Server](docs/components/cn/server_readme.md)            | API 发布、SSE 流式传输 |
+| [Postprocess](docs/components/cn/postprocess_readme.md)  | 流式转换流水线 |
 
 ---
 
@@ -356,6 +322,6 @@ llm = OpenAILike(
 
 本项目遵循 **Apache License 2.0** 协议。
 
-详情请参阅 [LICENSE](https://www.google.com/search?q=./LICENSE)。
+详情请参阅 [LICENSE](./LICENSE)。
 
-贡献代码前需要签署 [贡献者许可协议 (CLA)](https://www.google.com/search?q=CLA.md)。
+贡献代码前需要签署 [贡献者许可协议 (CLA)](CLA.md)。
