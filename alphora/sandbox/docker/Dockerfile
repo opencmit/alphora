@@ -28,7 +28,7 @@ COPY requirements-runtime.txt .
 RUN pip install --no-cache-dir -r requirements-runtime.txt
 
 # Mount-point directories (created at build time, populated at runtime via bind mounts)
-RUN mkdir -p /mnt/workspace /mnt/skills
+RUN mkdir -p /mnt/workspace /mnt/workspace/uploads /mnt/workspace/outputs /mnt/skills
 
 WORKDIR /mnt/workspace
 

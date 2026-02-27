@@ -5,6 +5,7 @@ Local Python interpreter execution backend.
 """
 import asyncio
 import os
+import re
 import sys
 import tempfile
 import time
@@ -102,11 +103,42 @@ class LocalBackend(ExecutionBackend):
         self._python_path = python_path or sys.executable
         self._process_pool: List[asyncio.subprocess.Process] = []
         self._path_resolver = PathResolver(Workspace(host_root=self._workspace_path))
-    
+        self._sandbox_root = self._path_resolver.sandbox_root
+        self._resolved_workspace = str(self._workspace_path.resolve())
+        self._uploads_dir = self._workspace_path / "uploads"
+        self._outputs_dir = self._workspace_path / "outputs"
+
+        # Boundary-aware regexes: only match when the path is NOT followed by
+        # alphanumeric / underscore / dash / dot (i.e. not part of a longer
+        # directory name like "sb_backup" when workspace is "sb").
+        _boundary = r'(?=[/\s\'\";\)\]\}:,]|$)'
+        self._re_sandbox_to_real = re.compile(
+            re.escape(self._sandbox_root) + _boundary
+        )
+        self._re_real_to_sandbox = re.compile(
+            re.escape(self._resolved_workspace) + _boundary
+        )
+        raw = str(self._workspace_path)
+        self._re_raw_to_sandbox = (
+            re.compile(re.escape(raw) + _boundary)
+            if raw != self._resolved_workspace else None
+        )
+
     def _validate_path(self, path: str) -> Path:
         """Validate and resolve file path within workspace."""
         return self._path_resolver.to_host(path)
-    
+
+    def _to_real(self, text: str) -> str:
+        """Translate sandbox virtual paths to real host paths in commands/code."""
+        return self._re_sandbox_to_real.sub(self._resolved_workspace, text)
+
+    def _to_virtual(self, text: str) -> str:
+        """Translate real host paths to sandbox virtual paths in output."""
+        result = self._re_real_to_sandbox.sub(self._sandbox_root, text)
+        if self._re_raw_to_sandbox is not None:
+            result = self._re_raw_to_sandbox.sub(self._sandbox_root, result)
+        return result
+
     def _get_execution_env(self) -> Dict[str, str]:
         """Get environment variables for execution"""
         env = os.environ.copy()
@@ -120,6 +152,8 @@ class LocalBackend(ExecutionBackend):
         """Initialize the backend"""
         # Create workspace directory
         self._workspace_path.mkdir(parents=True, exist_ok=True)
+        self._uploads_dir.mkdir(parents=True, exist_ok=True)
+        self._outputs_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"LocalBackend initialized: {self._workspace_path}")
     
     async def start(self) -> None:
@@ -173,6 +207,7 @@ class LocalBackend(ExecutionBackend):
             ExecutionResult: Execution result
         """
         timeout = timeout or self.resource_limits.timeout_seconds
+        code = self._to_real(code)
         
         # Create temporary file for code
         with tempfile.NamedTemporaryFile(
@@ -244,6 +279,7 @@ class LocalBackend(ExecutionBackend):
             raise ShellAccessDeniedError("Shell access is disabled")
         
         timeout = timeout or self.resource_limits.timeout_seconds
+        command = self._to_real(command)
         start_time = time.time()
         
         try:
@@ -272,8 +308,8 @@ class LocalBackend(ExecutionBackend):
             
             return ExecutionResult(
                 success=process.returncode == 0,
-                stdout=stdout.decode("utf-8", errors="replace"),
-                stderr=stderr.decode("utf-8", errors="replace"),
+                stdout=self._to_virtual(stdout.decode("utf-8", errors="replace")),
+                stderr=self._to_virtual(stderr.decode("utf-8", errors="replace")),
                 return_code=process.returncode or 0,
                 execution_time=execution_time
             )
@@ -322,8 +358,8 @@ class LocalBackend(ExecutionBackend):
             
             return ExecutionResult(
                 success=process.returncode == 0,
-                stdout=stdout.decode("utf-8", errors="replace"),
-                stderr=stderr.decode("utf-8", errors="replace"),
+                stdout=self._to_virtual(stdout.decode("utf-8", errors="replace")),
+                stderr=self._to_virtual(stderr.decode("utf-8", errors="replace")),
                 return_code=process.returncode or 0,
                 execution_time=execution_time
             )
