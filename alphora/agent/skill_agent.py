@@ -380,8 +380,8 @@ class SkillAgent(BaseAgent):
         )
         result = "抱歉，我无法在限定步骤内完成这个任务。"
         await self._hooks.emit(
-            HookEvent.AGENT_AFTER_RUN,
-            HookContext(
+            event=HookEvent.AGENT_AFTER_RUN,
+            ctx=HookContext(
                 event=HookEvent.AGENT_AFTER_RUN,
                 component="agent",
                 data={

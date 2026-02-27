@@ -55,7 +55,7 @@ Docker 容器化部署 (DooD)
         runtime="docker",
     )
 
-也可以自定义 Docker 连接地址::
+自定义 Docker 连接地址::
     Sandbox(
         runtime="docker",
         docker_host="unix:///var/run/docker.sock",   # 或 tcp://remote:2376

@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alphora"
+version = "1.0.7"
+description = "AI Agent Development Toolkit"
+authors = [
+    { name = "Tian tian", email = "tiantianit@chinamobile.com" }
+]
+license = {text = "CLA"}
+requires-python = ">=3.11"
+dependencies = [
+    "aiofiles==25.1.0",
+    "fastapi==0.128.5",
+    "httpx==0.28.1",
+    "Jinja2==3.1.6",
+    "json_repair==0.52.1",
+    "openai==2.17.0",
+    "openpyxl==3.1.5",
+    "pandas",
+    "pydantic==2.12.5",
+    "PyYAML==6.0.3",
+    "setuptools==80.9.0",
+    "typing_extensions==4.15.0",
+    "uvicorn==0.39.0",
+    "docker==7.1.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["alphora", "alphora.*"]
+
+[tool.setuptools.package-data]
+alphora = ["*", "*.tmpl"]
