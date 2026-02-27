@@ -65,14 +65,14 @@ async def main(
     )
 
     sandbox = Sandbox(
-        workspace_root=workspace,
-        runtime=runtime,
-        allow_network=allow_network,
+        workspace_root=workspace,  # 挂载宿主机上的持久卷路径
+        runtime=runtime,    # docker or local
+        allow_network=allow_network,    # 是否允许网络链接
     )
 
     agent = SkillAgent(
         llm=OpenAILike(max_tokens=8000),
-        skill_paths=[SKILLS_DIR],
+        skill_paths=[SKILLS_DIR],   # 把宿主机上的Skills全部挂载到沙箱容器内的 /mnt/skills/ 下
         sandbox=sandbox,
         system_prompt=SYSTEM_PROMPT,
         max_iterations=30,

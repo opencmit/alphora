@@ -21,12 +21,11 @@ from alphora.sandbox.exceptions import (
     MissingConfigError,
 )
 
-# ── Sandbox-internal path conventions (fixed, do not change) ─────────────────
+
 SANDBOX_WORKSPACE = "/mnt/workspace"
 SANDBOX_SKILLS_MOUNT = "/mnt/skills"
 
 
-# ============================ <<< Storage Configuration >>> =================================================
 @dataclass
 class StorageConfig:
     """
@@ -137,7 +136,6 @@ class DockerConfig:
     
     Settings for Docker container execution.
     """
-    # image: str = "python:3.11-slim"
     image: str = "alphora-sandbox:latest"
     network_mode: str = "bridge"  # none, bridge, host
     auto_remove: bool = True
@@ -165,6 +163,10 @@ class DockerConfig:
         "PYTHONUNBUFFERED": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
     })
+
+    # DooD (Docker-outside-of-Docker) support
+    host_workspace_root: Optional[str] = None
+    docker_host: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -185,6 +187,8 @@ class DockerConfig:
             "security_opt": self.security_opt,
             "volumes": self.volumes,
             "environment": self.environment,
+            "host_workspace_root": self.host_workspace_root,
+            "docker_host": self.docker_host,
         }
 
 
@@ -416,6 +420,8 @@ def config_from_env(prefix: str = "SANDBOX_") -> SandboxConfig:
         SANDBOX_TIMEOUT: Execution timeout
         SANDBOX_MEMORY_MB: Memory limit in MB
         SANDBOX_NETWORK_ENABLED: Enable network (true/false)
+        SANDBOX_HOST_WORKSPACE_ROOT: Docker-host workspace path (DooD mode)
+        SANDBOX_DOCKER_HOST: Docker daemon URL, e.g. unix:///var/run/docker.sock
     
     Args:
         prefix: Environment variable prefix
@@ -487,6 +493,8 @@ def config_from_env(prefix: str = "SANDBOX_") -> SandboxConfig:
             image=get_env("DOCKER_IMAGE", "python:3.11-slim"),
             network_mode="bridge" if resource_limits.network_enabled else "none",
             memory_limit=f"{resource_limits.memory_mb}m",
+            host_workspace_root=get_env("HOST_WORKSPACE_ROOT"),
+            docker_host=get_env("DOCKER_HOST"),
         )
     
     return SandboxConfig(

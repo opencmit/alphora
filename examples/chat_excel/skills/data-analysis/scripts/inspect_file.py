@@ -22,14 +22,6 @@ import pandas as pd
 from openpyxl.utils import get_column_letter
 
 
-DEFAULT_LOCATE_KEYWORDS = [
-    "id", "key", "code", "no",
-    "订单", "单号", "编号", "客户", "用户",
-    "日期", "时间", "金额", "销售", "收入", "成本", "利润",
-    "区域", "城市", "省", "产品", "sku", "渠道", "状态",
-]
-
-
 def detect_encoding(filepath: str) -> str:
     """Detect text encoding with safe fallback."""
     try:
@@ -187,7 +179,7 @@ def _parse_keywords(keyword: str):
         words = [w.strip() for w in keyword.split(",") if w.strip()]
         if words:
             return words
-    return DEFAULT_LOCATE_KEYWORDS
+    return []
 
 
 def _infer_and_validate_params(purpose: str, keyword: str, start_row: int, end_row: int):

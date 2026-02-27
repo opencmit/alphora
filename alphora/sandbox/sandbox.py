@@ -1,8 +1,109 @@
 """
-Alphora Sandbox - Core Sandbox Class
+Sandbox 提供一个隔离的 Python 代码执行环境，支持本地进程和 Docker 容器两种运行时。所有操作均为异步接口
 
-Main sandbox class providing unified interface for code execution.
+创建沙箱
+1. 本地模式::
+    async with Sandbox(runtime="local") as sb:
+        result = await sb.execute_code("print(1 + 1)")
+        print(result.stdout)
+
+2. Docker 模式::
+    async with Sandbox(
+        workspace_root="/data/sandboxes",
+        runtime="docker",
+        image="alphora-sandbox:latest",
+    ) as sb:
+        result = await sb.execute_code("import pandas; print(pandas.__version__)")
+
+
+工作目录模式 (mount_mode)
+- direct: workspace_root 直接作为工作目录，适合每个请求/会话自行管理子目录的场景。
+- isolated: 自动创建 workspace_root/<sandbox_id> 子目录，适合多租户或并发场景，每个沙箱互不影响。
+
+
+Docker 容器化部署 (DooD)
+当服务本身运行在 Docker 容器中，同时又需要 Docker 沙箱执行代码时，
+需要挂载宿主机的 Docker Socket，让沙箱容器作为 兄弟容器 运行在宿主机上。
+
+推荐部署方式（保持路径一致，无需额外参数）:
+
+    # docker-compose.yml
+    services:
+      agent:
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - /data/sandboxes:/data/sandboxes   # 路径一致
+
+    # Python 代码——和本地开发完全一样
+    Sandbox(workspace_root="/data/sandboxes", runtime="docker")
+
+路径不一致时，通过参数或环境变量指定宿主机路径::
+
+    # docker-compose.yml
+    services:
+      agent:
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - /data/sandboxes:/app/workspace     # 路径不一致
+        environment:
+          - SANDBOX_HOST_WORKSPACE_ROOT=/data/sandboxes
+
+    # 或者在代码中显式指定
+    Sandbox(
+        workspace_root="/app/workspace",
+        host_workspace_root="/data/sandboxes",
+        runtime="docker",
+    )
+
+也可以自定义 Docker 连接地址::
+    Sandbox(
+        runtime="docker",
+        docker_host="unix:///var/run/docker.sock",   # 或 tcp://remote:2376
+    )
+
+相关环境变量:
+    - ``SANDBOX_HOST_WORKSPACE_ROOT``: 宿主机工作目录路径
+    - ``SANDBOX_DOCKER_HOST``: Docker daemon 连接地址
+
+
+生命周期钩子 (Hooks)
+通过 hooks 参数注册回调，支持字符串别名和 HookEvent 枚举两种 key::
+
+    async def log_start(ctx):
+        print(f"沙箱 {ctx.data['sandbox_id']} 启动中...")
+
+    async def log_result(ctx):
+        print(f"执行结果: {ctx.data['result'].stdout}")
+
+    Sandbox(
+        runtime="docker",
+        hooks={
+            "before_start": log_start,
+            "after_execute": log_result,
+        },
+    )
+
+支持的钩子名称:
+    ``before_start``, ``after_start``, ``before_stop``, ``after_stop``,
+    ``before_execute``, ``after_execute``, ``before_write_file``, ``after_write_file``
+
+
+文件与包管理
+    async with Sandbox(runtime="docker") as sb:
+        # 写入文件
+        await sb.write_file("data.csv", "a,b\\n1,2\\n3,4")
+
+        # 执行脚本文件
+        await sb.write_file("main.py", "print(open('data.csv').read())")
+        result = await sb.execute_file("main.py")
+
+        # 安装 Python 包
+        await sb.install_package("httpx")
+
+        # 列出文件
+        files = await sb.list_files()
 """
+import os
 import uuid
 import asyncio
 import logging
@@ -10,7 +111,7 @@ import base64
 import binascii
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Union, TypeVar, Callable, Literal
+from typing import Optional, List, Dict, Any, Union, TypeVar, Literal
 
 from alphora.sandbox.types import (
     BackendType,
@@ -39,48 +140,7 @@ T = TypeVar("T", bound="Sandbox")
 
 
 class Sandbox:
-    """
-    Sandbox Core Class
-
-    Provides a secure, isolated code execution environment.
-
-    Features:
-        - Multiple backend support (Local, Docker)
-        - File operations within sandbox
-        - Package management
-        - Environment variable management
-        - Resource monitoring
-        - Async context manager support
-
-    Usage - Direct:
-        ```python
-        sandbox = Sandbox(
-            workspace_root="/data/sandboxes",
-            runtime="local",
-            allow_network=False,
-        )
-        await sandbox.start()
-        result = await sandbox.execute_code("print('Hello')")
-        print(result.stdout)  # Hello
-        await sandbox.stop()
-        ```
-
-    Usage - Context Manager:
-        ```python
-        async with Sandbox(workspace_root="/tmp/sandboxes", runtime="local") as sandbox:
-            result = await sandbox.execute_code("print('Hello')")
-            print(result.stdout)
-        ```
-
-    Extensibility - Subclass:
-        ```python
-        class MySandbox(Sandbox):
-            async def my_custom_method(self):
-                return await self.execute_code("print('custom')")
-
-        sandbox = MySandbox(runtime="local")
-        ```
-    """
+    """代码执行沙箱，详细使用说明见模块顶部文档。"""
 
     def __init__(
             self,
@@ -95,15 +155,9 @@ class Sandbox:
             security_policy: Optional[SecurityPolicy] = None,
             auto_cleanup: bool = False,
             skill_host_path: Optional[str] = None,
+            host_workspace_root: Optional[str] = None,
+            docker_host: Optional[str] = None,
             hooks: Optional[Union[HookManager, Dict[Any, Any]]] = None,
-            before_start: Optional[Callable] = None,
-            after_start: Optional[Callable] = None,
-            before_stop: Optional[Callable] = None,
-            after_stop: Optional[Callable] = None,
-            before_execute: Optional[Callable] = None,
-            after_execute: Optional[Callable] = None,
-            before_write_file: Optional[Callable] = None,
-            after_write_file: Optional[Callable] = None,
             **kwargs
     ):
         """
@@ -121,6 +175,23 @@ class Sandbox:
             security_policy: Security policy configuration
             auto_cleanup: Cleanup workspace on stop
             skill_host_path: Host path to skills directory, mounted read-only at /mnt/skills in Docker
+            host_workspace_root: Docker-host path corresponding to workspace_root.
+                Only needed when your service runs inside Docker and uses a
+                mounted Docker socket (DooD). The Docker daemon on the host
+                resolves volume sources against the host filesystem, so this
+                must be the *host-side* path. When both paths are identical
+                (recommended deployment), leave this as None.
+                Can also be set via the SANDBOX_HOST_WORKSPACE_ROOT env var.
+            docker_host: Docker daemon connection URL, e.g.
+                ``unix:///var/run/docker.sock`` or ``tcp://host:2376``.
+                When None, falls back to DOCKER_HOST env var or the platform
+                default. Can also be set via the SANDBOX_DOCKER_HOST env var.
+            hooks: Hook callbacks. Accepts a :class:`HookManager` instance or a
+                dict mapping hook names to callables. Supported string keys:
+                ``before_start``, ``after_start``, ``before_stop``,
+                ``after_stop``, ``before_execute``, ``after_execute``,
+                ``before_write_file``, ``after_write_file``.
+                :class:`HookEvent` enum values are also accepted as keys.
             **kwargs: Additional backend-specific options
         """
         # Handle runtime type
@@ -145,6 +216,16 @@ class Sandbox:
         self._auto_cleanup = auto_cleanup
         self._extra_kwargs = kwargs
 
+        # DooD support: resolve from param or env var
+        self._host_workspace_root: Optional[str] = (
+            host_workspace_root
+            or os.environ.get("SANDBOX_HOST_WORKSPACE_ROOT")
+        )
+        self._docker_host: Optional[str] = (
+            docker_host
+            or os.environ.get("SANDBOX_DOCKER_HOST")
+        )
+
         self._hooks = build_manager(
             hooks,
             short_map={
@@ -157,14 +238,6 @@ class Sandbox:
                 "before_write_file": HookEvent.SANDBOX_BEFORE_WRITE_FILE,
                 "after_write_file": HookEvent.SANDBOX_AFTER_WRITE_FILE,
             },
-            before_start=before_start,
-            after_start=after_start,
-            before_stop=before_stop,
-            after_stop=after_stop,
-            before_execute=before_execute,
-            after_execute=after_execute,
-            before_write_file=before_write_file,
-            after_write_file=after_write_file,
         )
 
         self._base_path = Path(workspace_root)
@@ -392,6 +465,14 @@ class Sandbox:
             backend_kwargs["docker_image"] = self._docker_image
             if self._skill_host_path:
                 backend_kwargs["skill_host_path"] = str(self._skill_host_path)
+            if self._host_workspace_root:
+                host_base = Path(self._host_workspace_root)
+                if self._mount_mode == "direct":
+                    backend_kwargs["host_workspace_path"] = str(host_base)
+                else:
+                    backend_kwargs["host_workspace_path"] = str(host_base / self._sandbox_id)
+            if self._docker_host:
+                backend_kwargs["docker_host"] = self._docker_host
 
         backend_kwargs.update(self._extra_kwargs)
 
@@ -899,7 +980,6 @@ class Sandbox:
 
     def to_host_path(self, path: str) -> Path:
         """
-        2026-02-06 update
         转换至宿主机的绝对路径
         """
         return self._path_resolver.to_host(path)

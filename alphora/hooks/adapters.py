@@ -19,13 +19,24 @@ def build_manager(
         manager_options: Optional[Dict[str, Any]] = None,
         **short_hooks: HookInput,
 ) -> HookManager:
+    """Build a :class:`HookManager` from multiple hook sources.
+
+    ``hooks`` accepts a :class:`HookManager` (used as-is), or a *dict*
+    mapping event keys to callables.  Dict keys may be :class:`HookEvent`
+    values **or** short-name strings defined in ``short_map`` (e.g.
+    ``"before_start"``).
+
+    ``short_hooks`` kwargs are a legacy convenience; prefer the ``hooks``
+    dict with string keys for the same effect.
+    """
     if isinstance(hooks, HookManager):
         manager = hooks
     else:
         manager = HookManager(**(manager_options or {}))
 
     if hooks and isinstance(hooks, dict):
-        for event, funcs in hooks.items():
+        for key, funcs in hooks.items():
+            event = short_map.get(key, key) if short_map and isinstance(key, str) else key
             for fn in _normalize_funcs(funcs):
                 manager.register(event, fn)
 

@@ -34,6 +34,18 @@ from alphora.sandbox.exceptions import (
 logger = logging.getLogger(__name__)
 
 
+def _is_running_in_docker() -> bool:
+    """Detect if the current process is running inside a Docker container."""
+    if Path("/.dockerenv").exists():
+        return True
+    try:
+        with open("/proc/1/cgroup", "r") as f:
+            content = f.read()
+            return "docker" in content or "containerd" in content
+    except Exception:
+        return False
+
+
 def is_docker_available() -> bool:
     """Check if Docker is available"""
     try:
@@ -90,6 +102,8 @@ class DockerBackend(ExecutionBackend):
         docker_image: str = "alphora-sandbox:latest",
         docker_config: Optional[DockerConfig] = None,
         skill_host_path: Optional[str] = None,
+        host_workspace_path: Optional[str] = None,
+        docker_host: Optional[str] = None,
         **kwargs
     ):
         """
@@ -97,12 +111,23 @@ class DockerBackend(ExecutionBackend):
         
         Args:
             sandbox_id: Unique sandbox identifier
-            workspace_path: Path to workspace directory
+            workspace_path: Path to workspace directory (local path for file I/O)
             resource_limits: Resource limits configuration
             security_policy: Security policy configuration
             docker_image: Docker image to use
             docker_config: Docker-specific configuration
             skill_host_path: Host path to skills directory (mounted read-only at /mnt/skills)
+            host_workspace_path: Docker-host path for volume mounts (DooD mode).
+                When your service itself runs in Docker and shares the host's
+                Docker socket, the Docker daemon resolves volume sources against
+                the *host* filesystem. Set this to the host-side path that
+                corresponds to ``workspace_path`` so volumes mount correctly.
+                Leave ``None`` when running directly on the host.
+            docker_host: Docker daemon connection URL. Examples:
+                - ``unix:///var/run/docker.sock`` (local socket, default)
+                - ``tcp://remote-host:2376`` (remote daemon)
+                When ``None``, falls back to the ``DOCKER_HOST`` env var or
+                the platform default.
             **kwargs: Additional options
         """
         super().__init__(
@@ -116,6 +141,8 @@ class DockerBackend(ExecutionBackend):
         self._docker_image = docker_image
         self._docker_config = docker_config or DockerConfig(image=docker_image)
         self._skill_host_path = Path(skill_host_path) if skill_host_path else None
+        self._host_workspace_path = Path(host_workspace_path) if host_workspace_path else None
+        self._docker_host = docker_host
 
         self._docker_dir = Path(__file__).parent.parent / "docker"
 
@@ -141,16 +168,30 @@ class DockerBackend(ExecutionBackend):
         """检查镜像，不存在则构建"""
         try:
             import docker
-            self._client = docker.from_env()
+            if self._docker_host:
+                self._client = docker.DockerClient(base_url=self._docker_host)
+                logger.info(f"Connected to Docker daemon at {self._docker_host}")
+            else:
+                self._client = docker.from_env()
         except ImportError:
             raise DockerError("docker package not installed. Install with: pip install docker")
+
+        if _is_running_in_docker() and not self._host_workspace_path:
+            logger.warning(
+                "Detected Docker environment but 'host_workspace_root' is not set. "
+                "When running inside Docker with a mounted Docker socket (DooD), "
+                "sandbox volume mounts require the *host-side* workspace path. "
+                "Set host_workspace_root in Sandbox() or the SANDBOX_HOST_WORKSPACE_ROOT "
+                "environment variable to the path on the Docker host that corresponds "
+                "to workspace_root. If both paths are identical (recommended), "
+                "you can safely ignore this warning."
+            )
 
         try:
             self._client.images.get(self._docker_image)
             logger.info(f"Using existing sandbox image: {self._docker_image}")
 
         except Exception:
-            # if self._docker_image == "alphora-sandbox:latest":
             if self._docker_image.startswith('alphora'):
                 await self._build_custom_image()
             else:
@@ -311,9 +352,19 @@ class DockerBackend(ExecutionBackend):
         return container_config
 
     def _build_volumes(self) -> Dict[str, Dict[str, str]]:
-        """Build volume mount configuration."""
+        """Build volume mount configuration.
+
+        When ``host_workspace_path`` is set (DooD mode), it is used as the
+        volume source so the Docker daemon on the host can resolve the path
+        correctly.  Otherwise falls back to the local ``workspace_path``.
+        """
+        volume_source = str(
+            self._host_workspace_path.resolve()
+            if self._host_workspace_path
+            else self._workspace_path.resolve()
+        )
         volumes = {
-            str(self._workspace_path.resolve()): {
+            volume_source: {
                 "bind": self._container_workspace,
                 "mode": "rw",
             }
