@@ -67,7 +67,7 @@ class SandboxTools:
             "run_python_file": self.run_python_file,
             "run_shell_command": self.run_shell_command,
             "save_file": self.save_file,
-            "upload_file_base64": self.upload_file_base64,
+            "upload_file": self.upload_file,
             "read_file": self.read_file,
             "delete_file": self.delete_file,
             "list_files": self.list_files,
@@ -202,21 +202,21 @@ class SandboxTools:
         except Exception as e:
             return self._error(str(e))
 
-    async def upload_file_base64(self, path: str, base64_data: str) -> Dict[str, Any]:
+    async def upload_file(self, file_name: str, base64_data: str) -> Dict[str, Any]:
         """
-        Upload a file using Base64-encoded content.
+        Upload a file to /mnt/workspace/uploads/.
 
         Args:
-            path: File path (relative to workspace)
+            file_name: Target file name, e.g. "data.xlsx"
             base64_data: Base64-encoded content (raw or data URL)
 
         Returns:
             Dict with success status and file info
         """
         try:
-            file_info = await self._sandbox.upload_file_base64(path, base64_data)
+            file_info = await self._sandbox.upload_file(file_name, base64_data)
             return self._success(
-                f"File uploaded: {path}",
+                f"File uploaded: {file_info.path}",
                 file_info=file_info.to_dict()
             )
         except Exception as e:

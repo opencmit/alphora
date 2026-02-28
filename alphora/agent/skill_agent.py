@@ -189,9 +189,9 @@ class SkillAgent(BaseAgent):
         组装完整的 system prompt
 
         顺序：
-        1. 用户自定义 system prompt
-        2. Skill 系统指令（包含 available_skills 清单）
-        3. 默认提示（如果用户未提供）
+        1. 用户自定义 system prompt（或默认提示）
+        2. Sandbox 环境说明（如果有沙箱）
+        3. Skill 系统指令（包含 available_skills 清单）
         """
         parts = []
 
@@ -200,7 +200,9 @@ class SkillAgent(BaseAgent):
         else:
             parts.append(self._get_default_system_prompt())
 
-        # 注入 Skill 清单
+        if self._sandbox is not None and user_system_prompt:
+            parts.append(self._get_sandbox_prompt())
+
         skill_instruction = self._skill_manager.to_system_instruction()
         if skill_instruction:
             parts.append(skill_instruction)
@@ -212,9 +214,37 @@ class SkillAgent(BaseAgent):
         prompt = "你是一个 AI 助手，可以使用工具和技能来帮助用户完成任务。"
 
         if self._sandbox is not None:
-            prompt += "\n你可以执行代码来分析数据和处理文件。"
+            prompt += self._get_sandbox_prompt()
 
         return prompt
+
+    @staticmethod
+    def _get_sandbox_prompt() -> str:
+        return (
+            "\n\n## Sandbox Environment\n\n"
+            "You are working inside a sandboxed execution environment. "
+            "All file paths follow this layout:\n\n"
+            "```\n"
+            "/mnt/workspace/          ← working directory (cwd)\n"
+            "├── uploads/             ← user-uploaded files (READ HERE FIRST)\n"
+            "├── outputs/             ← final output files for the user\n"
+            "└── ...                  ← you may create any other files\n"
+            "/mnt/skills/             ← skill scripts & resources (read-only)\n"
+            "```\n\n"
+            "### Important rules\n\n"
+            "1. **Check uploads first**: Before starting any task, run "
+            "`list_files` or `ls /mnt/workspace/uploads/` to see what "
+            "files the user has provided.\n"
+            "2. **Persist intermediate results**: Save valuable intermediate "
+            "data (cleaned dataframes, extracted text, partial results, etc.) "
+            "to files under `/mnt/workspace/` so you can read them back in "
+            "later iterations. Do NOT rely solely on stdout for large data.\n"
+            "3. **Write final outputs to `outputs/`**: Any file the user "
+            "should receive (reports, charts, CSVs, etc.) must be saved to "
+            "`/mnt/workspace/outputs/`.\n"
+            "4. **Use absolute `/mnt/...` paths** in shell commands and "
+            "scripts for clarity and consistency.\n"
+        )
 
     def _setup_sandbox_tools(self, sandbox: "Sandbox") -> None:
         """注册沙箱工具（如果尚未通过 Skill 工具注册脚本执行能力）"""

@@ -705,18 +705,24 @@ class Sandbox:
             ),
         )
 
-    async def upload_file_base64(self, path: str, base64_data: str) -> FileInfo:
+    async def upload_file(self, file_name: str, base64_data: str) -> FileInfo:
         """
-        Upload a file using Base64-encoded content.
+        Upload a file to /mnt/workspace/uploads/.
 
         Supports raw Base64 strings and data URLs (data:*;base64,...).
 
+        Usage::
+
+            info = await sb.upload_file("report.xlsx", base64_string)
+            # info.path == "/mnt/workspace/uploads/report.xlsx"
+
         Args:
-            path: File path (relative to workspace)
+            file_name: Target file name, e.g. ``"data.xlsx"``.
+                       Subdirectories are allowed, e.g. ``"sub/data.xlsx"``.
             base64_data: Base64-encoded content (raw or data URL)
 
         Returns:
-            FileInfo: File information
+            FileInfo with ``path`` set to the sandbox-convention path.
         """
         self._ensure_running()
         if not base64_data:
@@ -726,14 +732,17 @@ class Sandbox:
         if ',' in base64_data:
             base64_str = base64_data.split(',')[1]
 
+        clean_name = file_name.lstrip("/")
+        sandbox_path = f"/mnt/workspace/uploads/{clean_name}"
+
         decoded_data = base64.urlsafe_b64decode(base64_str)
-        await self._backend.write_file_bytes(path, decoded_data)
+        await self._backend.write_file_bytes(sandbox_path, decoded_data)
 
         return FileInfo(
-            name=Path(path).name,
-            path=path,
+            name=Path(sandbox_path).name,
+            path=sandbox_path,
             size=len(decoded_data),
-            file_type=FileType.from_extension(path),
+            file_type=FileType.from_extension(sandbox_path),
         )
 
     async def save_file(self, path: str, content: str) -> FileInfo:

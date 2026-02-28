@@ -261,10 +261,10 @@ class ToolExecutor:
             # 2. 解析 JSON 参数
             try:
                 if isinstance(arguments_str, str):
-                    arguments = json.loads(arguments_str) if arguments_str else {}
+                    arguments = self._parse_tool_arguments(arguments_str)
                 else:
                     arguments = arguments_str or {}
-            except json.JSONDecodeError as e:
+            except (json.JSONDecodeError, ValueError) as e:
                 error_result = ToolExecutionResult(
                     tool_call_id=call_id,
                     tool_name=tool_name,
@@ -412,6 +412,32 @@ class ToolExecutor:
                 ),
             )
             return error_result
+
+    @staticmethod
+    def _parse_tool_arguments(raw: str) -> dict:
+        """Parse JSON arguments from LLM, with tolerance for common errors.
+
+        LLMs frequently produce invalid JSON escape sequences such as ``\\'``
+        (backslash + single-quote) inside double-quoted strings.  Standard
+        ``json.loads`` rejects these.  This helper attempts a strict parse
+        first, then falls back to a lenient repair pass before giving up.
+        """
+        if not raw:
+            return {}
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+
+        # Repair pass: fix common LLM JSON errors
+        repaired = raw
+        # \' is not valid JSON escape — replace with bare '
+        repaired = repaired.replace("\\'", "'")
+        # Trailing commas before } or ] (e.g.  {"a":1,} )
+        import re
+        repaired = re.sub(r',\s*([}\]])', r'\1', repaired)
+
+        return json.loads(repaired)
 
     def execute_sync(
             self,
