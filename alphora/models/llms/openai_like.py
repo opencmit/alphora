@@ -27,6 +27,7 @@ from alphora.models.message import Message
 from alphora.models.llms.base import BaseLLM
 from alphora.models.llms.stream_helper import BaseGenerator, GeneratorOutput
 from alphora.models.llms.balancer import _LLMLoadBalancer
+from alphora.hooks import HookEvent, HookContext
 
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -44,6 +45,7 @@ class OpenAILike(BaseLLM):
             max_tokens: int = 1024,
             top_p: float = 1.0,
             is_multimodal: bool = False,
+            hooks=None,
     ):
 
         super().__init__(model_name=model_name,
@@ -53,7 +55,8 @@ class OpenAILike(BaseLLM):
                          temperature=temperature,
                          max_tokens=max_tokens,
                          top_p=top_p,
-                         is_multimodal=is_multimodal)
+                         is_multimodal=is_multimodal,
+                         hooks=hooks)
 
         self.model_name = model_name or os.getenv("DEFAULT_LLM")
         self.api_key = api_key or os.getenv("LLM_API_KEY")
@@ -270,6 +273,19 @@ class OpenAILike(BaseLLM):
                     token_usage=token_usage
                 )
 
+            self._hooks.emit_sync(
+                HookEvent.LLM_AFTER_CALL,
+                HookContext(
+                    event=HookEvent.LLM_AFTER_CALL,
+                    component="llm",
+                    data={
+                        "model_name": self.model_name,
+                        "usage": token_usage or {},
+                        "elapsed": elapsed,
+                    },
+                ),
+            )
+
             return content.strip()
 
         except Exception as e:
@@ -340,7 +356,8 @@ class OpenAILike(BaseLLM):
             raise
 
         class SyncStreamGenerator(BaseGenerator[GeneratorOutput]):
-            def __init__(self, stream_iter, content_type: str, tracer_ref, call_id_ref, agent_id_ref):
+            def __init__(self, stream_iter, content_type: str, tracer_ref, call_id_ref, agent_id_ref,
+                         llm_hooks=None, model_name=None):
                 super().__init__(content_type=content_type)
                 self._stream = stream_iter
                 self._tracer = tracer_ref
@@ -349,6 +366,9 @@ class OpenAILike(BaseLLM):
                 self._full_content = ""
                 self._full_reasoning = ""
                 self.token_usage = None
+                self._llm_hooks = llm_hooks
+                self._model_name = model_name
+                self._start_time = time.time()
 
                 # 工具调用缓存 (Index -> ToolCall Dict)
                 self._tool_calls_dict = {}
@@ -429,12 +449,28 @@ class OpenAILike(BaseLLM):
                             token_usage=self.token_usage
                         )
 
+                    if self._llm_hooks:
+                        elapsed = round(time.time() - self._start_time, 2)
+                        self._llm_hooks.emit_sync(
+                            HookEvent.LLM_AFTER_CALL,
+                            HookContext(
+                                event=HookEvent.LLM_AFTER_CALL,
+                                component="llm",
+                                data={
+                                    "model_name": self._model_name,
+                                    "usage": self.token_usage or {},
+                                    "elapsed": elapsed,
+                                },
+                            ),
+                        )
+
                 except Exception as e:
                     if self._tracer and self._call_id:
                         self._tracer.track_llm_error(self._call_id, str(e), traceback.format_exc())
                     raise
 
-        gen = SyncStreamGenerator(stream, content_type, tracer, call_id, self.agent_id)
+        gen = SyncStreamGenerator(stream, content_type, tracer, call_id, self.agent_id,
+                                  llm_hooks=self._hooks, model_name=self.model_name)
         return gen
 
     async def aget_non_stream_response(self,
@@ -526,6 +562,19 @@ class OpenAILike(BaseLLM):
                     token_usage=token_usage
                 )
 
+            await self._hooks.emit(
+                HookEvent.LLM_AFTER_CALL,
+                HookContext(
+                    event=HookEvent.LLM_AFTER_CALL,
+                    component="llm",
+                    data={
+                        "model_name": self.model_name,
+                        "usage": token_usage or {},
+                        "elapsed": elapsed,
+                    },
+                ),
+            )
+
             return content.strip()
 
         except Exception as e:
@@ -597,7 +646,8 @@ class OpenAILike(BaseLLM):
             raise
 
         class AsyncStreamGenerator(BaseGenerator[GeneratorOutput]):
-            def __init__(self, async_stream, content_type: str, tracer_ref, call_id_ref, agent_id_ref):
+            def __init__(self, async_stream, content_type: str, tracer_ref, call_id_ref, agent_id_ref,
+                         llm_hooks=None, model_name=None):
                 super().__init__(content_type=content_type)
                 self._stream = async_stream
                 self._tracer = tracer_ref
@@ -607,6 +657,9 @@ class OpenAILike(BaseLLM):
                 self._full_reasoning = ""
 
                 self.token_usage = None
+                self._llm_hooks = llm_hooks
+                self._model_name = model_name
+                self._start_time = time.time()
 
                 # 工具调用缓存
                 self._tool_calls_dict = {}
@@ -686,12 +739,28 @@ class OpenAILike(BaseLLM):
                             token_usage=self.token_usage
                         )
 
+                    if self._llm_hooks:
+                        elapsed = round(time.time() - self._start_time, 2)
+                        await self._llm_hooks.emit(
+                            HookEvent.LLM_AFTER_CALL,
+                            HookContext(
+                                event=HookEvent.LLM_AFTER_CALL,
+                                component="llm",
+                                data={
+                                    "model_name": self._model_name,
+                                    "usage": self.token_usage or {},
+                                    "elapsed": elapsed,
+                                },
+                            ),
+                        )
+
                 except Exception as e:
                     if self._tracer and self._call_id:
                         self._tracer.track_llm_error(self._call_id, str(e), traceback.format_exc())
                     raise
 
-        gen = AsyncStreamGenerator(stream, content_type, tracer, call_id, self.agent_id)
+        gen = AsyncStreamGenerator(stream, content_type, tracer, call_id, self.agent_id,
+                                   llm_hooks=self._hooks, model_name=self.model_name)
         return gen
 
     def _get_extra_body(self, *args, **kwargs) -> dict:

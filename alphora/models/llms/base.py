@@ -8,6 +8,7 @@ from typing import Union, Optional, List, Dict, Any, Mapping
 from alphora.models.message import Message
 from alphora.models.llms.stream_helper import BaseGenerator
 from alphora.server.stream_responser import DataStreamer
+from alphora.hooks import HookEvent, HookContext, build_manager
 
 
 class BaseLLM(ABC):
@@ -21,7 +22,8 @@ class BaseLLM(ABC):
             temperature: float = 0.0,
             max_tokens: int = 1024,
             top_p: float = 1.0,
-            is_multimodal: bool = False
+            is_multimodal: bool = False,
+            hooks=None,
     ):
 
         self.model_name = model_name
@@ -35,6 +37,14 @@ class BaseLLM(ABC):
         self.is_multimodal = is_multimodal
 
         self.post_processors = {}
+
+        self._hooks = build_manager(
+            hooks,
+            short_map={
+                "before_call": HookEvent.LLM_BEFORE_CALL,
+                "after_call": HookEvent.LLM_AFTER_CALL,
+            },
+        )
 
     @abstractmethod
     def get_non_stream_response(self,

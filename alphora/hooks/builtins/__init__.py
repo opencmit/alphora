@@ -9,6 +9,7 @@ from .checkpoint import (
     create_memory_from_checkpoint,
     list_checkpoints,
 )
+from .usage import UsageTracker
 
 __all__ = [
     "log_event",
@@ -23,4 +24,5 @@ __all__ = [
     "restore_memory_from_checkpoint",
     "create_memory_from_checkpoint",
     "list_checkpoints",
+    "UsageTracker",
 ]

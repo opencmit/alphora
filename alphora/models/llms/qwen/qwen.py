@@ -19,6 +19,7 @@ class Qwen(OpenAILike):
             temperature: float = 0.0,
             max_tokens: int = 1024,
             top_p: float = 1.0,
+            hooks=None,
     ):
         """
         初始化 Qwen 模型客户端。
@@ -30,6 +31,7 @@ class Qwen(OpenAILike):
             temperature: 采样温度（0.0 ~ 1.0）。
             max_tokens: 最大生成 token 数。
             top_p: 核采样参数。
+            hooks: Hook 回调，支持 ``{"after_call": callable}`` 等。
 
         """
         super().__init__(
@@ -39,7 +41,8 @@ class Qwen(OpenAILike):
             header=header,
             temperature=temperature,
             max_tokens=max_tokens,
-            top_p=top_p
+            top_p=top_p,
+            hooks=hooks,
         )
 
     def _get_extra_body(self, enable_thinking: bool = False) -> Optional[dict]:
