@@ -279,7 +279,7 @@ class DockerBackend(ExecutionBackend):
             self._container = self._client.containers.run(**container_config)
             self._running = True
             await self._wait_for_ready()
-            await self._ensure_user_data_dirs()
+            await self._ensure_workspace_permissions()
             if self._is_remote and self._skill_host_path:
                 await self._sync_skills_to_remote()
             logger.info(f"Container {self.container_name} started: {self.container_id[:12]}")
@@ -416,14 +416,17 @@ class DockerBackend(ExecutionBackend):
             await asyncio.sleep(0.5)
         raise ContainerError(self.container_name, "Container failed to become ready")
 
-    async def _ensure_user_data_dirs(self) -> None:
-        """Create uploads/ and outputs/ inside the container workspace."""
+    async def _ensure_workspace_permissions(self) -> None:
+        """Ensure the workspace and standard subdirs are writable by the sandbox user."""
         ws = self._container_workspace
         user = self._docker_config.user or "1000:1000"
-        self._container.exec_run(
-            ["sh", "-c", f"mkdir -p {ws}/uploads {ws}/outputs && chown -R {user} {ws}/uploads {ws}/outputs"],
-            user="root",
-        )
+        script = f"mkdir -p {ws}/uploads {ws}/outputs && chown -R {user} {ws}"
+        if self._skill_host_path:
+            script += (
+                f" && {{ test -d {SANDBOX_SKILLS_MOUNT} && ! -e {ws}/skills"
+                f" && ln -s {SANDBOX_SKILLS_MOUNT} {ws}/skills; true; }}"
+            )
+        self._container.exec_run(["sh", "-c", script], user="root")
 
     async def _sync_skills_to_remote(self) -> None:
         """Copy local skills directory into the remote container at /mnt/skills."""

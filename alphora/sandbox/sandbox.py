@@ -138,7 +138,7 @@ class Sandbox:
             self,
             workspace_root: str = "/tmp/sandboxes",
             mount_mode: Literal["direct", "isolated"] = "direct",
-            runtime: Union[str, BackendType] = BackendType.LOCAL,
+            runtime: Literal["docker", "local"] = "docker",
             image: str = "alphora-sandbox:latest",
             allow_network: bool = True,
             sandbox_id: Optional[str] = None,
@@ -180,8 +180,7 @@ class Sandbox:
             **kwargs: Additional backend-specific options
         """
         # Handle runtime type
-        if isinstance(runtime, str):
-            runtime = BackendType(runtime.lower())
+        runtime = BackendType(runtime.lower())
 
         if mount_mode not in ("direct", "isolated"):
             raise ValueError(f"Invalid mount_mode: {mount_mode}. Expected 'direct' or 'isolated'.")
@@ -446,10 +445,11 @@ class Sandbox:
             "security_policy": self._security_policy,
         }
 
+        if self._skill_host_path:
+            backend_kwargs["skill_host_path"] = str(self._skill_host_path)
+
         if self._backend_type == BackendType.DOCKER:
             backend_kwargs["docker_image"] = self._docker_image
-            if self._skill_host_path:
-                backend_kwargs["skill_host_path"] = str(self._skill_host_path)
             if self._docker_host:
                 backend_kwargs["docker_host"] = self._docker_host
 

@@ -4,8 +4,8 @@ Alphora Sandbox - Local Execution Backend
 Local Python interpreter execution backend.
 """
 import asyncio
+import shutil
 import os
-import re
 import sys
 import tempfile
 import time
@@ -16,6 +16,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from alphora.sandbox.backends.base import ExecutionBackend, BackendFactory
+from alphora.sandbox.config import SANDBOX_WORKSPACE, SANDBOX_SKILLS_MOUNT
 from alphora.sandbox.path_resolver import PathResolver
 from alphora.sandbox.types import (
     ExecutionResult,
@@ -79,6 +80,7 @@ class LocalBackend(ExecutionBackend):
         resource_limits: Optional[ResourceLimits] = None,
         security_policy: Optional[SecurityPolicy] = None,
         python_path: Optional[str] = None,
+        skill_host_path: Optional[str] = None,
         **kwargs
     ):
         """
@@ -90,6 +92,8 @@ class LocalBackend(ExecutionBackend):
             resource_limits: Resource limits configuration
             security_policy: Security policy configuration
             python_path: Path to Python interpreter (default: current)
+            skill_host_path: Path to skills directory. A symlink
+                ``workspace/skills`` will be created pointing to it.
             **kwargs: Additional options
         """
         super().__init__(
@@ -103,41 +107,43 @@ class LocalBackend(ExecutionBackend):
         self._python_path = python_path or sys.executable
         self._process_pool: List[asyncio.subprocess.Process] = []
         self._path_resolver = PathResolver(Workspace(host_root=self._workspace_path))
-        self._sandbox_root = self._path_resolver.sandbox_root
-        self._resolved_workspace = str(self._workspace_path.resolve())
+        self._skill_host_path = Path(skill_host_path) if skill_host_path else None
         self._uploads_dir = self._workspace_path / "uploads"
         self._outputs_dir = self._workspace_path / "outputs"
 
-        # Boundary-aware regexes: only match when the path is NOT followed by
-        # alphanumeric / underscore / dash / dot (i.e. not part of a longer
-        # directory name like "sb_backup" when workspace is "sb").
-        _boundary = r'(?=[/\s\'\";\)\]\}:,]|$)'
-        self._re_sandbox_to_real = re.compile(
-            re.escape(self._sandbox_root) + _boundary
+        self._host_workspace = str(self._workspace_path.resolve())
+        self._host_workspace_raw = str(self._workspace_path)
+        self._host_skills: Optional[str] = (
+            str(self._skill_host_path.resolve()) if self._skill_host_path else None
         )
-        self._re_real_to_sandbox = re.compile(
-            re.escape(self._resolved_workspace) + _boundary
-        )
-        raw = str(self._workspace_path)
-        self._re_raw_to_sandbox = (
-            re.compile(re.escape(raw) + _boundary)
-            if raw != self._resolved_workspace else None
-        )
+        self._mnt_dir = self._workspace_path.resolve().parent / f".alphora_mnt_{sandbox_id}"
+        self._host_mnt = str(self._mnt_dir)
+
+    def _to_host(self, text: str) -> str:
+        """Translate sandbox virtual paths to real host paths.
+
+        Order matters — longest prefixes first so ``/mnt/workspace`` and
+        ``/mnt/skills`` are matched before the catch-all ``/mnt``.
+        """
+        text = text.replace(SANDBOX_WORKSPACE, self._host_workspace)
+        if self._host_skills:
+            text = text.replace(SANDBOX_SKILLS_MOUNT, self._host_skills)
+        text = text.replace("/mnt", self._host_mnt)
+        return text
+
+    def _to_sandbox(self, text: str) -> str:
+        """Translate real host paths to sandbox virtual paths in output."""
+        text = text.replace(self._host_workspace, SANDBOX_WORKSPACE)
+        if self._host_workspace_raw != self._host_workspace:
+            text = text.replace(self._host_workspace_raw, SANDBOX_WORKSPACE)
+        if self._host_skills:
+            text = text.replace(self._host_skills, SANDBOX_SKILLS_MOUNT)
+        text = text.replace(self._host_mnt, "/mnt")
+        return text
 
     def _validate_path(self, path: str) -> Path:
         """Validate and resolve file path within workspace."""
         return self._path_resolver.to_host(path)
-
-    def _to_real(self, text: str) -> str:
-        """Translate sandbox virtual paths to real host paths in commands/code."""
-        return self._re_sandbox_to_real.sub(self._resolved_workspace, text)
-
-    def _to_virtual(self, text: str) -> str:
-        """Translate real host paths to sandbox virtual paths in output."""
-        result = self._re_real_to_sandbox.sub(self._sandbox_root, text)
-        if self._re_raw_to_sandbox is not None:
-            result = self._re_raw_to_sandbox.sub(self._sandbox_root, result)
-        return result
 
     def _get_execution_env(self) -> Dict[str, str]:
         """Get environment variables for execution"""
@@ -150,11 +156,43 @@ class LocalBackend(ExecutionBackend):
     # Lifecycle Methods
     async def initialize(self) -> None:
         """Initialize the backend"""
-        # Create workspace directory
         self._workspace_path.mkdir(parents=True, exist_ok=True)
         self._uploads_dir.mkdir(parents=True, exist_ok=True)
         self._outputs_dir.mkdir(parents=True, exist_ok=True)
+        self._setup_mnt_mirror()
         logger.info(f"LocalBackend initialized: {self._workspace_path}")
+
+    def _setup_mnt_mirror(self) -> None:
+        """Build a local directory that mirrors Docker's ``/mnt`` structure.
+
+            .alphora_mnt_<id>/
+            ├── workspace -> <workspace_path>
+            └── skills    -> <skill_host_path>   (if configured)
+
+        This lets ``cd /mnt && find .`` produce the same output as Docker mode.
+        A ``skills`` symlink is also placed inside the workspace itself so that
+        relative paths (``skills/...``) work when cwd is the workspace.
+        """
+        self._mnt_dir.mkdir(parents=True, exist_ok=True)
+        self._ensure_symlink(self._mnt_dir / "workspace", self._workspace_path.resolve())
+        if self._skill_host_path and self._skill_host_path.is_dir():
+            target = self._skill_host_path.resolve()
+            self._ensure_symlink(self._mnt_dir / "skills", target)
+            self._ensure_symlink(self._workspace_path / "skills", target)
+
+    @staticmethod
+    def _ensure_symlink(link: Path, target: Path) -> None:
+        """Create or update a symlink, no-op if already correct."""
+        if link.is_symlink():
+            if link.resolve() == target:
+                return
+            link.unlink()
+        elif link.exists():
+            return
+        try:
+            link.symlink_to(target)
+        except OSError as e:
+            logger.warning(f"Failed to create symlink {link} -> {target}: {e}")
     
     async def start(self) -> None:
         """Start the backend"""
@@ -181,6 +219,8 @@ class LocalBackend(ExecutionBackend):
     async def destroy(self) -> None:
         """Destroy the backend"""
         await self.stop()
+        if self._mnt_dir.exists():
+            shutil.rmtree(self._mnt_dir, ignore_errors=True)
         self._running = False
         logger.info(f"LocalBackend destroyed: {self.sandbox_id}")
     
@@ -207,7 +247,7 @@ class LocalBackend(ExecutionBackend):
             ExecutionResult: Execution result
         """
         timeout = timeout or self.resource_limits.timeout_seconds
-        code = self._to_real(code)
+        code = self._to_host(code)
         
         # Create temporary file for code
         with tempfile.NamedTemporaryFile(
@@ -279,7 +319,7 @@ class LocalBackend(ExecutionBackend):
             raise ShellAccessDeniedError("Shell access is disabled")
         
         timeout = timeout or self.resource_limits.timeout_seconds
-        command = self._to_real(command)
+        command = self._to_host(command)
         start_time = time.time()
         
         try:
@@ -308,10 +348,10 @@ class LocalBackend(ExecutionBackend):
             
             return ExecutionResult(
                 success=process.returncode == 0,
-                stdout=self._to_virtual(stdout.decode("utf-8", errors="replace")),
-                stderr=self._to_virtual(stderr.decode("utf-8", errors="replace")),
+                stdout=self._to_sandbox(stdout.decode("utf-8", errors="replace")),
+                stderr=self._to_sandbox(stderr.decode("utf-8", errors="replace")),
                 return_code=process.returncode or 0,
-                execution_time=execution_time
+                execution_time=execution_time,
             )
         
         except asyncio.TimeoutError:
@@ -358,10 +398,10 @@ class LocalBackend(ExecutionBackend):
             
             return ExecutionResult(
                 success=process.returncode == 0,
-                stdout=self._to_virtual(stdout.decode("utf-8", errors="replace")),
-                stderr=self._to_virtual(stderr.decode("utf-8", errors="replace")),
+                stdout=self._to_sandbox(stdout.decode("utf-8", errors="replace")),
+                stderr=self._to_sandbox(stderr.decode("utf-8", errors="replace")),
                 return_code=process.returncode or 0,
-                execution_time=execution_time
+                execution_time=execution_time,
             )
         
         except asyncio.TimeoutError:
