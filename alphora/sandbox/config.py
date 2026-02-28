@@ -140,7 +140,7 @@ class DockerConfig:
     network_mode: str = "bridge"  # none, bridge, host
     auto_remove: bool = True
     privileged: bool = False
-    user: Optional[str] = "1000:1000"
+    user: Optional[str] = None
     working_dir: str = SANDBOX_WORKSPACE
     
     # Resource limits

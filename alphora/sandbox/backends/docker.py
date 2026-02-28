@@ -261,7 +261,17 @@ class DockerBackend(ExecutionBackend):
                     logger.debug(line["stream"].strip())
             logger.info(f"Successfully built {self._docker_image}")
         except Exception as e:
-            raise DockerError(f"Failed to build custom sandbox image: {e}")
+            build_log = ""
+            if hasattr(e, "build_log"):
+                build_log = "\n".join(
+                    line.get("stream", line.get("error", "")).rstrip()
+                    for line in e.build_log
+                    if line.get("stream") or line.get("error")
+                )
+            detail = f"\n\nBuild log:\n{build_log}" if build_log else ""
+            raise DockerError(
+                f"Failed to build custom sandbox image: {e}{detail}"
+            )
     
     async def start(self) -> None:
         """Start the Docker container"""
@@ -417,10 +427,9 @@ class DockerBackend(ExecutionBackend):
         raise ContainerError(self.container_name, "Container failed to become ready")
 
     async def _ensure_workspace_permissions(self) -> None:
-        """Ensure the workspace and standard subdirs are writable by the sandbox user."""
+        """Ensure workspace subdirs exist and skills symlink is set up."""
         ws = self._container_workspace
-        user = self._docker_config.user or "1000:1000"
-        script = f"mkdir -p {ws}/uploads {ws}/outputs && chown -R {user} {ws}"
+        script = f"mkdir -p {ws}/uploads {ws}/outputs"
         if self._skill_host_path:
             script += (
                 f" && {{ test -d {SANDBOX_SKILLS_MOUNT} && ! -e {ws}/skills"
@@ -454,11 +463,6 @@ class DockerBackend(ExecutionBackend):
         buf.seek(0)
         self._container.put_archive(SANDBOX_SKILLS_MOUNT, buf)
 
-        user = self._docker_config.user or "1000:1000"
-        self._container.exec_run(
-            ["sh", "-c", f"chown -R {user} {SANDBOX_SKILLS_MOUNT}"],
-            user="root",
-        )
         logger.info(f"Synced local skills ({skill_path}) to remote container at {SANDBOX_SKILLS_MOUNT}")
 
     # ------------------------------------------------------------------ #

@@ -33,3 +33,4 @@ include = ["alphora", "alphora.*"]
 
 [tool.setuptools.package-data]
 alphora = ["*", "*.tmpl"]
+"alphora.sandbox" = ["docker/*"]

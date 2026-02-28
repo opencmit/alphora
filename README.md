@@ -160,6 +160,21 @@ result = await agent.run("What's the weather in Tokyo?")
 
 ### 2. Sandbox (Secure Code Execution)
 
+Build the sandbox Docker image first:
+
+```bash
+# Auto-build: The image is built automatically on first use if not found locally.
+
+# Manual build: Navigate to the Docker directory and build the image.
+cd alphora/sandbox/docker
+docker build --target base -t alphora-sandbox:latest .
+
+# If you've updated the Dockerfile, force a rebuild without cache:
+docker build --no-cache --target base -t alphora-sandbox:latest .
+```
+
+The image includes Python 3.11, Node.js 20, npm, and common data-processing packages (numpy, pandas, matplotlib, etc.).
+
 ```python
 from alphora.sandbox import Sandbox
 

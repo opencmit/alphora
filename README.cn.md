@@ -160,6 +160,21 @@ result = await agent.run("东京的天气怎么样？")
 
 ### 2. 沙箱（安全代码执行）
 
+首先构建沙箱 Docker 镜像：
+
+```bash
+# 自动构建：首次使用时，如果本地找不到镜像会自动构建。
+
+# 手动构建：进入 Docker 目录并构建镜像。
+cd alphora/sandbox/docker
+docker build --target base -t alphora-sandbox:latest .
+
+# 如果修改了 Dockerfile，需要强制不使用缓存重新构建：
+docker build --no-cache --target base -t alphora-sandbox:latest .
+```
+
+该镜像内置 Python 3.11、Node.js 20、npm 以及常用数据处理包（numpy、pandas、matplotlib 等）。
+
 ```python
 from alphora.sandbox import Sandbox
 
