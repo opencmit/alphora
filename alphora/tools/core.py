@@ -130,6 +130,22 @@ class Tool(BaseModel):
         except Exception as e:
             raise ToolValidationError(f"Arguments validation failed for tool '{self.name}': {str(e)}")
 
+    def __call__(self, *args, **kwargs) -> Any:
+        """允许 Tool 像普通函数一样被调用，自动映射位置参数到参数名。"""
+        if args:
+            import inspect
+            sig = inspect.signature(self.func)
+            params = [
+                p.name for p in sig.parameters.values()
+                if p.name not in ('self', 'cls')
+            ]
+            for i, val in enumerate(args):
+                if i < len(params):
+                    kwargs[params[i]] = val
+        if self.is_async:
+            return self.arun(**kwargs)
+        return self.run(**kwargs)
+
     def run(self, **kwargs) -> Any:
         """同步执行入口"""
         if self.is_async:

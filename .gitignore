@@ -22,6 +22,10 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 
+# 环境变量
+.env
+.env.*
+
 # 个人
 .vscode
 .vscode/*
