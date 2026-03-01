@@ -12,10 +12,18 @@ import time
 import asyncio
 
 
+class ToolCallDelta(BaseModel):
+    """工具调用增量数据，用于流式传输工具调用过程"""
+    index: int = 0
+    id: Optional[str] = None
+    function: Optional[Dict[str, str]] = None
+
+
 class ChoiceDelta(BaseModel):
     content: Optional[str] = None
     content_type: Optional[str] = 'text'
     function_call: Optional[str] = None
+    tool_calls: Optional[List[ToolCallDelta]] = None
     refusal: Optional[str] = None
     role: Optional[str] = None
 
@@ -85,14 +93,34 @@ class DataStreamer:
         created_time = int(time.time() * 1000)
 
         try:
+            delta_kwargs: Dict[str, Any] = {"content_type": content_type}
+
+            if content_type == "tool_call":
+                tc_data = json.loads(content)
+                delta_kwargs["tool_calls"] = [ToolCallDelta(
+                    index=tc_data.get("index", 0),
+                    id=tc_data.get("id") or None,
+                    function={"name": tc_data.get("name", "")},
+                )]
+                delta_kwargs["content"] = None
+            elif content_type == "tool_call_args":
+                tc_data = json.loads(content)
+                delta_kwargs["tool_calls"] = [ToolCallDelta(
+                    index=tc_data.get("index", 0),
+                    id=tc_data.get("id") or None,
+                    function={"arguments": tc_data.get("arguments", "")},
+                )]
+                delta_kwargs["content"] = None
+            else:
+                delta_kwargs["content"] = content
+
             chunk = ChatCompletionChunk(
                 id=self.completion_id,
                 created=created_time,
                 model=self.model_name,
                 choices=[Choice(
                     index=0,
-                    delta=ChoiceDelta(content=content,
-                                      content_type=content_type),
+                    delta=ChoiceDelta(**delta_kwargs),
                     finish_reason=finish_reason
                 )]
             )

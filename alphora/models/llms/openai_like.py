@@ -300,7 +300,8 @@ class OpenAILike(BaseLLM):
             enable_thinking: bool = False,
             system_prompt: Optional[str] = None,
             prompt_id: Optional[str] = None,
-            tools: Optional[List] = None
+            tools: Optional[List] = None,
+            stream_tool_calls: bool = False,
     ) -> BaseGenerator:
         """
         同步-流式输出 (支持 Tools)
@@ -357,7 +358,7 @@ class OpenAILike(BaseLLM):
 
         class SyncStreamGenerator(BaseGenerator[GeneratorOutput]):
             def __init__(self, stream_iter, content_type: str, tracer_ref, call_id_ref, agent_id_ref,
-                         llm_hooks=None, model_name=None):
+                         llm_hooks=None, model_name=None, stream_tool_calls=False):
                 super().__init__(content_type=content_type)
                 self._stream = stream_iter
                 self._tracer = tracer_ref
@@ -369,9 +370,11 @@ class OpenAILike(BaseLLM):
                 self._llm_hooks = llm_hooks
                 self._model_name = model_name
                 self._start_time = time.time()
+                self._stream_tool_calls = stream_tool_calls
 
                 # 工具调用缓存 (Index -> ToolCall Dict)
                 self._tool_calls_dict = {}
+                self._announced_tool_calls: set = set()
 
             @property
             def collected_tool_calls(self):
@@ -395,7 +398,7 @@ class OpenAILike(BaseLLM):
                         if finish_reason:
                             self.finish_reason = finish_reason
 
-                        # 1. 处理 Tool Calls (Accumulate, Do Not Yield)
+                        # 1. 处理 Tool Calls (Accumulate + Optionally Yield)
                         if delta.tool_calls:
                             for tc in delta.tool_calls:
                                 idx = tc.index
@@ -407,17 +410,31 @@ class OpenAILike(BaseLLM):
                                         "function": {"name": tc.function.name or "", "arguments": ""}
                                     }
                                 else:
-                                    # Merge Logic
                                     if tc.id:
                                         self._tool_calls_dict[idx]["id"] += tc.id
                                     if tc.function.name:
                                         self._tool_calls_dict[idx]["function"]["name"] += tc.function.name
 
-                                # Append arguments (most common case in chunks)
                                 if tc.function.arguments:
                                     self._tool_calls_dict[idx]["function"]["arguments"] += tc.function.arguments
 
-                            # Skip yielding for tool chunks
+                                if self._stream_tool_calls:
+                                    if idx not in self._announced_tool_calls and self._tool_calls_dict[idx]["function"]["name"]:
+                                        self._announced_tool_calls.add(idx)
+                                        yield GeneratorOutput(
+                                            content=json.dumps({
+                                                "index": idx,
+                                                "id": self._tool_calls_dict[idx]["id"],
+                                                "name": self._tool_calls_dict[idx]["function"]["name"],
+                                            }, ensure_ascii=False),
+                                            content_type="tool_call",
+                                        )
+                                    if tc.function.arguments:
+                                        yield GeneratorOutput(
+                                            content=tc.function.arguments,
+                                            content_type="tool_call_args",
+                                        )
+
                             continue
 
                         # 2. 处理 Content / Reasoning
@@ -470,7 +487,8 @@ class OpenAILike(BaseLLM):
                     raise
 
         gen = SyncStreamGenerator(stream, content_type, tracer, call_id, self.agent_id,
-                                  llm_hooks=self._hooks, model_name=self.model_name)
+                                  llm_hooks=self._hooks, model_name=self.model_name,
+                                  stream_tool_calls=stream_tool_calls)
         return gen
 
     async def aget_non_stream_response(self,
@@ -589,7 +607,8 @@ class OpenAILike(BaseLLM):
             enable_thinking: bool = False,
             system_prompt: Optional[str] = None,
             prompt_id: Optional[str] = None,
-            tools: Optional[List] = None
+            tools: Optional[List] = None,
+            stream_tool_calls: bool = False,
     ) -> BaseGenerator:
         """
         异步 - 流式输出 (支持 Tools)
@@ -647,7 +666,7 @@ class OpenAILike(BaseLLM):
 
         class AsyncStreamGenerator(BaseGenerator[GeneratorOutput]):
             def __init__(self, async_stream, content_type: str, tracer_ref, call_id_ref, agent_id_ref,
-                         llm_hooks=None, model_name=None):
+                         llm_hooks=None, model_name=None, stream_tool_calls=False):
                 super().__init__(content_type=content_type)
                 self._stream = async_stream
                 self._tracer = tracer_ref
@@ -660,9 +679,11 @@ class OpenAILike(BaseLLM):
                 self._llm_hooks = llm_hooks
                 self._model_name = model_name
                 self._start_time = time.time()
+                self._stream_tool_calls = stream_tool_calls
 
                 # 工具调用缓存
                 self._tool_calls_dict = {}
+                self._announced_tool_calls: set = set()
 
             @property
             def collected_tool_calls(self):
@@ -687,7 +708,7 @@ class OpenAILike(BaseLLM):
                         if finish_reason:
                             self.finish_reason = finish_reason
 
-                        # 1. 处理 Tool Calls (Accumulate, Do Not Yield)
+                        # 1. 处理 Tool Calls (Accumulate + Optionally Yield)
                         if delta.tool_calls:
                             for tc in delta.tool_calls:
                                 idx = tc.index
@@ -706,6 +727,23 @@ class OpenAILike(BaseLLM):
 
                                 if tc.function.arguments:
                                     self._tool_calls_dict[idx]["function"]["arguments"] += tc.function.arguments
+
+                                if self._stream_tool_calls:
+                                    if idx not in self._announced_tool_calls and self._tool_calls_dict[idx]["function"]["name"]:
+                                        self._announced_tool_calls.add(idx)
+                                        yield GeneratorOutput(
+                                            content=json.dumps({
+                                                "index": idx,
+                                                "id": self._tool_calls_dict[idx]["id"],
+                                                "name": self._tool_calls_dict[idx]["function"]["name"],
+                                            }, ensure_ascii=False),
+                                            content_type="tool_call",
+                                        )
+                                    if tc.function.arguments:
+                                        yield GeneratorOutput(
+                                            content=tc.function.arguments,
+                                            content_type="tool_call_args",
+                                        )
 
                             continue
 
@@ -760,7 +798,8 @@ class OpenAILike(BaseLLM):
                     raise
 
         gen = AsyncStreamGenerator(stream, content_type, tracer, call_id, self.agent_id,
-                                   llm_hooks=self._hooks, model_name=self.model_name)
+                                   llm_hooks=self._hooks, model_name=self.model_name,
+                                   stream_tool_calls=stream_tool_calls)
         return gen
 
     def _get_extra_body(self, *args, **kwargs) -> dict:

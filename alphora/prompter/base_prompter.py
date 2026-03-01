@@ -501,6 +501,7 @@ class BasePrompt:
              long_response: bool = False,
              runtime_system_prompt: Union[str, List[str], None] = None,
              history: Optional[HistoryPayload] = None,
+             stream_tool_calls: bool = False,
              ) -> BaseGenerator | str | Any | ToolCall:
 
         """
@@ -586,6 +587,7 @@ class BasePrompt:
 
                 if tools:
                     gen_kwargs["tools"] = tools
+                    gen_kwargs["stream_tool_calls"] = stream_tool_calls
 
                 if long_response:
                     from alphora.prompter.long_response import LongResponseGenerator
@@ -611,6 +613,8 @@ class BasePrompt:
                 # 消费流
                 output_str = ''
                 reasoning_content = ''
+                _cur_tc_index = None
+                _cur_tc_id = None
 
                 for ck in generator:
                     chunk_ctx = HookContext(
@@ -623,6 +627,17 @@ class BasePrompt:
 
                     content = ck.content
                     ctype = ck.content_type
+
+                    if ctype == 'tool_call':
+                        tc_info = json.loads(content)
+                        _cur_tc_index = tc_info.get("index", 0)
+                        _cur_tc_id = tc_info.get("id", "")
+                        print(f"\n[Tool Call] {tc_info.get('name', 'unknown')}\n", end='', flush=True)
+                        continue
+
+                    if ctype == 'tool_call_args':
+                        print(content, end='', flush=True)
+                        continue
 
                     if ctype == 'think' and enable_thinking:
                         reasoning_content += content
@@ -718,6 +733,7 @@ class BasePrompt:
                     long_response: bool = False,
                     runtime_system_prompt: Union[str, List[str], None] = None,
                     history: Optional[HistoryPayload] = None,
+                    stream_tool_calls: bool = False,
                     ) -> BaseGenerator | str | Any | ToolCall:
         """
         Asynchronously executes the LLM request.
@@ -807,6 +823,7 @@ class BasePrompt:
 
                 if tools:
                     gen_kwargs["tools"] = tools
+                    gen_kwargs["stream_tool_calls"] = stream_tool_calls
 
                 if long_response:
                     gen_kwargs.pop('prompt_id')
@@ -831,6 +848,8 @@ class BasePrompt:
 
                 output_str = ''
                 reasoning_content = ''
+                _cur_tc_index = None
+                _cur_tc_id = None
 
                 async for ck in generator:
                     chunk_ctx = HookContext(
@@ -843,6 +862,28 @@ class BasePrompt:
 
                     content = ck.content
                     ctype = ck.content_type
+
+                    if ctype == 'tool_call':
+                        tc_info = json.loads(content)
+                        _cur_tc_index = tc_info.get("index", 0)
+                        _cur_tc_id = tc_info.get("id", "")
+                        if self.callback:
+                            await self.callback.send_data(content_type=ctype, content=content)
+                        else:
+                            print(f"\n[Tool Call] {tc_info.get('name', 'unknown')}\n", end='', flush=True)
+                        continue
+
+                    if ctype == 'tool_call_args':
+                        if self.callback:
+                            enriched = json.dumps({
+                                "index": _cur_tc_index,
+                                "id": _cur_tc_id,
+                                "arguments": content,
+                            }, ensure_ascii=False)
+                            await self.callback.send_data(content_type=ctype, content=enriched)
+                        else:
+                            print(content, end='', flush=True)
+                        continue
 
                     if self.callback:
                         if ctype == 'think' and enable_thinking:

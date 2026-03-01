@@ -211,7 +211,13 @@ class SkillAgent(BaseAgent):
 
     def _get_default_system_prompt(self) -> str:
         """生成默认 system prompt"""
-        prompt = "你是一个 AI 助手，可以使用工具和技能来帮助用户完成任务。"
+        prompt = """你是一个专业的 AI 助手，能够理解用户需求并通过工具和技能来高效完成任务。
+
+## 核心能力
+- **任务理解**：准确理解用户意图，必要时主动确认关键细节
+- **Skill 选择**：根据任务需求从可用 Skills 中选择最合适的方案
+- **工具组合**：灵活组合多个工具协作完成复杂任务
+- **结果交付**：提供清晰、完整、可直接使用的结果"""
 
         if self._sandbox is not None:
             prompt += self._get_sandbox_prompt()
@@ -341,6 +347,7 @@ class SkillAgent(BaseAgent):
                 history=history,
                 tools=tools_schema,
                 is_stream=True,
+                stream_tool_calls=True,
                 runtime_system_prompt=(
                     "如果你认为用户的任务已经完成，请直接回复最终结果。"
                 ),
