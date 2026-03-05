@@ -190,12 +190,20 @@ async with Sandbox(
     files = await sandbox.list_files()
 ```
 
-Remote Docker:
+Remote Docker (TLS):
 
 ```python
+from alphora.sandbox import Sandbox, DockerHost
+
 async with Sandbox(
     runtime="docker",
-    docker_host="tcp://your-server:2375",
+    docker_host=DockerHost(
+        url="tcp://your-server:2376",
+        tls_verify=True,
+        tls_ca_cert="/path/to/ca.pem",
+        tls_client_cert="/path/to/cert.pem",
+        tls_client_key="/path/to/key.pem",
+    ),
     workspace_root="/data/sandboxes",
     skill_host_path="./local-skills",
     image="alphora-sandbox:latest",

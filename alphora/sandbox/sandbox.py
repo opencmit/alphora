@@ -37,25 +37,40 @@ Docker 容器化部署 (DooD)
     Sandbox(workspace_root="/data/sandboxes", runtime="docker")
 
 
-远程 Docker (TCP)
-通过 docker_host 连接远程 Docker daemon，workspace_root 指向远程服务器路径::
+远程 Docker (TCP + TLS)
+通过 docker_host 连接远程 Docker daemon，workspace_root 指向远程服务器路径。
+
+**重要：** 不要使用未加密的 2375 端口暴露 Docker daemon，否则任何人都可远程
+控制你的服务器。请始终使用 TLS (端口 2376) 并配置客户端证书认证::
+
+    from alphora.sandbox import Sandbox, DockerHost
 
     Sandbox(
         runtime="docker",
-        docker_host="tcp://remote-host:2375",
+        docker_host=DockerHost(
+            url="tcp://remote-host:2376",
+            tls_verify=True,
+            tls_ca_cert="/path/to/ca.pem",
+            tls_client_cert="/path/to/cert.pem",
+            tls_client_key="/path/to/key.pem",
+        ),
         workspace_root="/data/sandboxes",        # 远程服务器上的路径
         skill_host_path="/opt/skills",           # 远程服务器上的路径
         image="alphora-sandbox:latest",
     )
 
-自定义 Docker 连接地址::
+也接受纯字符串（向后兼容，无 TLS）::
     Sandbox(
         runtime="docker",
-        docker_host="unix:///var/run/docker.sock",   # 或 tcp://remote:2376
+        docker_host="unix:///var/run/docker.sock",
     )
 
-相关环境变量:
-    - ``SANDBOX_DOCKER_HOST``: Docker daemon 连接地址
+相关环境变量（不传 docker_host 时自动读取）:
+    - ``SANDBOX_DOCKER_HOST``: Docker daemon 连接地址 (如 tcp://host:2376)
+    - ``SANDBOX_DOCKER_TLS_VERIFY``: 启用 TLS 验证 (true/false)
+    - ``SANDBOX_DOCKER_TLS_CA_CERT``: CA 证书路径 (ca.pem)
+    - ``SANDBOX_DOCKER_TLS_CLIENT_CERT``: 客户端证书路径 (cert.pem)
+    - ``SANDBOX_DOCKER_TLS_CLIENT_KEY``: 客户端私钥路径 (key.pem)
 
 
 生命周期钩子 (Hooks)
@@ -117,6 +132,7 @@ from alphora.sandbox.types import (
     SandboxInfo,
 )
 from alphora.sandbox.backends.base import ExecutionBackend, BackendFactory
+from alphora.sandbox.config import DockerHost
 from alphora.sandbox.path_resolver import PathResolver
 from alphora.sandbox.workspace import Workspace
 from alphora.sandbox.exceptions import (
@@ -147,7 +163,7 @@ class Sandbox:
             security_policy: Optional[SecurityPolicy] = None,
             auto_cleanup: bool = False,
             skill_host_path: Optional[str] = None,
-            docker_host: Optional[str] = None,
+            docker_host: Optional[Union[str, DockerHost]] = None,
             hooks: Optional[Union[HookManager, Dict[Any, Any]]] = None,
             **kwargs
     ):
@@ -167,10 +183,25 @@ class Sandbox:
             auto_cleanup: Cleanup workspace on stop
             skill_host_path: Host path to skills directory, mounted read-only at /mnt/skills in Docker.
                 For remote Docker (tcp://), this should be a path on the remote server.
-            docker_host: Docker daemon connection URL, e.g.
-                ``unix:///var/run/docker.sock`` or ``tcp://host:2376``.
-                When None, falls back to DOCKER_HOST env var or the platform
-                default. Can also be set via the SANDBOX_DOCKER_HOST env var.
+            docker_host: Docker daemon connection. Accepts:
+
+                - A :class:`DockerHost` object (recommended for TLS)::
+
+                      DockerHost(
+                          url="tcp://host:2376",
+                          tls_verify=True,
+                          tls_ca_cert="/certs/ca.pem",
+                          tls_client_cert="/certs/cert.pem",
+                          tls_client_key="/certs/key.pem",
+                      )
+
+                - A plain URL string (backward-compatible, no TLS)::
+
+                      "tcp://host:2376"
+                      "unix:///var/run/docker.sock"
+
+                - ``None`` — auto-detects from ``SANDBOX_DOCKER_*`` env vars,
+                  then falls back to the platform default.
             hooks: Hook callbacks. Accepts a :class:`HookManager` instance or a
                 dict mapping hook names to callables. Supported string keys:
                 ``before_start``, ``after_start``, ``before_stop``,
@@ -200,10 +231,12 @@ class Sandbox:
         self._auto_cleanup = auto_cleanup
         self._extra_kwargs = kwargs
 
-        self._docker_host: Optional[str] = (
-            docker_host
-            or os.environ.get("SANDBOX_DOCKER_HOST")
-        )
+        if isinstance(docker_host, str):
+            self._docker_host: Optional[DockerHost] = DockerHost.from_url(docker_host)
+        elif isinstance(docker_host, DockerHost):
+            self._docker_host = docker_host
+        else:
+            self._docker_host = DockerHost.from_env()
 
         self._hooks = build_manager(
             hooks,
@@ -323,7 +356,7 @@ class Sandbox:
                 is_remote_docker = (
                     self._backend_type == BackendType.DOCKER
                     and self._docker_host
-                    and self._docker_host.startswith("tcp://")
+                    and self._docker_host.is_tcp
                 )
                 if not is_remote_docker:
                     self._workspace_path.mkdir(parents=True, exist_ok=True)

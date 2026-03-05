@@ -205,14 +205,24 @@ print('Done')
 
 ---
 
-## 远程 Docker (TCP)
+## 远程 Docker (TCP + TLS)
 
-通过 `docker_host` 参数连接远程 Docker daemon，实现远程代码执行：
+通过 `docker_host` 参数连接远程 Docker daemon，实现远程代码执行。
+
+> **安全警告：** 切勿使用未加密的 2375 端口暴露 Docker daemon，否则任何人都可远程控制你的服务器。请始终使用 TLS（端口 2376）并配置客户端证书认证。
 
 ```python
+from alphora.sandbox import Sandbox, DockerHost
+
 async with Sandbox(
     runtime="docker",
-    docker_host="tcp://your-server:2375",
+    docker_host=DockerHost(
+        url="tcp://your-server:2376",
+        tls_verify=True,
+        tls_ca_cert="/path/to/ca.pem",
+        tls_client_cert="/path/to/cert.pem",
+        tls_client_key="/path/to/key.pem",
+    ),
     workspace_root="/data/sandboxes",         # 远程服务器上的绝对路径
     skill_host_path="/local/path/to/skills",  # 本地路径，自动同步到远程容器
     image="alphora-sandbox:latest",
@@ -364,7 +374,7 @@ async with SandboxManager(base_path="/tmp/sandboxes") as manager:
 | `security_policy` | 安全策略配置 |
 | `auto_cleanup` | 停止后是否清理工作目录 |
 | `skill_host_path` | 技能目录路径，Docker 中挂载为 `/mnt/skills`（只读）。远程模式下自动将本地目录同步到容器 |
-| `docker_host` | Docker daemon 连接地址，如 `tcp://host:2375`。不设置时使用本地默认 |
+| `docker_host` | Docker daemon 连接配置。接受 `DockerHost` 对象（含 TLS）、纯 URL 字符串或 `None`（自动读取环境变量） |
 
 ### Sandbox 属性
 

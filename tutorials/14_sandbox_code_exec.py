@@ -9,7 +9,7 @@ Run:
 
 import asyncio
 
-from alphora.sandbox import Sandbox
+from alphora.sandbox import Sandbox, DockerHost
 from alphora.sandbox.types import ResourceLimits, SecurityPolicy
 
 
@@ -48,16 +48,23 @@ async def local_docker_example() -> None:
 
 
 async def remote_docker_example() -> None:
-    """Remote Docker (TCP) sandbox example.
+    """Remote Docker (TCP + TLS) sandbox example.
 
-    Connects to a remote Docker daemon and executes code there.
+    Connects to a remote Docker daemon over TLS and executes code there.
     Requires:
-      - A remote server with Docker daemon exposed on TCP
+      - A remote server with Docker daemon exposed on TCP port 2376 with TLS
+      - TLS certificates (ca.pem, cert.pem, key.pem)
       - The image pre-built on the remote server
     """
     async with Sandbox(
         runtime="docker",
-        docker_host="tcp://your-server:2375",
+        docker_host=DockerHost(
+            url="tcp://your-server:2376",
+            tls_verify=True,
+            tls_ca_cert="/path/to/ca.pem",
+            tls_client_cert="/path/to/cert.pem",
+            tls_client_key="/path/to/key.pem",
+        ),
         workspace_root="/data/sandboxes/tutorial",
         skill_host_path="./skills",
         image="alphora-sandbox:latest",

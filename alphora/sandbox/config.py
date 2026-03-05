@@ -127,6 +127,78 @@ class StorageConfig:
         )
 
 
+# Docker Host Connection
+
+@dataclass
+class DockerHost:
+    """Docker daemon connection configuration (address + TLS).
+
+    Encapsulates the daemon URL and optional TLS certificate paths so that
+    all connection-level settings travel as a single object.
+
+    Examples::
+
+        # Plain URL (no TLS) — backward-compatible shorthand
+        DockerHost.from_url("tcp://host:2376")
+
+        # Full TLS
+        DockerHost(
+            url="tcp://host:2376",
+            tls_verify=True,
+            tls_ca_cert="/certs/ca.pem",
+            tls_client_cert="/certs/cert.pem",
+            tls_client_key="/certs/key.pem",
+        )
+
+        # From environment variables
+        host = DockerHost.from_env()  # returns None when no env is set
+    """
+    url: str
+    tls_verify: bool = False
+    tls_ca_cert: Optional[str] = None
+    tls_client_cert: Optional[str] = None
+    tls_client_key: Optional[str] = None
+
+    @property
+    def is_tcp(self) -> bool:
+        return self.url.startswith("tcp://")
+
+    @classmethod
+    def from_url(cls, url: str) -> "DockerHost":
+        """Create from a bare URL string (no TLS)."""
+        return cls(url=url)
+
+    @classmethod
+    def from_env(cls, prefix: str = "SANDBOX_") -> Optional["DockerHost"]:
+        """Build from ``SANDBOX_DOCKER_*`` environment variables.
+
+        Returns ``None`` when ``SANDBOX_DOCKER_HOST`` is not set.
+        """
+        url = os.environ.get(f"{prefix}DOCKER_HOST")
+        if not url:
+            return None
+
+        def _bool(key: str) -> bool:
+            return os.environ.get(f"{prefix}{key}", "").lower() in ("true", "1", "yes")
+
+        return cls(
+            url=url,
+            tls_verify=_bool("DOCKER_TLS_VERIFY"),
+            tls_ca_cert=os.environ.get(f"{prefix}DOCKER_TLS_CA_CERT"),
+            tls_client_cert=os.environ.get(f"{prefix}DOCKER_TLS_CLIENT_CERT"),
+            tls_client_key=os.environ.get(f"{prefix}DOCKER_TLS_CLIENT_KEY"),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "url": self.url,
+            "tls_verify": self.tls_verify,
+            "tls_ca_cert": self.tls_ca_cert,
+            "tls_client_cert": self.tls_client_cert,
+            "tls_client_key": self.tls_client_key,
+        }
+
+
 # Docker Configuration
 
 @dataclass
@@ -164,7 +236,7 @@ class DockerConfig:
         "PYTHONDONTWRITEBYTECODE": "1",
     })
 
-    docker_host: Optional[str] = None
+    docker_host: Optional[DockerHost] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -185,7 +257,7 @@ class DockerConfig:
             "security_opt": self.security_opt,
             "volumes": self.volumes,
             "environment": self.environment,
-            "docker_host": self.docker_host,
+            "docker_host": self.docker_host.to_dict() if self.docker_host else None,
         }
 
 
@@ -417,7 +489,11 @@ def config_from_env(prefix: str = "SANDBOX_") -> SandboxConfig:
         SANDBOX_TIMEOUT: Execution timeout
         SANDBOX_MEMORY_MB: Memory limit in MB
         SANDBOX_NETWORK_ENABLED: Enable network (true/false)
-        SANDBOX_DOCKER_HOST: Docker daemon URL, e.g. unix:///var/run/docker.sock
+        SANDBOX_DOCKER_HOST: Docker daemon URL, e.g. tcp://host:2376
+        SANDBOX_DOCKER_TLS_VERIFY: Enable TLS verification (true/false)
+        SANDBOX_DOCKER_TLS_CA_CERT: CA certificate path (ca.pem)
+        SANDBOX_DOCKER_TLS_CLIENT_CERT: Client certificate path (cert.pem)
+        SANDBOX_DOCKER_TLS_CLIENT_KEY: Client private key path (key.pem)
     
     Args:
         prefix: Environment variable prefix
@@ -489,7 +565,7 @@ def config_from_env(prefix: str = "SANDBOX_") -> SandboxConfig:
             image=get_env("DOCKER_IMAGE", "python:3.11-slim"),
             network_mode="bridge" if resource_limits.network_enabled else "none",
             memory_limit=f"{resource_limits.memory_mb}m",
-            docker_host=get_env("DOCKER_HOST"),
+            docker_host=DockerHost.from_env(prefix),
         )
     
     return SandboxConfig(
@@ -560,7 +636,15 @@ def _config_from_dict(data: Dict[str, Any]) -> SandboxConfig:
     
     docker_config = None
     if "docker" in data:
-        docker_config = DockerConfig(**data["docker"])
+        docker_data = dict(data["docker"])
+        dh = docker_data.pop("docker_host", None)
+        if isinstance(dh, str):
+            docker_data["docker_host"] = DockerHost.from_url(dh)
+        elif isinstance(dh, dict):
+            docker_data["docker_host"] = DockerHost(**dh)
+        else:
+            docker_data["docker_host"] = dh
+        docker_config = DockerConfig(**docker_data)
     
     return SandboxConfig(
         base_path=data.get("base_path", "/tmp/sandboxes"),

@@ -25,6 +25,7 @@ from alphora.sandbox.types import (
 )
 from alphora.sandbox.workspace import Workspace
 from alphora.sandbox.config import (
+    DockerHost,
     DockerConfig,
     SANDBOX_SKILLS_MOUNT,
 )
@@ -109,7 +110,7 @@ class DockerBackend(ExecutionBackend):
         docker_image: str = "alphora-sandbox:latest",
         docker_config: Optional[DockerConfig] = None,
         skill_host_path: Optional[str] = None,
-        docker_host: Optional[str] = None,
+        docker_host: Optional[DockerHost] = None,
         **kwargs
     ):
         """
@@ -127,11 +128,10 @@ class DockerBackend(ExecutionBackend):
             skill_host_path: Path to skills directory (mounted read-only at
                 /mnt/skills). For remote Docker, this should be a path on the
                 remote server.
-            docker_host: Docker daemon connection URL. Examples:
-                - ``unix:///var/run/docker.sock`` (local socket, default)
-                - ``tcp://remote-host:2376`` (remote daemon)
-                When ``None``, falls back to the ``DOCKER_HOST`` env var or
-                the platform default.
+            docker_host: Docker daemon connection configuration. A
+                :class:`DockerHost` instance that encapsulates the URL
+                and optional TLS settings. When ``None``, falls back to
+                ``DockerConfig.docker_host``, then ``docker.from_env()``.
             **kwargs: Additional options
         """
         super().__init__(
@@ -145,7 +145,7 @@ class DockerBackend(ExecutionBackend):
         self._docker_image = docker_image
         self._docker_config = docker_config or DockerConfig(image=docker_image)
         self._skill_host_path = Path(skill_host_path) if skill_host_path else None
-        self._docker_host = docker_host
+        self._docker_host: Optional[DockerHost] = docker_host or self._docker_config.docker_host
 
         self._docker_dir = Path(__file__).parent.parent / "docker"
 
@@ -160,7 +160,7 @@ class DockerBackend(ExecutionBackend):
     @property
     def _is_remote(self) -> bool:
         """Whether the Docker daemon is a remote TCP connection."""
-        return bool(self._docker_host and self._docker_host.startswith("tcp://"))
+        return bool(self._docker_host and self._docker_host.is_tcp)
     
     @property
     def container_id(self) -> Optional[str]:
@@ -176,13 +176,63 @@ class DockerBackend(ExecutionBackend):
     # Lifecycle
     # ------------------------------------------------------------------ #
 
+    def _build_tls_config(self):
+        """Build TLS configuration for Docker client if enabled.
+
+        Returns ``None`` when TLS is not requested; otherwise returns a
+        ``docker.tls.TLSConfig`` instance suitable for passing to
+        ``DockerClient``.
+
+        Raises:
+            DockerError: when required certificate files are missing.
+        """
+        dh = self._docker_host
+        if not dh or not dh.tls_verify:
+            return None
+
+        import docker
+
+        if dh.tls_client_cert and dh.tls_client_key:
+            for label, path in [
+                ("CA cert", dh.tls_ca_cert),
+                ("client cert", dh.tls_client_cert),
+                ("client key", dh.tls_client_key),
+            ]:
+                if path and not Path(path).exists():
+                    raise DockerError(f"TLS {label} file not found: {path}")
+
+            return docker.tls.TLSConfig(
+                ca_cert=dh.tls_ca_cert,
+                client_cert=(dh.tls_client_cert, dh.tls_client_key),
+                verify=True,
+            )
+
+        if dh.tls_ca_cert:
+            if not Path(dh.tls_ca_cert).exists():
+                raise DockerError(f"TLS CA cert file not found: {dh.tls_ca_cert}")
+            return docker.tls.TLSConfig(ca_cert=dh.tls_ca_cert, verify=True)
+
+        return docker.tls.TLSConfig(verify=True)
+
     async def initialize(self) -> None:
         """Initialize the backend: connect to daemon, validate image."""
         try:
             import docker
             if self._docker_host:
-                self._client = docker.DockerClient(base_url=self._docker_host)
-                logger.info(f"Connected to Docker daemon at {self._docker_host}")
+                tls_config = self._build_tls_config()
+                if self._is_remote and not tls_config:
+                    logger.warning(
+                        "Connecting to remote Docker daemon WITHOUT TLS. "
+                        "This is insecure — the daemon is exposed to the network without "
+                        "encryption or authentication. Use DockerHost(tls_verify=True, ...) "
+                        "or set SANDBOX_DOCKER_TLS_VERIFY=true."
+                    )
+                kwargs = {"base_url": self._docker_host.url}
+                if tls_config:
+                    kwargs["tls"] = tls_config
+                self._client = docker.DockerClient(**kwargs)
+                proto = "TLS" if tls_config else "plain"
+                logger.info(f"Connected to Docker daemon at {self._docker_host.url} ({proto})")
             else:
                 self._client = docker.from_env()
         except ImportError:
@@ -209,7 +259,7 @@ class DockerBackend(ExecutionBackend):
             img_list = "\n".join(f"  - {t}" for t in available) if available else "  (none)"
             raise DockerError(
                 f"Image '{self._docker_image}' not found on remote Docker daemon "
-                f"{self._docker_host}.\n\nAvailable images:\n{img_list}"
+                f"{self._docker_host.url}.\n\nAvailable images:\n{img_list}"
             )
 
     def _list_remote_images(self) -> List[str]:
