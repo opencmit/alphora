@@ -811,22 +811,26 @@ class OpenAILike(BaseLLM):
             raise RuntimeError("temperature must be between 0.0 and 1.0")
         self.temperature = temp
         self.completion_params['temperature'] = temp
+        self._balancer.update_primary_param('temperature', temp)
 
     def set_max_tokens(self, tokens: int):
         if tokens <= 0:
             raise RuntimeError("max_tokens must be > 0")
         self.max_tokens = tokens
         self.completion_params['max_tokens'] = tokens
+        self._balancer.update_primary_param('max_tokens', tokens)
 
     def set_top_p(self, p: float):
         if not (0.0 <= p <= 1.0):
             raise RuntimeError("top_p must be between 0.0 and 1.0")
         self.top_p = p
         self.completion_params['top_p'] = p
+        self._balancer.update_primary_param('top_p', p)
 
     def set_model_name(self, name: str):
         self.model_name = name
         self.completion_params['model'] = name
+        self._balancer.update_primary_param('model', name)
 
     def ping(self) -> bool:
         try:

@@ -107,6 +107,13 @@ class _LLMLoadBalancer:
         client, params, _ = self._async_backends[idx]
         return client, params
 
+    def update_primary_param(self, key: str, value: Any):
+        """更新主后端（index 0）的 completion_params 中的指定参数。
+        sync 和 async 后端共享同一个 params dict，只需更新一侧即可。
+        """
+        if self._sync_backends:
+            self._sync_backends[0][1][key] = value
+
     def size(self) -> int:
         """返回后端对的数量"""
         return len(self._sync_backends)
