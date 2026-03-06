@@ -11,3 +11,4 @@ pytz
 matplotlib
 python-pptx
 python-docx
+ruff

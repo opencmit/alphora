@@ -126,6 +126,17 @@ from alphora.sandbox.storage import (
     S3Storage,
 )
 
+from alphora.sandbox.tools import (
+    sandbox_file_editor,
+    apply_edits_to_content,
+    EditBlock,
+    EditBlockResult,
+    EditResult,
+    file_inspector,
+    FileContent,
+    code_analyzer,
+)
+
 __all__ = [
     "Sandbox",
     "SandboxManager",
@@ -180,4 +191,12 @@ __all__ = [
     "StorageFactory",
     "LocalStorage",
     "S3Storage",
+    "sandbox_file_editor",
+    "apply_edits_to_content",
+    "EditBlock",
+    "EditBlockResult",
+    "EditResult",
+    "file_inspector",
+    "FileContent",
+    "code_analyzer",
 ]

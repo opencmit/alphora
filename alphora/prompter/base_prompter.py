@@ -351,7 +351,7 @@ class BasePrompt:
             if not is_valid_history_payload(history):
                 raise TypeError(
                     "history must be a valid HistoryPayload from MemoryManager.build_history(). "
-                    "Got: {type(history).__name__}"
+                    f"Got: {type(history).__name__}"
                 )
 
             # 检查工具链完整性警告
@@ -488,10 +488,83 @@ class BasePrompt:
         self.llm = model
         return self
 
+    @staticmethod
+    def _normalize_tools(tools) -> Optional[List[Dict]]:
+        """将多种 tools 输入格式统一转换为 OpenAI Function Calling schema。
+
+        支持以下输入类型:
+            - None: 直接返回 None
+            - ToolRegistry: 调用 get_openai_tools_schema()
+            - List[Dict]: 已经是 OpenAI schema，直接透传
+            - List[Tool]: 逐个提取 openai_schema
+            - List[Callable]: 通过 Tool.from_function 自动转换
+            - 以上类型可混合使用
+        """
+        if tools is None:
+            return None
+
+        from alphora.tools import Tool, ToolRegistry
+
+        if isinstance(tools, ToolRegistry):
+            return tools.get_openai_tools_schema()
+
+        if not isinstance(tools, (list, tuple)):
+            raise TypeError(
+                f"tools must be a list, tuple, ToolRegistry, or None, got {type(tools).__name__}"
+            )
+
+        result = []
+        for item in tools:
+            if isinstance(item, dict):
+                result.append(item)
+            elif isinstance(item, Tool):
+                result.append(item.openai_schema)
+            elif callable(item):
+                result.append(Tool.from_function(item).openai_schema)
+            else:
+                raise TypeError(
+                    f"Each tool must be a dict, Tool, or callable, got {type(item).__name__}"
+                )
+        return result or None
+
+    @staticmethod
+    def _validate_history(history) -> Optional[HistoryPayload]:
+        """校验 history 参数类型，给出对开发者友好的错误提示。"""
+        if history is None:
+            return None
+
+        if isinstance(history, HistoryPayload):
+            return history
+
+        from alphora.memory.manager import MemoryManager
+
+        hint = (
+            "history must be a HistoryPayload instance, "
+            "please use memory.build_history() to create it.\n"
+            "Example:\n"
+            "    memory = MemoryManager()\n"
+            "    history = memory.build_history()\n"
+            "    response = await prompt.acall(history=history)"
+        )
+
+        if isinstance(history, MemoryManager):
+            raise TypeError(
+                f"Received a MemoryManager instance directly. {hint}"
+            )
+
+        if isinstance(history, (list, tuple)):
+            raise TypeError(
+                f"Received a raw {type(history).__name__} instead of HistoryPayload. {hint}"
+            )
+
+        raise TypeError(
+            f"Expected HistoryPayload, got {type(history).__name__}. {hint}"
+        )
+
     def call(self,
              query: str = None,
              is_stream: bool = False,
-             tools: Optional[List] = None,
+             tools: Union[List, "ToolRegistry", None] = None,
              multimodal_message: Message = None,
              return_generator: bool = False,
              content_type: str = None,
@@ -512,7 +585,12 @@ class BasePrompt:
         Args:
             query: The user input (optional if continuing a tool chain).
             is_stream: If True, streams the response token by token.
-            tools: A list of available tools/functions for the LLM.
+            tools: Tools for the LLM to use. Accepts any of the following:
+                - ``ToolRegistry`` instance (calls ``get_openai_tools_schema()`` automatically)
+                - ``List[Tool]`` – Tool objects (extracts ``openai_schema``)
+                - ``List[Callable]`` – plain functions or ``@tool``-decorated (auto-converted via ``Tool.from_function``)
+                - ``List[Dict]`` – raw OpenAI function-calling schema dicts (passed through as-is)
+                - Mixed list of the above types
             multimodal_message: A specialized message object for multimodal inputs.
             return_generator: If True, returns the raw generator instead of consuming it.
             content_type: MIME type override for the response.
@@ -521,18 +599,27 @@ class BasePrompt:
             force_json: If True, attempts to repair and parse the output as JSON.
             long_response: If True, activates the LongResponseGenerator for extended outputs.
             runtime_system_prompt: System prompts injected specifically for this call.
-            history: The conversation history payload.
+            history: A ``HistoryPayload`` built by ``MemoryManager.build_history()``.
+                Do NOT pass raw lists or the MemoryManager itself; use::
+
+                    memory = MemoryManager()
+                    history = memory.build_history()
+                    response = prompt.call(history=history)
 
         Returns:
             Union[PrompterOutput, ToolCall, BaseGenerator]: The generated response, tool call, or stream generator.
 
         Raises:
             ValueError: If the LLM has not been bound via `add_llm`.
+            TypeError: If ``history`` is not a valid ``HistoryPayload``.
             RuntimeError: If the execution fails during generation.
         """
 
         if not self.llm:
             raise ValueError("LLM not initialized. Call add_llm() first.")
+
+        tools = self._normalize_tools(tools)
+        history = self._validate_history(history)
 
         # 1. 构建消息
         messages = self.build_messages(
@@ -723,7 +810,7 @@ class BasePrompt:
     async def acall(self,
                     query: str = None,
                     is_stream: bool = False,
-                    tools: Optional[List] = None,
+                    tools: Union[List, "ToolRegistry", None] = None,
                     multimodal_message: Message = None,
                     return_generator: bool = False,
                     content_type: Optional[str] = None,
@@ -744,7 +831,12 @@ class BasePrompt:
         Args:
             query: The user input (optional if continuing a tool chain).
             is_stream: If True, streams the response token by token.
-            tools: A list of available tools/functions for the LLM.
+            tools: Tools for the LLM to use. Accepts any of the following:
+                - ``ToolRegistry`` instance (calls ``get_openai_tools_schema()`` automatically)
+                - ``List[Tool]`` – Tool objects (extracts ``openai_schema``)
+                - ``List[Callable]`` – plain functions or ``@tool``-decorated (auto-converted via ``Tool.from_function``)
+                - ``List[Dict]`` – raw OpenAI function-calling schema dicts (passed through as-is)
+                - Mixed list of the above types
             multimodal_message: A specialized message object for multimodal inputs.
             return_generator: If True, returns the async generator instead of consuming it.
             content_type: MIME type override for the response.
@@ -753,10 +845,20 @@ class BasePrompt:
             force_json: If True, attempts to repair and parse the output as JSON.
             long_response: If True, activates the LongResponseGenerator for extended outputs.
             runtime_system_prompt: System prompts injected specifically for this call.
-            history: The conversation history payload.
+            history: A ``HistoryPayload`` built by ``MemoryManager.build_history()``.
+                Do NOT pass raw lists or the MemoryManager itself; use::
+
+                    memory = MemoryManager()
+                    history = memory.build_history()
+                    response = await prompt.acall(history=history)
 
         Returns:
             Union[PrompterOutput, ToolCall, BaseGenerator]: The generated response, tool call, or stream generator.
+
+        Raises:
+            ValueError: If the LLM has not been bound via `add_llm`.
+            TypeError: If ``history`` is not a valid ``HistoryPayload``.
+            RuntimeError: If the execution fails during generation.
 
         Example:
             prompt = BasePrompt(user_prompt="Hello, {{name}}")
@@ -767,6 +869,9 @@ class BasePrompt:
 
         if not self.llm:
             raise ValueError("LLM not initialized. Call add_llm() first.")
+
+        tools = self._normalize_tools(tools)
+        history = self._validate_history(history)
 
         if not content_type:
             content_type = self.content_type or 'char'

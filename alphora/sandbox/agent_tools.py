@@ -7,6 +7,10 @@ from typing import Optional, List, Dict, Any, Callable, Awaitable
 import logging
 import json
 
+from alphora.sandbox.tools.editor.file_editor import sandbox_file_editor
+from alphora.sandbox.tools.inspector import file_inspector
+from alphora.sandbox.tools.analyzer import code_analyzer
+
 logger = logging.getLogger(__name__)
 
 
@@ -74,6 +78,9 @@ class SandboxTools:
             "file_exists": self.file_exists,
             "copy_file": self.copy_file,
             "move_file": self.move_file,
+            "edit_file": self.edit_file,
+            "inspect_file": self.inspect_file,
+            "analyze_code": self.analyze_code,
             "install_pip_package": self.install_pip_package,
             "install_pip_packages": self.install_pip_packages,
             "uninstall_pip_package": self.uninstall_pip_package,
@@ -326,6 +333,166 @@ class SandboxTools:
         try:
             await self._sandbox.move_file(source, dest)
             return self._success(f"Moved {source} to {dest}")
+        except Exception as e:
+            return self._error(str(e))
+
+    # File Editing Tools
+    async def edit_file(
+        self,
+        file_path: str,
+        mode: str = "search_replace",
+        edits: Optional[List[Dict[str, str]]] = None,
+        new_content: Optional[str] = None,
+        backup: bool = True,
+        match_strategy: str = "fuzzy",
+        fuzzy_threshold: float = 0.8,
+    ) -> Dict[str, Any]:
+        """
+        Incrementally edit a file using search-and-replace blocks, or fully rewrite it.
+
+        Supports two modes:
+        - "search_replace": Apply targeted edits via search/replace blocks.
+          Uses a 3-tier matching strategy (exact → whitespace-normalized → fuzzy).
+        - "full_rewrite": Replace the entire file content.
+
+        Args:
+            file_path: Path to the target file (relative to workspace)
+            mode: "search_replace" or "full_rewrite"
+            edits: List of {"search": str, "replace": str} blocks (search_replace mode)
+            new_content: Complete new file content (full_rewrite mode)
+            backup: Whether to create a .bak backup before editing
+            match_strategy: "exact" (strict) or "fuzzy" (exact → whitespace → similarity)
+            fuzzy_threshold: Similarity threshold for fuzzy matching (0.0 ~ 1.0, default 0.8)
+
+        Returns:
+            Dict with success, mode, file_path, edit_results, stats, diff, error, message
+        """
+        try:
+            return await sandbox_file_editor(
+                sandbox=self._sandbox,
+                file_path=file_path,
+                mode=mode,
+                edits=edits,
+                new_content=new_content,
+                backup=backup,
+                match_strategy=match_strategy,
+                fuzzy_threshold=fuzzy_threshold,
+            )
+        except Exception as e:
+            return self._error(str(e))
+
+    # File Inspection Tools
+    async def inspect_file(
+        self,
+        path: str,
+        search: Optional[str] = None,
+        outline: bool = False,
+        info_only: bool = False,
+        diff_with: Optional[str] = None,
+        start_line: Optional[int] = None,
+        end_line: Optional[int] = None,
+        max_lines: int = 100,
+        regex: bool = False,
+        context_lines: int = 3,
+        max_matches: int = 20,
+        glob_pattern: Optional[str] = None,
+        max_files: int = 10,
+        diff_context_lines: int = 3,
+        line_numbers: bool = False,
+        encoding: str = "utf-8",
+        sheet: Optional[str] = None,
+        page: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Inspect files in the sandbox: view content, search, outline, diff, or get metadata.
+        Supports text files, Excel, PDF, and PowerPoint. Accepts both file and directory paths.
+
+        Modes (priority: info_only > diff_with > outline > search > view):
+        - Default (view): Show file content with optional line range.
+        - search: Find a string or regex pattern in a file or across a directory.
+        - outline: Extract structural overview (class/function signatures).
+        - diff_with: Compare with another file (unified diff).
+        - info_only: Return only file/directory metadata (size, lines, type).
+
+        Args:
+            path: File or directory path in the sandbox
+            search: Search pattern (activates search mode)
+            outline: If True, show structural outline only
+            info_only: If True, return metadata only (no content)
+            diff_with: Path to a second file for comparison
+            start_line: Start line for viewing (1-indexed, negative = from end)
+            end_line: End line for viewing (1-indexed, negative = from end)
+            max_lines: Maximum lines to return (default 100)
+            regex: Treat search pattern as regex
+            context_lines: Context lines around each search match (default 3)
+            max_matches: Maximum search matches to return (default 20)
+            glob_pattern: Filename filter for directory search (e.g. "*.py")
+            max_files: Maximum files to search in directory mode (default 10)
+            diff_context_lines: Context lines in diff output (default 3)
+            line_numbers: Show line numbers (default False)
+            encoding: File encoding (default utf-8)
+            sheet: Excel sheet name (Excel files only)
+            page: Page number, 1-indexed (PDF/PPT only)
+
+        Returns:
+            Dict with success, file_info/dir_info, content/matches/diff, and error
+        """
+        try:
+            return await file_inspector(
+                sandbox=self._sandbox,
+                path=path,
+                search=search,
+                outline=outline,
+                info_only=info_only,
+                diff_with=diff_with,
+                start_line=start_line,
+                end_line=end_line,
+                max_lines=max_lines,
+                regex=regex,
+                context_lines=context_lines,
+                max_matches=max_matches,
+                glob_pattern=glob_pattern,
+                max_files=max_files,
+                diff_context_lines=diff_context_lines,
+                line_numbers=line_numbers,
+                encoding=encoding,
+                sheet=sheet,
+                page=page,
+            )
+        except Exception as e:
+            return self._error(str(e))
+
+    # Code Analysis Tools
+    async def analyze_code(
+        self,
+        path: str,
+        fix: bool = False,
+        max_issues: int = 50,
+        severity: str = "all",
+    ) -> Dict[str, Any]:
+        """
+        Run lint check on Python files or directories in the sandbox.
+
+        Uses ruff (pre-installed in Docker image). Falls back to AST-based checks
+        when ruff is unavailable.
+
+        Args:
+            path: File or directory path in the sandbox
+            fix: Auto-fix lint issues (ruff only)
+            max_issues: Maximum issues to return (default 50)
+            severity: Filter by severity ("all" | "error" | "warning")
+
+        Returns:
+            Dict with success, tool, issues, error_count, warning_count, info_count, truncated
+        """
+        try:
+            return await code_analyzer(
+                sandbox=self._sandbox,
+                path=path,
+                fix=fix,
+                max_issues=max_issues,
+                severity=severity,
+            )
         except Exception as e:
             return self._error(str(e))
 
