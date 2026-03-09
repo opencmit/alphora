@@ -364,10 +364,15 @@ class BasePrompt:
             # 合并历史消息
             messages.extend(history.to_list())
 
-        # 5. User Content
+        # 5. User Content (skip if history already contains the same user message)
         if query is not None:
             user_content = self._render_user_content(query)
-            messages.append({"role": "user", "content": user_content})
+            already_in_history = any(
+                msg.get("role") == "user" and msg.get("content") == user_content
+                for msg in messages
+            )
+            if not already_in_history:
+                messages.append({"role": "user", "content": user_content})
 
         after_ctx = HookContext(
             event=HookEvent.PROMPTER_AFTER_BUILD_MESSAGES,
@@ -623,8 +628,8 @@ class BasePrompt:
 
         # 1. 构建消息
         messages = self.build_messages(
-            # query=query,
-            query=None,
+            query=query,
+            # query=None,
             force_json=force_json,
             runtime_system_prompt=runtime_system_prompt,
             history=history
@@ -879,8 +884,8 @@ class BasePrompt:
 
         # 1. 构建消息
         messages = self.build_messages(
-            # query=query,
-            query=None,
+            query=query,
+            # query=None,
             force_json=force_json,
             runtime_system_prompt=runtime_system_prompt,
             history=history
