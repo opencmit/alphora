@@ -869,7 +869,8 @@ class OpenAILike(BaseLLM):
 
         self._balancer.add_client(async_client=other._async_client,
                                   sync_client=other._sync_client,
-                                  completion_params=other.completion_params)
+                                  completion_params=other.completion_params,
+                                  is_multimodal=other.is_multimodal)
 
         return self
 
