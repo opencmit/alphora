@@ -623,7 +623,8 @@ class BasePrompt:
 
         # 1. 构建消息
         messages = self.build_messages(
-            query=query,
+            # query=query,
+            query=None,
             force_json=force_json,
             runtime_system_prompt=runtime_system_prompt,
             history=history
@@ -878,11 +879,13 @@ class BasePrompt:
 
         # 1. 构建消息
         messages = self.build_messages(
-            query=query,
+            # query=query,
+            query=None,
             force_json=force_json,
             runtime_system_prompt=runtime_system_prompt,
             history=history
         )
+
         msg_payload = messages if not multimodal_message else multimodal_message
         await self._hooks.emit(
             HookEvent.LLM_BEFORE_CALL,

@@ -1,7 +1,8 @@
 """
-Alphora Sandbox - AI Agent Tools
+Alphora 沙箱工具集
 
-Simplified interfaces for LLM Function Calling.
+为 LLM Function Calling 提供统一的沙箱操作接口。
+所有工具方法返回标准 Dict 格式：{"success": bool, "output": Any, "error": str}
 """
 from typing import Optional, List, Dict, Any, Callable, Awaitable
 import logging
@@ -16,55 +17,33 @@ logger = logging.getLogger(__name__)
 
 class SandboxTools:
     """
-    Sandbox Tool Collection for AI Agents.
-    
-    Provides simplified, consistent interfaces for all sandbox operations.
-    All methods return a standard response format for easy LLM integration.
-    
-    Response Format:
-        {
-            "success": bool,
-            "output": Any,
-            "error": str
-        }
-    
-    Usage:
-        ```python
-        from alphora.sandbox import Sandbox, SandboxTools
-        
-        async with Sandbox(runtime="local") as sandbox:
-            tools = SandboxTools(sandbox)
-            
-            # Execute code
-            result = await tools.run_python_code("print('Hello')")
-            print(result)  # {'success': True, 'output': 'Hello', ...}
-            
-            # Save file
-            result = await tools.save_file("script.py", "print('test')")
-            
-            # Install package
-            result = await tools.install_pip_package("requests")
-        ```
-    
-    With OpenAI Function Calling:
-        ```python
+    AI Agent 沙箱工具集 —— 提供代码执行、文件操作、包管理、环境控制等全套沙箱能力。
+
+    所有工具方法返回统一的 Dict 格式，便于 LLM Function Calling 解析：
+        {"success": bool, "output": Any, "error": str}
+
+    工具分类:
+        代码执行:  run_python_code, run_python_file, run_shell_command
+        文件操作:  save_file, upload_file, read_file, delete_file, list_files, file_exists, copy_file, move_file
+        文件编辑:  edit_file（增量搜索替换 或 全量重写）
+        文件检查:  inspect_file（查看/搜索/大纲/对比/元信息，支持 Excel/PDF/PPT）
+        代码分析:  analyze_code（lint 检查与自动修复）
+        包管理:    install_pip_package, install_pip_packages, uninstall_pip_package, list_installed_packages, check_package_installed
+        环境变量:  set_environment_variable, get_environment_variable
+        沙箱管理:  get_sandbox_status, get_resource_usage, reset_sandbox
+
+    用法:
         tools = SandboxTools(sandbox)
-        
-        # Get tool definitions
-        definitions = tools.get_openai_tools()
-        
-        # Execute tool call
+
+        # 按名称调用工具（适配 Function Calling）
         result = await tools.execute_tool("run_python_code", {"code": "print(1+1)"})
-        ```
+
+        # 直接调用方法
+        result = await tools.run_python_code("print(1+1)")
     """
     
     def __init__(self, sandbox):
-        """
-        Initialize tool collection.
-        
-        Args:
-            sandbox: Sandbox instance
-        """
+        """初始化工具集，绑定沙箱实例。"""
         self._sandbox = sandbox
         self._tool_registry: Dict[str, Callable[..., Awaitable[Dict[str, Any]]]] = {
             "run_python_code": self.run_python_code,
@@ -95,32 +74,37 @@ class SandboxTools:
     
     @property
     def sandbox(self):
-        """Get sandbox instance"""
         return self._sandbox
-    
+
     def _success(self, output: Any, **extra) -> Dict[str, Any]:
-        """Create success response"""
         return {"success": True, "output": output, "error": "", **extra}
-    
+
     def _error(self, error: str, output: Any = None) -> Dict[str, Any]:
-        """Create error response"""
         return {"success": False, "output": output, "error": str(error)}
 
-    # Code Execution Tools
+    # ━━ 代码执行工具 ━━
+
     async def run_python_code(
         self,
         code: str,
         timeout: int = 60
     ) -> Dict[str, Any]:
         """
-        Execute Python code in the sandbox.
-        
-        Args:
-            code: Python code to execute
-            timeout: Execution timeout in seconds (default: 60)
-        
-        Returns:
-            Dict with success, output, error, and execution_time
+        在沙箱中执行 Python 代码。
+
+        适用于运行计算逻辑、数据处理脚本、调试代码片段等场景。
+        代码在隔离的沙箱环境中执行，可访问沙箱内已安装的所有包和文件。
+
+        参数:
+            code:    要执行的 Python 代码（支持多行，可包含 import、函数定义等）
+            timeout: 执行超时时间（秒），默认 60。长耗时任务可适当增大
+
+        返回:
+            success:        bool，是否执行成功（return_code == 0）
+            output:         str，标准输出（print 的内容）
+            error:          str，标准错误输出（异常信息、warnings 等）
+            execution_time: float，执行耗时（秒）
+            return_code:    int，进程退出码（0=成功）
         """
         try:
             result = await self._sandbox.execute_code(code, timeout=timeout)
@@ -141,15 +125,21 @@ class SandboxTools:
         timeout: int = 60
     ) -> Dict[str, Any]:
         """
-        Execute a Python file in the sandbox.
-        
-        Args:
-            file_path: Path to the Python file
-            args: Command line arguments (optional)
-            timeout: Execution timeout in seconds
-        
-        Returns:
-            Dict with execution results
+        在沙箱中执行 Python 文件。
+
+        与 run_python_code 的区别：执行的是沙箱内已保存的 .py 文件，可传入命令行参数。
+        适用于运行完整脚本、带参数的数据处理任务等。
+
+        参数:
+            file_path: Python 文件路径（沙箱内路径），如 "scripts/analyze.py"
+            args:      命令行参数列表，如 ["--input", "data.csv", "--output", "result.json"]
+            timeout:   执行超时时间（秒），默认 60
+
+        返回:
+            success:        bool，是否执行成功
+            output:         str，标准输出
+            error:          str，标准错误输出
+            execution_time: float，执行耗时（秒）
         """
         try:
             result = await self._sandbox.execute_file(file_path, args=args, timeout=timeout)
@@ -168,14 +158,20 @@ class SandboxTools:
         timeout: int = 60
     ) -> Dict[str, Any]:
         """
-        Execute a shell command in the sandbox.
-        
-        Args:
-            command: Shell command to execute
-            timeout: Execution timeout in seconds
-        
-        Returns:
-            Dict with execution results
+        在沙箱中执行 Shell 命令。
+
+        适用于文件系统操作（ls, find, wc）、数据处理（curl, jq）、系统工具调用等。
+        支持管道和重定向，如 "cat data.csv | head -20" 或 "ls -la > filelist.txt"。
+
+        参数:
+            command: Shell 命令字符串，如 "ls -la /mnt/workspace"
+            timeout: 执行超时时间（秒），默认 60
+
+        返回:
+            success:        bool，是否执行成功
+            output:         str，标准输出
+            error:          str，标准错误输出
+            execution_time: float，执行耗时（秒）
         """
         try:
             result = await self._sandbox.execute_shell(command, timeout=timeout)
@@ -188,17 +184,20 @@ class SandboxTools:
         except Exception as e:
             return self._error(str(e))
 
-    # File Operation Tools
+    # ━━ 文件操作工具 ━━
+
     async def save_file(self, path: str, content: str) -> Dict[str, Any]:
         """
-        Save content to a file.
-        
-        Args:
-            path: File path (relative to workspace)
-            content: File content
-        
-        Returns:
-            Dict with success status and file info
+        将文本内容保存为文件。文件不存在则创建，已存在则覆盖。自动创建中间目录。
+
+        参数:
+            path:    文件路径（沙箱内路径），如 "scripts/main.py" 或 "data/config.json"
+            content: 文件内容（字符串）
+
+        返回:
+            success:   bool
+            output:    str，保存确认信息
+            file_info: {path, size, ...}，文件元信息
         """
         try:
             file_info = await self._sandbox.save_file(path, content)
@@ -211,14 +210,18 @@ class SandboxTools:
 
     async def upload_file(self, file_name: str, base64_data: str) -> Dict[str, Any]:
         """
-        Upload a file to /mnt/workspace/uploads/.
+        上传文件到沙箱的 /mnt/workspace/uploads/ 目录。
 
-        Args:
-            file_name: Target file name, e.g. "data.xlsx"
-            base64_data: Base64-encoded content (raw or data URL)
+        接收 Base64 编码的文件内容，适用于上传用户提供的二进制文件（Excel、图片、PDF 等）。
 
-        Returns:
-            Dict with success status and file info
+        参数:
+            file_name:   目标文件名，如 "data.xlsx"、"image.png"
+            base64_data: Base64 编码的文件内容（支持纯 Base64 或 data URL 格式）
+
+        返回:
+            success:   bool
+            output:    str，上传确认信息
+            file_info: {path, size, ...}，文件元信息（含完整路径）
         """
         try:
             file_info = await self._sandbox.upload_file(file_name, base64_data)
@@ -231,13 +234,17 @@ class SandboxTools:
     
     async def read_file(self, path: str) -> Dict[str, Any]:
         """
-        Read content from a file.
-        
-        Args:
-            path: File path (relative to workspace)
-        
-        Returns:
-            Dict with file content
+        读取文本文件的原始内容。
+
+        返回文件的完整文本内容。仅适用于文本文件（.py .json .csv .txt 等）。
+        如需读取 Excel/PDF/PPT 等二进制文件，请使用 inspect_file。
+
+        参数:
+            path: 文件路径（沙箱内路径）
+
+        返回:
+            success: bool
+            output:  str，文件内容全文
         """
         try:
             content = await self._sandbox.read_file(path)
@@ -247,13 +254,14 @@ class SandboxTools:
     
     async def delete_file(self, path: str) -> Dict[str, Any]:
         """
-        Delete a file or directory.
-        
-        Args:
-            path: File path to delete
-        
-        Returns:
-            Dict with deletion status
+        删除文件或目录。
+
+        参数:
+            path: 要删除的文件或目录路径
+
+        返回:
+            success: bool
+            output:  str，删除确认信息（文件不存在时也返回成功）
         """
         try:
             deleted = await self._sandbox.delete_file(path)
@@ -270,14 +278,15 @@ class SandboxTools:
         recursive: bool = False
     ) -> Dict[str, Any]:
         """
-        List files in a directory.
-        
-        Args:
-            path: Directory path (default: workspace root)
-            recursive: Include subdirectories
-        
-        Returns:
-            Dict with list of files
+        列出目录下的文件和子目录。
+
+        参数:
+            path:      目录路径，默认为工作区根目录。如 "data/"、"src/components/"
+            recursive: 是否递归列出子目录内容，默认 False（仅列出一层）
+
+        返回:
+            success: bool
+            output:  [{name, path, size, is_directory, modified_time}, ...]，文件列表
         """
         try:
             files = await self._sandbox.list_files(path, recursive=recursive)
@@ -288,13 +297,14 @@ class SandboxTools:
     
     async def file_exists(self, path: str) -> Dict[str, Any]:
         """
-        Check if a file exists.
-        
-        Args:
-            path: File path to check
-        
-        Returns:
-            Dict with existence status
+        检查文件是否存在。
+
+        参数:
+            path: 文件路径
+
+        返回:
+            success: bool
+            output:  bool，True=文件存在，False=文件不存在
         """
         try:
             exists = await self._sandbox.file_exists(path)
@@ -304,14 +314,15 @@ class SandboxTools:
     
     async def copy_file(self, source: str, dest: str) -> Dict[str, Any]:
         """
-        Copy a file.
-        
-        Args:
-            source: Source file path
-            dest: Destination file path
-        
-        Returns:
-            Dict with copy status
+        复制文件。
+
+        参数:
+            source: 源文件路径
+            dest:   目标文件路径（如目标已存在则覆盖）
+
+        返回:
+            success: bool
+            output:  str，复制确认信息
         """
         try:
             await self._sandbox.copy_file(source, dest)
@@ -321,14 +332,15 @@ class SandboxTools:
     
     async def move_file(self, source: str, dest: str) -> Dict[str, Any]:
         """
-        Move a file.
-        
-        Args:
-            source: Source file path
-            dest: Destination file path
-        
-        Returns:
-            Dict with move status
+        移动或重命名文件。
+
+        参数:
+            source: 源文件路径
+            dest:   目标路径（可以是新目录路径或新文件名）
+
+        返回:
+            success: bool
+            output:  str，移动确认信息
         """
         try:
             await self._sandbox.move_file(source, dest)
@@ -336,7 +348,8 @@ class SandboxTools:
         except Exception as e:
             return self._error(str(e))
 
-    # File Editing Tools
+    # ━━ 文件编辑工具 ━━
+
     async def edit_file(
         self,
         file_path: str,
@@ -348,24 +361,55 @@ class SandboxTools:
         fuzzy_threshold: float = 0.8,
     ) -> Dict[str, Any]:
         """
-        Incrementally edit a file using search-and-replace blocks, or fully rewrite it.
+        增量编辑文件（搜索替换）或全量重写文件内容。
 
-        Supports two modes:
-        - "search_replace": Apply targeted edits via search/replace blocks.
-          Uses a 3-tier matching strategy (exact → whitespace-normalized → fuzzy).
-        - "full_rewrite": Replace the entire file content.
+        ━━ 工作模式 ━━
 
-        Args:
-            file_path: Path to the target file (relative to workspace)
-            mode: "search_replace" or "full_rewrite"
-            edits: List of {"search": str, "replace": str} blocks (search_replace mode)
-            new_content: Complete new file content (full_rewrite mode)
-            backup: Whether to create a .bak backup before editing
-            match_strategy: "exact" (strict) or "fuzzy" (exact → whitespace → similarity)
-            fuzzy_threshold: Similarity threshold for fuzzy matching (0.0 ~ 1.0, default 0.8)
+        1. search_replace（默认）—— 精准定位并替换文件中的代码片段
+           通过 edits 列表指定多个 {search, replace} 块，逐一应用。
+           匹配策略采用 3 级降级：精确匹配 → 空白归一化匹配 → 模糊相似度匹配。
+           适用于修改函数、修复 bug、添加代码等场景。
 
-        Returns:
-            Dict with success, mode, file_path, edit_results, stats, diff, error, message
+        2. full_rewrite —— 用 new_content 完全替换文件内容
+           适用于文件较小或需要大幅重构的场景。
+
+        ━━ 参数说明 ━━
+
+        基础参数:
+            file_path:       目标文件路径（沙箱内路径）
+            mode:            编辑模式，"search_replace" 或 "full_rewrite"
+            backup:          是否在编辑前创建 .bak 备份，默认 True
+
+        search_replace 模式参数:
+            edits:           编辑块列表，每个元素为 {"search": "要查找的代码", "replace": "替换为的代码"}
+                             search 内容需与文件中的片段匹配（支持多行）
+            match_strategy:  匹配策略，"exact"（严格精确）或 "fuzzy"（3 级降级，默认）
+            fuzzy_threshold: 模糊匹配的相似度阈值（0.0~1.0），默认 0.8
+
+        full_rewrite 模式参数:
+            new_content:     完整的新文件内容
+
+        ━━ 返回结构 ━━
+
+            success:      bool，是否全部编辑成功
+            mode:         str，实际使用的编辑模式
+            file_path:    str，编辑的文件路径
+            edit_results: [{search_preview, status, match_type, similarity}, ...]，每个编辑块的匹配结果
+            stats:        {total, applied, failed}，编辑统计
+            diff:         str，编辑前后的 unified diff
+            error:        str，错误信息
+            message:      str，结果摘要
+
+        ━━ 典型用法 ━━
+
+        # 替换函数实现
+        edit_file("app.py", edits=[{
+            "search": "def hello():\\n    return 'hi'",
+            "replace": "def hello():\\n    return 'hello world'"
+        }])
+
+        # 全量重写配置文件
+        edit_file("config.yaml", mode="full_rewrite", new_content="key: new_value\\n")
         """
         try:
             return await sandbox_file_editor(
@@ -381,7 +425,7 @@ class SandboxTools:
         except Exception as e:
             return self._error(str(e))
 
-    # File Inspection Tools
+    # ━━ 文件检查工具 ━━
     async def inspect_file(
         self,
         path: str,
@@ -404,38 +448,122 @@ class SandboxTools:
         page: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Inspect files in the sandbox: view content, search, outline, diff, or get metadata.
-        Supports text files, Excel, PDF, and PowerPoint. Accepts both file and directory paths.
+        沙箱文件检查工具 —— 查看、搜索、大纲、对比、元信息，一个入口覆盖全部操作。
 
-        Modes (priority: info_only > diff_with > outline > search > view):
-        - Default (view): Show file content with optional line range.
-        - search: Find a string or regex pattern in a file or across a directory.
-        - outline: Extract structural overview (class/function signatures).
-        - diff_with: Compare with another file (unified diff).
-        - info_only: Return only file/directory metadata (size, lines, type).
+        支持文本文件（.py .js .json .md .yaml 等）、Excel（.xlsx .xls .csv）、PDF、PPT。
+        支持传入文件路径或目录路径。
 
-        Args:
-            path: File or directory path in the sandbox
-            search: Search pattern (activates search mode)
-            outline: If True, show structural outline only
-            info_only: If True, return metadata only (no content)
-            diff_with: Path to a second file for comparison
-            start_line: Start line for viewing (1-indexed, negative = from end)
-            end_line: End line for viewing (1-indexed, negative = from end)
-            max_lines: Maximum lines to return (default 100)
-            regex: Treat search pattern as regex
-            context_lines: Context lines around each search match (default 3)
-            max_matches: Maximum search matches to return (default 20)
-            glob_pattern: Filename filter for directory search (e.g. "*.py")
-            max_files: Maximum files to search in directory mode (default 10)
-            diff_context_lines: Context lines in diff output (default 3)
-            line_numbers: Show line numbers (default False)
-            encoding: File encoding (default utf-8)
-            sheet: Excel sheet name (Excel files only)
-            page: Page number, 1-indexed (PDF/PPT only)
+        ━━ 工作模式（按优先级，同时传入多个时只执行最高优先级）━━
 
-        Returns:
-            Dict with success, file_info/dir_info, content/matches/diff, and error
+        1. info_only=True  → 元信息模式：仅返回文件/目录的大小、行数、类型等，不读取内容
+        2. diff_with="B.py" → 对比模式：将 path 文件与 diff_with 文件做 unified diff
+        3. outline=True     → 大纲模式：提取代码结构（class/function 签名），适合快速了解文件骨架
+        4. search="关键词"   → 搜索模式：在文件内容中查找字符串或正则，返回匹配行及上下文
+           - 对目录：递归搜索目录下所有可读文件
+           - 对 Excel/PDF：先解析为文本再搜索，可搜索合并单元格内容
+        5. 默认（查看模式） → 返回文件内容，可通过 start_line/end_line 指定行范围
+
+        ━━ 参数说明 ━━
+
+        路径与基础参数:
+            path:             文件或目录路径（沙箱内路径）
+            encoding:         文件编码，默认 "utf-8"
+
+        查看模式参数:
+            start_line:       起始行号（1-indexed），支持负数（-1=最后一行，-10=倒数第10行）
+            end_line:         结束行号（1-indexed），支持负数
+            max_lines:        单次最大返回行数，默认 100
+            line_numbers:     是否在每行前添加行号，默认 False
+
+        搜索模式参数:
+            search:           搜索关键词（传入即激活搜索模式）
+            regex:            是否将 search 作为正则表达式，默认 False
+            context_lines:    每个匹配结果前后显示的上下文行数，默认 3
+            max_matches:      最大返回匹配数，默认 20
+            glob_pattern:     目录搜索时的文件名过滤，如 "*.py"、"*.xlsx"
+            max_files:        目录搜索时最多扫描的文件数量，默认 10
+
+        大纲模式参数:
+            outline:          设为 True 激活大纲模式，提取 class/function/import 结构
+
+        对比模式参数:
+            diff_with:        对比目标文件路径（传入即激活对比模式）
+            diff_context_lines: diff 输出中每个变更区域的上下文行数，默认 3
+
+        元信息模式参数:
+            info_only:        设为 True 激活元信息模式
+
+        格式专用参数:
+            sheet:            Excel sheet 名称。
+                              - 不传：多 sheet 文件返回全部 sheet 索引概览（名称、行列数、合并区域数）
+                              - 传入：返回该 sheet 的格式化表格内容（自动处理合并单元格、多级表头）
+            page:             PDF/PPT 页码（1-indexed），不传则返回全部内容
+
+        ━━ 返回结构 ━━
+
+        所有模式统一返回 Dict，包含:
+            success:    bool，操作是否成功
+            error:      str，失败时的错误码（成功时为空字符串）
+            message:    str，失败时的错误描述
+
+        查看模式额外返回:
+            file_info:  {path, size, size_human, total_lines, type, encoding, metadata}
+            content:    str，文件内容（已按行范围截取）
+            shown_range: [start, end]，实际显示的行范围
+            truncated:  bool，是否因 max_lines 限制而截断
+
+        搜索模式额外返回:
+            file_info:  同上
+            matches:    [{line, column, text, context}, ...]，匹配列表
+            match_count: int，总匹配数
+            shown_matches: int，实际返回的匹配数
+            matches_truncated: bool，是否因 max_matches 限制而截断
+            （目录搜索时额外有 file_matches, files_searched, files_with_matches）
+
+        大纲模式额外返回:
+            file_info:  同上
+            outline:    str，代码结构大纲
+
+        对比模式额外返回:
+            file_info:  同上
+            diff:       str，unified diff 文本
+            has_changes: bool，两文件是否有差异
+            stats:      {added, removed, changed_regions}
+
+        元信息模式额外返回:
+            file_info 或 dir_info（目录时包含 total_files, total_size, file_types 等）
+
+        ━━ 典型用法 ━━
+
+        # 查看文件前 50 行
+        inspect_file("data/report.py", max_lines=50)
+
+        # 查看文件末尾 20 行（带行号）
+        inspect_file("logs/app.log", start_line=-20, line_numbers=True)
+
+        # 搜索关键词
+        inspect_file("src/main.py", search="def handle_request")
+
+        # 正则搜索目录下所有 Python 文件
+        inspect_file("src/", search="TODO|FIXME", regex=True, glob_pattern="*.py")
+
+        # 查看 Excel 多 sheet 概览
+        inspect_file("财务报表.xlsx")
+
+        # 查看 Excel 指定 sheet
+        inspect_file("财务报表.xlsx", sheet="利润表")
+
+        # 在 Excel 中搜索关键词
+        inspect_file("财务报表.xlsx", sheet="利润表", search="营运收入")
+
+        # 提取代码大纲
+        inspect_file("src/service.py", outline=True)
+
+        # 对比两个文件
+        inspect_file("v1/config.yaml", diff_with="v2/config.yaml")
+
+        # 仅获取文件元信息
+        inspect_file("data/large_file.csv", info_only=True)
         """
         try:
             return await file_inspector(
@@ -462,7 +590,8 @@ class SandboxTools:
         except Exception as e:
             return self._error(str(e))
 
-    # Code Analysis Tools
+    # ━━ 代码分析工具 ━━
+
     async def analyze_code(
         self,
         path: str,
@@ -471,19 +600,25 @@ class SandboxTools:
         severity: str = "all",
     ) -> Dict[str, Any]:
         """
-        Run lint check on Python files or directories in the sandbox.
+        对 Python 代码进行 lint 静态检查，发现语法错误、风格问题和潜在 bug。
 
-        Uses ruff (pre-installed in Docker image). Falls back to AST-based checks
-        when ruff is unavailable.
+        底层使用 ruff（Docker 镜像已预装），ruff 不可用时自动降级为 AST 语法检查。
+        支持单文件或整个目录的批量检查。
 
-        Args:
-            path: File or directory path in the sandbox
-            fix: Auto-fix lint issues (ruff only)
-            max_issues: Maximum issues to return (default 50)
-            severity: Filter by severity ("all" | "error" | "warning")
+        参数:
+            path:       文件或目录路径（沙箱内路径），如 "src/main.py" 或 "src/"
+            fix:        是否自动修复可修复的问题（仅 ruff 支持），默认 False
+            max_issues: 最大返回问题数量，默认 50
+            severity:   严重级别过滤，"all"（全部）| "error"（仅错误）| "warning"（仅警告）
 
-        Returns:
-            Dict with success, tool, issues, error_count, warning_count, info_count, truncated
+        返回:
+            success:       bool
+            tool:          str，实际使用的检查工具名称（"ruff" 或 "ast"）
+            issues:        [{file, line, column, code, message, severity, fixable}, ...]
+            error_count:   int，错误数量
+            warning_count: int，警告数量
+            info_count:    int，提示数量
+            truncated:     bool，是否因 max_issues 限制而截断
         """
         try:
             return await code_analyzer(
@@ -496,21 +631,24 @@ class SandboxTools:
         except Exception as e:
             return self._error(str(e))
 
-    # Package Management Tools
+    # ━━ 包管理工具 ━━
+
     async def install_pip_package(
         self,
         package: str,
         version: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Install a pip package.
-        
-        Args:
-            package: Package name
-            version: Specific version (optional)
-        
-        Returns:
-            Dict with installation result
+        安装单个 pip 包。
+
+        参数:
+            package: 包名，如 "pandas"、"requests"
+            version: 指定版本号（可选），如 "2.1.0"、">=1.0,<2.0"
+
+        返回:
+            success: bool
+            output:  str，pip 安装输出日志
+            error:   str，错误信息
         """
         try:
             result = await self._sandbox.install_package(package, version=version)
@@ -524,13 +662,15 @@ class SandboxTools:
     
     async def install_pip_packages(self, packages: List[str]) -> Dict[str, Any]:
         """
-        Install multiple pip packages.
-        
-        Args:
-            packages: List of package names
-        
-        Returns:
-            Dict with installation result
+        批量安装多个 pip 包。一次调用安装多个包比逐个安装更高效。
+
+        参数:
+            packages: 包名列表，如 ["pandas", "numpy", "matplotlib"]
+
+        返回:
+            success: bool
+            output:  str，pip 安装输出日志
+            error:   str，错误信息
         """
         try:
             result = await self._sandbox.install_packages(packages)
@@ -544,13 +684,15 @@ class SandboxTools:
     
     async def uninstall_pip_package(self, package: str) -> Dict[str, Any]:
         """
-        Uninstall a pip package.
-        
-        Args:
-            package: Package name
-        
-        Returns:
-            Dict with uninstallation result
+        卸载 pip 包。
+
+        参数:
+            package: 要卸载的包名
+
+        返回:
+            success: bool
+            output:  str，pip 卸载输出日志
+            error:   str，错误信息
         """
         try:
             result = await self._sandbox.uninstall_package(package)
@@ -564,10 +706,11 @@ class SandboxTools:
     
     async def list_installed_packages(self) -> Dict[str, Any]:
         """
-        List all installed pip packages.
-        
-        Returns:
-            Dict with list of packages
+        列出沙箱中已安装的所有 pip 包及其版本号。
+
+        返回:
+            success: bool
+            output:  [{name, version}, ...]，已安装包列表
         """
         try:
             packages = await self._sandbox.list_packages()
@@ -578,13 +721,14 @@ class SandboxTools:
     
     async def check_package_installed(self, package: str) -> Dict[str, Any]:
         """
-        Check if a package is installed.
-        
-        Args:
-            package: Package name
-        
-        Returns:
-            Dict with installation status
+        检查指定包是否已安装。安装依赖前可先调用此方法避免重复安装。
+
+        参数:
+            package: 包名，如 "pandas"
+
+        返回:
+            success: bool
+            output:  bool，True=已安装，False=未安装
         """
         try:
             installed = await self._sandbox.package_installed(package)
@@ -592,17 +736,19 @@ class SandboxTools:
         except Exception as e:
             return self._error(str(e), False)
 
-    # Environment Variable Tools
+    # ━━ 环境变量工具 ━━
+
     async def set_environment_variable(self, key: str, value: str) -> Dict[str, Any]:
         """
-        Set an environment variable.
-        
-        Args:
-            key: Variable name
-            value: Variable value
-        
-        Returns:
-            Dict with set status
+        设置沙箱环境变量。设置后在后续的代码执行和 Shell 命令中均可通过 os.environ 访问。
+
+        参数:
+            key:   变量名，如 "API_KEY"、"DEBUG"
+            value: 变量值
+
+        返回:
+            success: bool
+            output:  str，设置确认信息
         """
         try:
             await self._sandbox.set_env(key, value)
@@ -612,13 +758,14 @@ class SandboxTools:
     
     async def get_environment_variable(self, key: str) -> Dict[str, Any]:
         """
-        Get an environment variable.
-        
-        Args:
-            key: Variable name
-        
-        Returns:
-            Dict with variable value
+        获取沙箱环境变量的值。
+
+        参数:
+            key: 变量名
+
+        返回:
+            success: bool
+            output:  str | None，变量值（不存在时为 None）
         """
         try:
             value = await self._sandbox.get_env(key)
@@ -626,13 +773,15 @@ class SandboxTools:
         except Exception as e:
             return self._error(str(e))
 
-    # Status Tools
+    # ━━ 沙箱管理工具 ━━
+
     async def get_sandbox_status(self) -> Dict[str, Any]:
         """
-        Get sandbox status information.
-        
-        Returns:
-            Dict with sandbox status
+        获取沙箱运行状态信息，包括运行时类型、启动时间、工作目录等。
+
+        返回:
+            success: bool
+            output:  dict，沙箱状态信息
         """
         try:
             status = await self._sandbox.get_status()
@@ -642,10 +791,11 @@ class SandboxTools:
     
     async def get_resource_usage(self) -> Dict[str, Any]:
         """
-        Get current resource usage.
-        
-        Returns:
-            Dict with resource usage information
+        获取沙箱当前资源使用情况（CPU、内存、磁盘等）。可用于判断是否需要清理空间或优化内存。
+
+        返回:
+            success: bool
+            output:  dict，资源使用信息
         """
         try:
             usage = await self._sandbox.get_resource_usage()
@@ -655,10 +805,13 @@ class SandboxTools:
     
     async def reset_sandbox(self) -> Dict[str, Any]:
         """
-        Reset the sandbox to initial state.
-        
-        Returns:
-            Dict with reset status
+        重置沙箱到初始状态。清除所有文件、已安装的包和环境变量。
+
+        ⚠️ 此操作不可逆，所有沙箱内数据将丢失。仅在确实需要全新环境时使用。
+
+        返回:
+            success: bool
+            output:  str，重置确认信息
         """
         try:
             await self._sandbox.restart()
@@ -666,21 +819,25 @@ class SandboxTools:
         except Exception as e:
             return self._error(str(e))
 
-    # Tool Execution
+    # ━━ 工具调度 ━━
+
     async def execute_tool(
         self,
         tool_name: str,
         parameters: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Execute a tool by name.
-        
-        Args:
-            tool_name: Name of the tool to execute
-            parameters: Tool parameters
-        
-        Returns:
-            Dict with tool result
+        按工具名称动态调用工具 —— Function Calling 的统一入口。
+
+        将 LLM 返回的 tool_name + parameters 直接传入即可执行对应工具。
+
+        参数:
+            tool_name:  工具名称，如 "run_python_code"、"save_file"、"inspect_file"
+            parameters: 工具参数字典，键值对应目标工具方法的参数
+
+        返回:
+            对应工具的返回结果（格式参见各工具的 docstring）
+            工具名不存在时返回 {success: False, error: "Unknown tool: xxx"}
         """
         if tool_name not in self._tool_registry:
             return self._error(f"Unknown tool: {tool_name}")
@@ -694,5 +851,5 @@ class SandboxTools:
             return self._error(str(e))
     
     def get_available_tools(self) -> List[str]:
-        """Get list of available tool names."""
+        """获取所有可用工具的名称列表。"""
         return list(self._tool_registry.keys())
