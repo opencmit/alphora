@@ -192,7 +192,7 @@ class ReActAgent(BaseAgent):
                 history=history,
                 tools=tools_schema,
                 is_stream=True,
-                runtime_system_prompt='如果你认为用户的任务已经完成，请直接输出 TASK_FINISHED'
+                runtime_system_prompt='如果你认为用户的任务已经完成，请对用户进行回复，并务必在回复的最后输出 "\nTASK_FINISHED"'
             )
 
             # 记录助手响应
@@ -212,7 +212,7 @@ class ReActAgent(BaseAgent):
                             },
                         ),
                     )
-                    return ""
+                    return response.content
                 else:
                     await self.stream.astream_message(content=response.content)
                     self.memory.add_assistant(content=response.content)
