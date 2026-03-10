@@ -27,7 +27,7 @@ from jinja2 import Environment, Template, BaseLoader, meta
 
 from alphora.models.message import Message
 from alphora.postprocess.base_pp import BasePostProcessor
-from alphora.server.stream_responser import DataStreamer
+from alphora.server.stream_responser import DataStreamer, StreamCallback
 
 from json_repair import repair_json
 
@@ -39,6 +39,8 @@ from alphora.memory.history_payload import HistoryPayload, is_valid_history_payl
 
 from alphora.debugger import tracer
 from alphora.hooks import HookEvent, HookContext, HookManager, build_manager
+
+from alphora.cli.renderer import cli_print as _cli_print
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -96,7 +98,7 @@ class BasePrompt:
                  template_path: str = None,
                  system_prompt: Union[str, List[str], None] = None,
                  verbose: bool = False,
-                 callback: Optional[DataStreamer] = None,
+                 callback: Optional[StreamCallback] = None,
                  content_type: Optional[str] = None,
                  agent_id: str | None = None,
                  hooks: Optional[Union[HookManager, Dict[Any, Any]]] = None,
@@ -129,7 +131,7 @@ class BasePrompt:
         self.is_stream: bool = False
 
         self.llm: BaseLLM | None = None
-        self.callback: Optional[DataStreamer] = callback
+        self.callback: Optional[StreamCallback] = callback
         self.verbose: bool = verbose
         self.content_type = content_type or 'char'
         self.context = kwargs
@@ -725,29 +727,29 @@ class BasePrompt:
                         tc_info = json.loads(content)
                         _cur_tc_index = tc_info.get("index", 0)
                         _cur_tc_id = tc_info.get("id", "")
-                        print(f"\n[Tool Call] {tc_info.get('name', 'unknown')}\n", end='', flush=True)
+                        _cli_print(f"\n[Tool Call] {tc_info.get('name', 'unknown')}\n", ctype="tool_call")
                         continue
 
                     if ctype == 'tool_call_args':
-                        print(content, end='', flush=True)
+                        _cli_print(content, ctype="tool_call_args")
                         continue
 
                     if ctype == 'think' and enable_thinking:
                         reasoning_content += content
-                        print(content, end='', flush=True)
+                        _cli_print(content, ctype="think")
                         continue
 
                     if ctype == '[STREAM_IGNORE]':
                         output_str += content
                         continue
                     if ctype == '[RESPONSE_IGNORE]':
-                        print(content, end='', flush=True)
+                        _cli_print(content)
                         continue
                     if ctype == '[BOTH_IGNORE]':
                         continue
 
                     if content:
-                        print(content, end='', flush=True)
+                        _cli_print(content)
                         output_str += content
 
                 # 流结束后，检查工具调用
@@ -983,7 +985,7 @@ class BasePrompt:
                         if self.callback:
                             await self.callback.send_data(content_type=ctype, content=content)
                         else:
-                            print(f"\n[Tool Call] {tc_info.get('name', 'unknown')}\n", end='', flush=True)
+                            _cli_print(f"\n[Tool Call] {tc_info.get('name', 'unknown')}\n", ctype="tool_call")
                         continue
 
                     if ctype == 'tool_call_args':
@@ -995,7 +997,7 @@ class BasePrompt:
                             }, ensure_ascii=False)
                             await self.callback.send_data(content_type=ctype, content=enriched)
                         else:
-                            print(content, end='', flush=True)
+                            _cli_print(content, ctype="tool_call_args")
                         continue
 
                     if self.callback:
@@ -1017,10 +1019,10 @@ class BasePrompt:
                     else:
                         if ctype == 'think' and enable_thinking:
                             reasoning_content += content
-                            print(content, end='', flush=True)
+                            _cli_print(content, ctype="think")
                             continue
                         if content and ctype != '[STREAM_IGNORE]':
-                            print(content, end='', flush=True)
+                            _cli_print(content)
                         if ctype != '[RESPONSE_IGNORE]':
                             output_str += content
 

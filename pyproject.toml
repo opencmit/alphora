@@ -28,6 +28,9 @@ dependencies = [
     "docker==7.1.0",
 ]
 
+[project.optional-dependencies]
+cli = ["rich>=13.0"]
+
 [tool.setuptools.packages.find]
 include = ["alphora", "alphora.*"]
 

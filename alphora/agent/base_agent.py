@@ -12,7 +12,7 @@ import time
 import re
 
 from alphora.models.llms.openai_like import OpenAILike
-from alphora.server.stream_responser import DataStreamer
+from alphora.server.stream_responser import DataStreamer, StreamCallback
 from alphora.prompter import BasePrompt
 from alphora.agent.stream import Stream
 from pydantic import BaseModel
@@ -69,7 +69,7 @@ class BaseAgent(object):
                  llm: Optional[OpenAILike] = None,
                  verbose: bool = False,
                  agent_id: Optional[str] = None,
-                 callback: Optional[DataStreamer] = None,
+                 callback: Optional[StreamCallback] = None,
                  debugger: bool = False,
                  debugger_port: int = 9527,
                  config: Optional[Dict[str, Any]] = None,
@@ -369,21 +369,38 @@ class BaseAgent(object):
                 agent.memory = MemoryManager()
             seen_memories.add(mem_id)
 
+        cli_streamer = None
+        effective_callback = self.callback
+        if not effective_callback:
+            from alphora.cli import create_cli_streamer
+            labels = [
+                f"{type(agent).__name__}_{i}" for i, (agent, _) in enumerate(tasks)
+            ]
+            cli_streamer = create_cli_streamer(agent_labels=labels)
+            effective_callback = cli_streamer
+
         for i, (agent, _) in enumerate(tasks):
-            wrapped = _PrefixedCallback(self.callback, f"parallel_{i}") if self.callback else None
+            wrapped = _PrefixedCallback(effective_callback, f"parallel_{i}")
             agent.callback = wrapped
             agent.stream = Stream(callback=wrapped)
             if hasattr(agent, '_prompt') and agent._prompt:
                 agent._prompt.callback = wrapped
 
-        coros = [agent.run(task=query) for agent, query in tasks]
-        if timeout is not None:
-            raw_results = await asyncio.wait_for(
-                asyncio.gather(*coros, return_exceptions=return_exceptions),
-                timeout=timeout,
-            )
-        else:
-            raw_results = await asyncio.gather(*coros, return_exceptions=return_exceptions)
+        if cli_streamer is not None:
+            cli_streamer.start()
+
+        try:
+            coros = [agent.run(task=query) for agent, query in tasks]
+            if timeout is not None:
+                raw_results = await asyncio.wait_for(
+                    asyncio.gather(*coros, return_exceptions=return_exceptions),
+                    timeout=timeout,
+                )
+            else:
+                raw_results = await asyncio.gather(*coros, return_exceptions=return_exceptions)
+        finally:
+            if cli_streamer is not None:
+                cli_streamer.stop_display()
 
         results: List[str] = []
         for r in raw_results:
