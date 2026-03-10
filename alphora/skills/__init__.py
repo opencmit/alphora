@@ -40,6 +40,10 @@ from .tools import (
     create_skill_tools,
     create_filesystem_skill_tools,
 )
+from .setup import (
+    setup_skills,
+    SkillSetup,
+)
 from .exceptions import (
     SkillError,
     SkillParseError,
@@ -69,6 +73,10 @@ __all__ = [
     # 工具创建
     "create_skill_tools",
     "create_filesystem_skill_tools",
+
+    # 一站式集成
+    "setup_skills",
+    "SkillSetup",
 
     # 异常
     "SkillError",
