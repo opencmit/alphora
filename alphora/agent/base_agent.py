@@ -5,13 +5,14 @@
 
 
 from uuid import uuid4
-from typing import TypeVar, List, Dict, Optional, Any, Type, Union, TYPE_CHECKING, AsyncIterator, Callable
+from typing import TypeVar, List, Dict, Optional, Any, Type, Union, Tuple, TYPE_CHECKING, AsyncIterator, Callable
+import asyncio
 import logging
 import time
 import re
 
 from alphora.models.llms.openai_like import OpenAILike
-from alphora.server.stream_responser import DataStreamer
+from alphora.server.stream_responser import DataStreamer, StreamCallback
 from alphora.prompter import BasePrompt
 from alphora.agent.stream import Stream
 from pydantic import BaseModel
@@ -29,6 +30,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T', bound='BaseAgent')
+
+
+class _PrefixedCallback:
+    """DataStreamer 代理：给 content_type 加前缀以区分并行 agent 的输出，拦截 stop() 防止提前关闭共享流。"""
+
+    def __init__(self, callback, prefix: str):
+        self._callback = callback
+        self._prefix = prefix
+
+    async def send_data(self, content_type: str, content: str = None):
+        if self._callback:
+            await self._callback.send_data(
+                content_type=f"{self._prefix}:{content_type}",
+                content=content,
+            )
+
+    async def stop(self, stop_reason='stop'):
+        pass
 
 
 class MemoryPoolItem(BaseModel):
@@ -50,7 +69,7 @@ class BaseAgent(object):
                  llm: Optional[OpenAILike] = None,
                  verbose: bool = False,
                  agent_id: Optional[str] = None,
-                 callback: Optional[DataStreamer] = None,
+                 callback: Optional[StreamCallback] = None,
                  debugger: bool = False,
                  debugger_port: int = 9527,
                  config: Optional[Dict[str, Any]] = None,
@@ -302,9 +321,98 @@ class BaseAgent(object):
 
         self._active_sessions[session_id] = now
 
-    def __or__(self, other):
-        # TODO
-        pass
+    async def parallel_run(
+            self,
+            tasks: List[Tuple["BaseAgent", str]],
+            timeout: Optional[float] = None,
+            return_exceptions: bool = False,
+    ) -> List[str]:
+        """
+        并行运行多个子 agent，返回有序结果列表。
+
+        自动处理 memory 隔离（防止并发写入冲突）和 callback 前缀隔离
+        （通过 content_type 前缀 ``parallel_{i}:`` 区分各 agent 的流式输出）。
+
+        Args:
+            tasks: ``(agent, query)`` 元组列表，每个元素是一个子 agent 及其对应的查询
+            timeout: 可选的总超时时间（秒），超时抛出 ``asyncio.TimeoutError``
+            return_exceptions: 为 True 时异常不抛出，对应位置结果为错误信息字符串；
+                               为 False 时任一 agent 失败立即抛出
+
+        Returns:
+            与 tasks 顺序一一对应的结果字符串列表
+
+        示例::
+
+            sub_a = self.derive(ReActAgent, tools=[tool_1], system_prompt="研究员")
+            sub_b = self.derive(ReActAgent, tools=[tool_2], system_prompt="分析师")
+            results = await self.parallel_run([
+                (sub_a, "搜索相关资料"),
+                (sub_b, "分析现有数据"),
+            ])
+        """
+        if not tasks:
+            return []
+
+        for i, (agent, _) in enumerate(tasks):
+            if type(agent).run is BaseAgent.run:
+                raise TypeError(
+                    f"tasks[{i}] 的 agent ({type(agent).__name__}) 未覆写 run() 方法。"
+                    f"parallel_run 通过 run() 驱动每个子 agent，"
+                    f"请确保子类实现了 async def run(self, task: str) -> str。"
+                )
+
+        seen_memories = set()
+        for agent, _ in tasks:
+            mem_id = id(agent.memory)
+            if mem_id in seen_memories:
+                agent.memory = MemoryManager()
+            seen_memories.add(mem_id)
+
+        cli_streamer = None
+        effective_callback = self.callback
+        if not effective_callback:
+            from alphora.cli import create_cli_streamer
+            labels = [
+                f"{type(agent).__name__}_{i}" for i, (agent, _) in enumerate(tasks)
+            ]
+            cli_streamer = create_cli_streamer(agent_labels=labels)
+            effective_callback = cli_streamer
+
+        for i, (agent, _) in enumerate(tasks):
+            wrapped = _PrefixedCallback(effective_callback, f"parallel_{i}")
+            agent.callback = wrapped
+            agent.stream = Stream(callback=wrapped)
+            if hasattr(agent, '_prompt') and agent._prompt:
+                agent._prompt.callback = wrapped
+
+        if cli_streamer is not None:
+            cli_streamer.start()
+
+        try:
+            coros = [agent.run(task=query) for agent, query in tasks]
+            if timeout is not None:
+                raw_results = await asyncio.wait_for(
+                    asyncio.gather(*coros, return_exceptions=return_exceptions),
+                    timeout=timeout,
+                )
+            else:
+                raw_results = await asyncio.gather(*coros, return_exceptions=return_exceptions)
+        finally:
+            if cli_streamer is not None:
+                cli_streamer.stop_display()
+
+        results: List[str] = []
+        for r in raw_results:
+            if isinstance(r, BaseException):
+                results.append(f"[Error] {type(r).__name__}: {r}")
+            else:
+                results.append(r if r is not None else "")
+
+        return results
+
+    async def run(self, task: str) -> ...:
+        raise NotImplementedError
 
     async def afetch_stream(self,
                             url: str,

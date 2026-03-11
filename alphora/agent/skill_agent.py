@@ -45,8 +45,7 @@ from alphora.tools.decorators import Tool, tool
 from alphora.tools.registry import ToolRegistry
 from alphora.tools.executor import ToolExecutor
 from alphora.memory import MemoryManager
-from alphora.skills import SkillManager, create_skill_tools, create_filesystem_skill_tools
-from alphora.sandbox.config import SANDBOX_SKILLS_MOUNT
+from alphora.skills import SkillManager, create_skill_tools, create_filesystem_skill_tools, setup_skills
 from alphora.hooks import HookEvent, HookContext, HookManager, build_manager
 
 if TYPE_CHECKING:
@@ -120,59 +119,27 @@ class SkillAgent(BaseAgent):
         hook_manager = build_manager(hooks)
         super().__init__(llm=llm, memory=memory, hooks=hook_manager, **kwargs)
 
-        # Skill Manager
-        if skill_manager is not None:
-            self._skill_manager = skill_manager
-        elif skill_paths:
-            self._skill_manager = SkillManager(
-                skill_paths=skill_paths,
-                auto_discover=True,
-            )
-        else:
-            self._skill_manager = SkillManager(auto_discover=False)
-
         # Sandbox
         self._sandbox = sandbox
         self._filesystem_mode = filesystem_mode
 
-        # Auto-wire: if sandbox exists but has no skill_host_path,
-        # infer it from the SkillManager's first search path so the
-        # developer doesn't have to specify the same path twice.
-        if (
-            sandbox is not None
-            and not getattr(sandbox, "skill_host_path", None)
-            and self._skill_manager.search_paths
-        ):
-            sandbox._skill_host_path = self._skill_manager.search_paths[0]
-            logger.info(
-                f"Auto-configured sandbox skill_host_path: "
-                f"{sandbox._skill_host_path}"
-            )
-
-        # When a Docker sandbox with skills is configured, tell SkillManager
-        # to output sandbox-internal paths in the prompt so LLM can reason
-        # about in-container paths correctly.
-        if sandbox is not None and getattr(sandbox, "skill_host_path", None):
-            self._skill_manager.sandbox_skill_root = SANDBOX_SKILLS_MOUNT
+        # 一站式 Skill 配置（SkillManager 创建 + sandbox 路径映射 + 工具生成）
+        skill_setup = setup_skills(
+            skill_paths=skill_paths,
+            skill_manager=skill_manager,
+            sandbox=sandbox,
+            filesystem_mode=filesystem_mode,
+        )
+        self._skill_manager = skill_setup.manager
 
         # Tool Registry
         self._registry = ToolRegistry()
 
-        # 注册用户自定义工具
         if tools:
-            for t in tools:
-                self._registry.register(t)
+            self._registry.register_many(tools)
 
-        # 注册 Skill 内置工具
-        if filesystem_mode:
-            skill_tools = create_filesystem_skill_tools(self._skill_manager)
-        else:
-            skill_tools = create_skill_tools(self._skill_manager)
+        self._registry.register_many(skill_setup.tools)
 
-        for t in skill_tools:
-            self._registry.register(t)
-
-        # 如果有沙箱但不是 filesystem_mode，也注册沙箱工具
         if sandbox is not None:
             self._setup_sandbox_tools(sandbox)
 

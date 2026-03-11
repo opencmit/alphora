@@ -86,6 +86,21 @@ class ToolRegistry:
             self._hooks.emit_sync(HookEvent.TOOLS_AFTER_REGISTER, ctx)
             return tool
 
+    def register_many(
+            self,
+            tools: List[Union[Tool, Callable]],
+    ) -> List[Tool]:
+        """
+        批量注册工具列表。
+
+        Args:
+            tools: Tool 对象或可调用对象的列表
+
+        Returns:
+            注册后的 Tool 实例列表
+        """
+        return [self.register(t) for t in tools]
+
     def get_tool(self, name: str) -> Optional[Tool]:
         """获取指定工具"""
         return self._tools.get(name)

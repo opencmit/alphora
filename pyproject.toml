@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alphora"
-version = "1.0.9"
+version = "1.1.0"
 description = "AI Agent Development Toolkit"
 authors = [
     { name = "Tian tian", email = "tiantianit@chinamobile.com" }
@@ -27,6 +27,9 @@ dependencies = [
     "uvicorn==0.39.0",
     "docker==7.1.0",
 ]
+
+[project.optional-dependencies]
+cli = ["rich>=13.0"]
 
 [tool.setuptools.packages.find]
 include = ["alphora", "alphora.*"]

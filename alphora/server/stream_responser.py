@@ -3,13 +3,26 @@ import json
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import queue
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Protocol, runtime_checkable
 from fastapi.responses import StreamingResponse,  JSONResponse
 import uuid
 import typing
 import os
 import time
 import asyncio
+
+
+@runtime_checkable
+class StreamCallback(Protocol):
+    """Structural type for any object that can receive streaming data.
+
+    ``DataStreamer``, ``_PrefixedCallback``, CLI streamers, and any custom
+    callback all satisfy this protocol as long as they implement
+    ``send_data`` and ``stop``.
+    """
+
+    async def send_data(self, content_type: str, content: str = None) -> None: ...
+    async def stop(self, stop_reason: str = "stop") -> None: ...
 
 
 class ToolCallDelta(BaseModel):

@@ -4,7 +4,8 @@
 # Author: Tian Tian (tiantianit@chinamobile.com)
 
 
-from alphora.server.stream_responser import DataStreamer
+from alphora.server.stream_responser import DataStreamer, StreamCallback
+from alphora.cli.renderer import cli_print as _cli_print
 from typing import Optional, List, Iterator
 import random
 import time
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class Stream:
-    def __init__(self, callback: Optional[DataStreamer] = None):
+    def __init__(self, callback: Optional[StreamCallback] = None):
         self.callback = callback
 
     async def astream_message(self,
@@ -114,7 +115,7 @@ class Stream:
         if self.callback:
             await self.callback.stop(stop_reason=stop_reason)
         else:
-            print(f"\n[Stream stopped: {stop_reason}]")
+            _cli_print(f"\n[Stream stopped: {stop_reason}]\n")
 
     def stop(self, stop_reason: str = 'end') -> None:
         """
@@ -126,7 +127,7 @@ class Stream:
             " [Synchronous `stop` does not support client streaming; use `astop` for API streaming.]"
         )
 
-        print(f"\n[Stream stopped: {stop_reason}]")
+        _cli_print(f"\n[Stream stopped: {stop_reason}]\n")
 
     async def astream_to_response(self,
                                   generator: BaseGenerator,
@@ -138,7 +139,7 @@ class Stream:
         :param post_processors:
         """
 
-        data_streamer: Optional[DataStreamer] = self.callback
+        data_streamer: Optional[StreamCallback] = self.callback
         response = ''
 
         # 应用所有后处理器
@@ -156,7 +157,7 @@ class Stream:
                     if data_streamer:
                         await data_streamer.send_data(content_type=content_type, content=content)
                     else:
-                        print(content, end='', flush=True)
+                        _cli_print(content, ctype=content_type)
                         continue
 
             except Exception as e:
@@ -196,7 +197,7 @@ class Stream:
                 content_type = output_content.content_type
 
                 if content:
-                    print(content, end='', flush=True)
+                    _cli_print(content, ctype=content_type)
 
             except Exception as e:
                 print(f"Streaming Parsing Error: {str(e)}")
