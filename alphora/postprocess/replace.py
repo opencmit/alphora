@@ -1,4 +1,4 @@
-from typing import Optional, Iterator, Union, List, Dict
+from typing import Optional, Iterator, Union, List, Dict, AsyncIterator
 from alphora.models.llms.stream_helper import BaseGenerator, GeneratorOutput
 from alphora.postprocess.base_pp import BasePostProcessor
 
@@ -82,7 +82,7 @@ class ReplacePP(BasePostProcessor):
                         content_type=output.content_type
                     )
 
-            async def agenerate(self) -> Iterator[GeneratorOutput]:
+            async def agenerate(self) -> AsyncIterator[GeneratorOutput]:
                 async for output in self.original_generator:
                     # 应用替换规则
                     replaced_content = self._apply_replacements(
