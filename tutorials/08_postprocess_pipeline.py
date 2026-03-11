@@ -5,7 +5,7 @@ Run:
   python tutorials/08_postprocess_pipeline.py
 """
 
-from typing import Iterator
+from typing import Iterator, AsyncIterator
 
 from alphora.models.llms.stream_helper import BaseGenerator, GeneratorOutput
 from alphora.postprocess.filter import FilterPP
@@ -26,7 +26,7 @@ class TextGenerator(BaseGenerator[GeneratorOutput]):
             chunk = self._text[i:i + 4]
             yield GeneratorOutput(content=chunk, content_type=self.content_type)
 
-    async def agenerate(self) -> Iterator[GeneratorOutput]:
+    async def agenerate(self) -> AsyncIterator[GeneratorOutput]:
         for out in self.generate():
             yield out
 
