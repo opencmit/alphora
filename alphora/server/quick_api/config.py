@@ -9,6 +9,7 @@ class APIPublisherConfig:
     memory_ttl: int = 3600          # 记忆过期时间（秒）
     max_memory_items: int = 1000        # 记忆池最大容量
     auto_clean_interval: int = 600          # 自动清理间隔（秒）
+    sandbox_workspace: Optional[str] = None  # 沙箱宿主机工作目录，设置后自动启用文件服务
     api_title: Optional[str] = None
     api_description: Optional[str] = None
 

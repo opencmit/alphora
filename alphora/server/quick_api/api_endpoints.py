@@ -67,13 +67,25 @@ def create_api_router(
             # 配置Agent实例
             new_agent.memory = session_memory
 
-            new_callback = DataStreamer(timeout=300)
+            new_callback = DataStreamer(timeout=1800)
             new_agent.callback = new_callback
             new_agent.stream = Stream(callback=new_callback)
 
-            # 执行Agent方法
+            # 执行Agent方法，用 wrapper 保证流生命周期正确关闭
             agent_method = getattr(new_agent, method_name)
-            _ = asyncio.create_task(agent_method(body_data))
+
+            async def _guarded_run(_method, _body, _cb):
+                try:
+                    await _method(_body)
+                except Exception as exc:
+                    logger.error(f"Agent 执行异常: {exc}", exc_info=exc)
+                    if not _cb._closed:
+                        await _cb.send_data(content_type="error", content=str(exc))
+                finally:
+                    if not _cb._closed:
+                        await _cb.stop()
+
+            asyncio.create_task(_guarded_run(agent_method, body_data, new_callback))
 
             # 返回响应（流式/非流式）
             if body_data.stream:

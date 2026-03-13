@@ -371,6 +371,7 @@ class BaseAgent(object):
 
         cli_streamer = None
         effective_callback = self.callback
+
         if not effective_callback:
             from alphora.cli import create_cli_streamer
             labels = [

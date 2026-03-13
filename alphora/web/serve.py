@@ -1,9 +1,10 @@
 """
-Alphora Chat Frontend Server
+九天AlphaData Frontend Server
 
-    python serve.py                    # localhost:8813
-    python serve.py --port 3000        # custom port
-    python serve.py --no-browser       # don't auto open
+    alphora-web                        # localhost:8813
+    alphora-web --port 3000            # custom port
+    alphora-web --host 0.0.0.0         # bind to all interfaces
+    alphora-web --no-browser           # don't auto open
 
 Backend connection is configured entirely in the frontend UI (API settings).
 """
@@ -11,7 +12,7 @@ import argparse, http.server, json, mimetypes, socketserver, sys, threading, web
 from pathlib import Path
 
 DIR = Path(__file__).parent.resolve()
-ROOT = DIR.parent
+ROOT = DIR.parent.parent
 DOCS_DIR = ROOT / 'docs'
 
 
@@ -47,8 +48,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def _serve_asset(self):
         rel = self.path.lstrip('/')
-        f = (ROOT / rel).resolve()
-        if not f.is_file() or ROOT not in f.parents:
+        f = (DIR / rel).resolve()
+        if not (f.is_file() and DIR in f.parents):
+            f = (ROOT / rel).resolve()
+        if not f.is_file():
             self.send_error(404)
             return
         ctype, _ = mimetypes.guess_type(str(f))
@@ -88,21 +91,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 
 def main():
-    p = argparse.ArgumentParser(description='Alphora Chat Frontend Server')
+    p = argparse.ArgumentParser(description='九天AlphaData Frontend Server')
     p.add_argument('--port', '-p', type=int, default=8813)
+    p.add_argument('--host', '-H', type=str, default='localhost')
     p.add_argument('--no-browser', action='store_true')
     a = p.parse_args()
 
     handler = lambda *args, **kw: Handler(*args, directory=str(DIR), **kw)
 
-    with socketserver.TCPServer(('', a.port), handler) as s:
+    with socketserver.TCPServer((a.host, a.port), handler) as s:
         s.allow_reuse_address = True
-        url = f'http://localhost:{a.port}'
-        print(f'\n  Alphora Chat → {url}')
+        url = f'http://{a.host}:{a.port}'
+        display_url = f'http://localhost:{a.port}' if a.host in ('0.0.0.0', '') else url
+        print(f'\n  九天AlphaData → {display_url}')
         print(f'  Backend: configure in frontend UI (click ··· in top-right)')
         print()
         if not a.no_browser:
-            threading.Timer(.5, lambda: webbrowser.open(url)).start()
+            threading.Timer(.5, lambda: webbrowser.open(display_url)).start()
         try:
             s.serve_forever()
         except KeyboardInterrupt:
