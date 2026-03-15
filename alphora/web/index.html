@@ -332,6 +332,9 @@ input,select,textarea{font-family:inherit;outline:none}
 .fb-meta{font-size:11px;color:var(--t4);margin-top:1px;letter-spacing:.01em}
 .fb-dl{background:none;border:none;color:var(--t4);cursor:pointer;padding:4px;border-radius:4px;transition:all .15s;flex:0 0 auto;display:flex;align-items:center;justify-content:center}.fb-dl:hover{color:var(--accent);background:var(--bg)}
 .fb-dl svg{width:14px;height:14px}
+.fb-upload{background:none;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;color:var(--t3);transition:all .15s;display:flex;align-items:center;justify-content:center;margin-right:auto}.fb-upload:hover{color:var(--accent);background:var(--bg)}
+.fb-upload svg{display:block;width:14px;height:14px}
+.fb-dragover{outline:2px dashed var(--accent);outline-offset:-4px;background:rgba(99,102,241,.04);border-radius:8px}
 
 /* Parallel summary card in main chat */
 .pp-summary{background:linear-gradient(135deg,var(--abg),rgba(168,85,247,.06));border:1px solid rgba(99,102,241,.15);border-radius:14px;padding:16px 18px;margin:6px 0;animation:ppSumIn .3s ease}
@@ -697,6 +700,8 @@ var hsl=$('hsl'),stl=$('stl'),sted=$('sted'),stPv=$('stPv'),pgChat=$('pgChat');
 var cfg=JSON.parse(JSON.stringify(window.RENDERER_CONFIG));
 var cvs=[],aid=null,fls=[],strm=false,pOpen=false,eType=null,abortCtrl=null,debugLog=[];
 var streamBubRow=null,streamConvId=null;
+var _newConvPending=false;
+var _genSessionId=function(){try{return crypto.randomUUID()}catch(e){return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16)})}};
 var SFX=window.StreamingEffects;
 var streamEffect=localStorage.getItem('ac_stream_effect')||'fade';
 
@@ -970,6 +975,7 @@ window.ppShowPreview=ppShowPreview;
 
 var FB=window.FileBrowser;
 FB.init({list:$('fbList'),bread:$('fbBread'),toolbar:$('fbToolbar')});
+FB.onUploadDone(function(err,data){if(err){toast('上传失败: '+err.message,'err')}else if(data&&data.uploaded&&data.uploaded.length){toast('已上传 '+data.uploaded.length+' 个文件','ok')}});
 $('fbRefresh').addEventListener('click',function(){FB.refresh()});
 
 function _fbGetBaseUrl(){
@@ -1015,8 +1021,13 @@ function sB(force){
 
 /* History */
 function cC(){return cvs.find(function(c){return c.id===aid})}
-function nC(){var c={id:G(),title:'新对话',messages:[],ts:Date.now()};cvs.unshift(c);aid=c.id;sV();rH();switchPage('pgChat');clr();return c}
-function dC(id){cvs=cvs.filter(function(c){return c.id!==id});if(aid===id){aid=cvs.length?cvs[0].id:null;if(aid)lC(aid);else{clr();wl.style.display=''}}sV();rH()}
+function nC(){
+  if(_newConvPending){var ec=cC();if(ec&&ec.messages.length===0&&!strm){lC(ec.id);toast('请先使用当前对话','err');return ec}}
+  var c={id:G(),title:'新对话',messages:[],ts:Date.now(),session_id:_genSessionId()};cvs.unshift(c);aid=c.id;_newConvPending=true;sV();rH();switchPage('pgChat');clr();
+  ppUserClosed=false;ppToggle(true);ppSwitchTop('files');_fbProbeAndOpen(c.session_id||c.id);
+  return c;
+}
+function dC(id){var wasPending=_newConvPending&&aid===id;cvs=cvs.filter(function(c){return c.id!==id});if(wasPending)_newConvPending=false;if(aid===id){aid=cvs.length?cvs[0].id:null;if(aid)lC(aid);else{clr();wl.style.display=''}}sV();rH()}
 function lC(id){
   aid=id;sV();rH();switchPage('pgChat');
   var c=cC();if(!c)return;
@@ -1034,7 +1045,7 @@ function rH(){
   cvs.forEach(function(c){var e=document.createElement('div');e.className='hi'+(c.id===aid?' on':'');e.innerHTML='<span class="hit">'+E(c.title)+'</span><span class="hid" title="删除">✕</span>';e.querySelector('.hit').addEventListener('click',function(){lC(c.id)});e.querySelector('.hid').addEventListener('click',function(ev){ev.stopPropagation();dC(c.id)});hsl.appendChild(e)});
 }
 $('bNew').addEventListener('click',function(){nC()});
-$('bClearAll').addEventListener('click',function(){if(!cvs.length)return;if(confirm('确定清空所有历史对话？此操作不可恢复。')){cvs=[];aid=null;sV();rH();clr();toast('已清空所有对话','ok')}});
+$('bClearAll').addEventListener('click',function(){if(!cvs.length)return;if(confirm('确定清空所有历史对话？此操作不可恢复。')){cvs=[];aid=null;_newConvPending=false;sV();rH();clr();toast('已清空所有对话','ok')}});
 rH();if(aid&&cvs.find(function(c){return c.id===aid}))lC(aid);
 
 /* Message DOM */
@@ -1092,21 +1103,43 @@ function gB(ctn,ty,bks,forceInline){
   if(sl){var lb=document.createElement('div');lb.className='cbl'+(rc.collapsible?' clk':'');lb.innerHTML=(rc.collapsible?'<span class="ar '+(rc.defaultCollapsed?'r':'d')+'">▾</span>':'')+(rc.icon?'<span>'+rc.icon+'</span>':'')+'<span>'+(rc.label||ty)+'</span>';w.appendChild(lb);if(rc.collapsible)lb.addEventListener('click',function(){var bd=lb.nextElementSibling;var ar=lb.querySelector('.ar');var cl=!bd.classList.contains('col');bd.classList.toggle('col',cl);ar.className='ar '+(cl?'r':'d')})}
   var bd=document.createElement('div');bd.className='cbd'+(rc.component==='markdown'?' md':'')+(rc.defaultCollapsed?' col':'');Object.assign(bd.style,cS(rc));if(rc.maxHeight){bd.style.maxHeight=rc.maxHeight;bd.style.overflowY='auto'}w.appendChild(bd);ctn.appendChild(w);bks[key]={el:bd,rc:rc,buf:'',ty:ty};return bks[key];
 }
+function _tfApply(rc,raw){
+  if(!rc.transform||!rc.transform.enabled)return null;
+  if(rc.transform.bufferUntil==='json'){
+    var parsed;try{parsed=JSON.parse(raw)}catch(e){return{waiting:true}}
+    try{
+      var fn=new Function('data',rc.transform.expression||'return JSON.stringify(data)');
+      var r=fn(parsed);
+      return{value:(typeof r==='string')?r:JSON.stringify(r,null,2)};
+    }catch(ex){console.warn('transform expression error:',ex);return{value:JSON.stringify(parsed,null,2)}}
+  }
+  return null;
+}
 function pC(bi,c,s){
   if(!c)return;
   if(bi.panel){var pt=bi.rc.label==='命令'?'bash':bi.rc.label==='错误输出'?'stderr':'stdout';tP(c,pt);bi.buf+=c;return}
   var _pTL=bi._pTL||0;
   bi.buf+=c;var el=bi.el,rc=bi.rc;
+  var buf=bi.buf;
+  var tf=_tfApply(rc,bi.buf);
+  if(tf){
+    if(tf.waiting){
+      if(!bi._tfWaiting){el.textContent=rc.transform.placeholder||'处理中...';el.style.fontStyle='italic';el.style.color='var(--t4)';bi._tfWaiting=true}
+      sB();return;
+    }
+    buf=tf.value;
+    if(bi._tfWaiting){el.style.fontStyle='';el.style.color='';bi._tfWaiting=false}
+  }
   switch(rc.component){
-    case 'markdown':try{el.innerHTML=marked.parse(bi.buf,{breaks:true,gfm:true});el.querySelectorAll('pre code').forEach(function(b){hljs.highlightElement(b)});aCB(el)}catch(e){el.textContent=bi.buf}break;
-    case 'code':var pre=el.querySelector('pre');if(!pre){pre=document.createElement('pre');var cd=document.createElement('code');pre.appendChild(cd);el.innerHTML='';el.appendChild(pre)}pre.querySelector('code').textContent=bi.buf;try{hljs.highlightElement(pre.querySelector('code'))}catch(e){}break;
-    case 'terminal':el.style.fontFamily='var(--mono)';el.style.whiteSpace='pre-wrap';el.textContent=bi.buf;break;
-    case 'json':try{var o=JSON.parse(bi.buf);var p2=el.querySelector('pre');if(!p2){p2=document.createElement('pre');var c2=document.createElement('code');c2.className='language-json';p2.appendChild(c2);el.innerHTML='';el.appendChild(p2)}p2.querySelector('code').textContent=JSON.stringify(o,null,2);try{hljs.highlightElement(p2.querySelector('code'))}catch(e){}}catch(e){el.style.fontFamily='var(--mono)';el.textContent=bi.buf}break;
-    case 'html':var fr=el.querySelector('iframe');if(!fr){fr=document.createElement('iframe');fr.sandbox='allow-scripts';fr.style.cssText='width:100%;border:none;border-radius:10px;background:#fff;min-height:60px';el.innerHTML='';el.appendChild(fr)}fr.srcdoc=bi.buf;break;
-    case 'image':var im=el.querySelector('img');if(!im){im=document.createElement('img');im.style.cssText='max-width:100%;border-radius:12px;box-shadow:var(--shadow-sm)';el.innerHTML='';el.appendChild(im)}im.src=bi.buf.startsWith('data:')||bi.buf.startsWith('http')?bi.buf:'data:image/png;base64,'+bi.buf.trim();break;
-    case 'table':try{var d=JSON.parse(bi.buf);if(Array.isArray(d)&&d.length){var ks=Object.keys(d[0]);el.innerHTML='<table style="border-collapse:collapse;width:100%;font-size:13px;border-radius:8px;overflow:hidden"><tr>'+ks.map(function(k){return '<th style="border:1px solid var(--border);padding:8px 12px;background:var(--bg);font-weight:600;text-align:left">'+E(k)+'</th>'}).join('')+'</tr>'+d.map(function(r){return '<tr>'+ks.map(function(k){return '<td style="border:1px solid var(--border);padding:8px 12px">'+E(String(r[k]!=null?r[k]:''))+'</td>'}).join('')+'</tr>'}).join('')+'</table>'}}catch(e){el.textContent=bi.buf}break;
+    case 'markdown':try{el.innerHTML=marked.parse(buf,{breaks:true,gfm:true});el.querySelectorAll('pre code').forEach(function(b){hljs.highlightElement(b)});aCB(el)}catch(e){el.textContent=buf}break;
+    case 'code':var pre=el.querySelector('pre');if(!pre){pre=document.createElement('pre');var cd=document.createElement('code');pre.appendChild(cd);el.innerHTML='';el.appendChild(pre)}pre.querySelector('code').textContent=buf;try{hljs.highlightElement(pre.querySelector('code'))}catch(e){}break;
+    case 'terminal':el.style.fontFamily='var(--mono)';el.style.whiteSpace='pre-wrap';el.textContent=buf;break;
+    case 'json':try{var o=JSON.parse(buf);var p2=el.querySelector('pre');if(!p2){p2=document.createElement('pre');var c2=document.createElement('code');c2.className='language-json';p2.appendChild(c2);el.innerHTML='';el.appendChild(p2)}p2.querySelector('code').textContent=JSON.stringify(o,null,2);try{hljs.highlightElement(p2.querySelector('code'))}catch(e){}}catch(e){el.style.fontFamily='var(--mono)';el.textContent=buf}break;
+    case 'html':var fr=el.querySelector('iframe');if(!fr){fr=document.createElement('iframe');fr.sandbox='allow-scripts';fr.style.cssText='width:100%;border:none;border-radius:10px;background:#fff;min-height:60px';el.innerHTML='';el.appendChild(fr)}fr.srcdoc=buf;break;
+    case 'image':var im=el.querySelector('img');if(!im){im=document.createElement('img');im.style.cssText='max-width:100%;border-radius:12px;box-shadow:var(--shadow-sm)';el.innerHTML='';el.appendChild(im)}im.src=buf.startsWith('data:')||buf.startsWith('http')?buf:'data:image/png;base64,'+buf.trim();break;
+    case 'table':try{var d=JSON.parse(buf);if(Array.isArray(d)&&d.length){var ks=Object.keys(d[0]);el.innerHTML='<table style="border-collapse:collapse;width:100%;font-size:13px;border-radius:8px;overflow:hidden"><tr>'+ks.map(function(k){return '<th style="border:1px solid var(--border);padding:8px 12px;background:var(--bg);font-weight:600;text-align:left">'+E(k)+'</th>'}).join('')+'</tr>'+d.map(function(r){return '<tr>'+ks.map(function(k){return '<td style="border:1px solid var(--border);padding:8px 12px">'+E(String(r[k]!=null?r[k]:''))+'</td>'}).join('')+'</tr>'}).join('')+'</table>'}}catch(e){el.textContent=buf}break;
     case 'file':
-      var raw=(bi.buf||'').trim();if(!raw){el.textContent='';break;}
+      var raw=(buf||'').trim();if(!raw){el.textContent='';break;}
       var fp=rc.filePreview||{},kind=FP.inferFileKind(fp.kind,bi.ty),mode=fp.mode||'drawer',title=fp.title||'文件预览';
       var isUrl=/^https?:\/\//i.test(raw);var srcType=fp.source&&fp.source!=='auto'?fp.source:(isUrl?'url':'base64');
       var info={kind:kind,mode:mode,title:title,srcType:srcType,raw:raw};
@@ -1142,7 +1175,7 @@ function pC(bi,c,s){
         }
       };
       break;
-    default:el.textContent=bi.buf;
+    default:el.textContent=buf;
   }
   bi._pTL=el.textContent.length;
   if(s&&SFX){if(streamEffect==='typewriter')SFX.applyTypewriter(el);else if(streamEffect!=='none')SFX.apply(el,_pTL,streamEffect)}
@@ -1174,16 +1207,18 @@ function send(){
   var t=uIn.value.trim();if((!t&&!fls.length)||strm)return;uIn.value='';uIn.style.height='auto';
   var c=cC();if(!c)c=nC();var mf=fls.slice();fls=[];rF();uD(t,mf);
   c.messages.push({role:'user',content:t});
+  _newConvPending=false;
   if(c.title==='新对话'&&t)c.title=t.slice(0,30);sV();rH();
   var url=buildUrl(),mod=cfgModel.value.trim(),st=cfgStream.value==='true';
   var am=[{role:'user',content:t}];
+  var sid=c.session_id||c.id;
   strm=true;setSendBtn(true);abortCtrl=new AbortController();ppReset();if(ppIsOpen)ppToggle(false);var bub=cBub(),bks={};
   streamConvId=c.id;streamBubRow=bub.closest('.msg');
-  _fbProbeAndOpen(c.id);
+  _fbProbeAndOpen(sid);
   var dbg={timestamp:new Date().toISOString(),request:{},response:{},duration_ms:0};
   var t0=performance.now();
   function doReq(){
-    var body=JSON.stringify({model:mod,messages:am,stream:st});
+    var body=JSON.stringify({model:mod,messages:am,stream:st,session_id:sid});
     var opts={method:'POST',headers:{'Content-Type':'application/json'},body:body,signal:abortCtrl.signal};
     dbg.request={url:url,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.parse(body)};
     return (st?doSSE(url,opts,bub,bks,dbg):doJSON(url,opts,bub,bks,dbg)).catch(function(err){
@@ -1278,6 +1313,8 @@ function eST(ty){
   h+='<div class="ss"><h4>基础配置</h4><div class="sr"><label>Label</label><input type="text" data-f="label" value="'+E(rc.label||'')+'"></div><div class="sr"><label>Icon</label><input type="text" data-f="icon" value="'+E(rc.icon||'')+'" style="width:60px;flex:none" placeholder="emoji"></div><div class="sr"><label>组件</label><select data-f="component">'+['text','markdown','code','terminal','json','html','image','table','file','hidden'].map(function(c){return '<option'+(rc.component===c?' selected':'')+'>'+c+'</option>'}).join('')+'</select></div><div class="sr"><label>布局</label><div class="pls">'+['inline','panel'].map(function(l){return '<button class="pl'+(rc.layout===l?' on':'')+'" data-ly="'+l+'">'+(l==='inline'?'💬 对话':'📟 面板')+'</button>'}).join('')+'</div></div><div class="sr"><label>可折叠</label><div class="pls"><button class="pl'+(rc.collapsible?' on':'')+'" data-bl="collapsible" data-bv="true">是</button><button class="pl'+(!rc.collapsible?' on':'')+'" data-bl="collapsible" data-bv="false">否</button></div></div><div class="sr"><label>默认折叠</label><div class="pls"><button class="pl'+(rc.defaultCollapsed?' on':'')+'" data-bl="defaultCollapsed" data-bv="true">是</button><button class="pl'+(!rc.defaultCollapsed?' on':'')+'" data-bl="defaultCollapsed" data-bv="false">否</button></div></div></div>';
   var fp=rc.filePreview||{kind:'auto',source:'auto',mode:'drawer',title:''};
   h+='<div class="ss"><h4>文件预览</h4><div class="sr"><label>预览类型</label><select data-fp="kind">'+['auto','excel','pdf','image','text'].map(function(k){return '<option'+(fp.kind===k?' selected':'')+'>'+k+'</option>'}).join('')+'</select></div><div class="sr"><label>数据来源</label><select data-fp="source">'+['auto','base64','url'].map(function(k){return '<option'+(fp.source===k?' selected':'')+'>'+k+'</option>'}).join('')+'</select></div><div class="sr"><label>展现形式</label><select data-fp="mode">'+['drawer','modal','inline'].map(function(k){return '<option'+(fp.mode===k?' selected':'')+'>'+k+'</option>'}).join('')+'</select></div><div class="sr"><label>标题</label><input type="text" data-fp="title" value="'+E(fp.title||'')+'" placeholder="文件预览"></div></div>';
+  var _tf=rc.transform||{enabled:false,bufferUntil:'json',expression:'',placeholder:''};
+  h+='<div class="ss"><h4>自定义解析</h4><div class="sr"><label>启用</label><div class="pls"><button class="pl'+(_tf.enabled?' on':'')+'" data-tfen="true">是</button><button class="pl'+(!_tf.enabled?' on':'')+'" data-tfen="false">否</button></div></div><div class="sr"><label>缓冲策略</label><select data-tf="bufferUntil"><option'+(_tf.bufferUntil==='json'?' selected':'')+'>json</option></select></div><div class="sr" style="align-items:flex-start"><label style="padding-top:8px">JS 表达式</label><div style="flex:1;min-width:0"><textarea data-tf="expression" style="width:100%;min-height:72px;font-family:var(--mono,ui-monospace,monospace);font-size:12px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;resize:vertical;line-height:1.5;background:var(--white);color:var(--t1)" placeholder="return data.result">'+E(_tf.expression||'')+'</textarea><div style="font-size:11px;color:var(--t4);margin-top:4px;line-height:1.5">变量 <code style="background:var(--bg);padding:1px 4px;border-radius:3px">data</code> 为解析后的对象，需 return 字符串</div></div></div><div class="sr"><label>占位提示</label><input type="text" data-tf="placeholder" value="'+E(_tf.placeholder||'')+'" placeholder="处理中..."></div></div>';
   h+='<div class="ss"><h4>预设样式</h4><div class="pgr">'+Object.keys(window.STYLE_PRESETS).map(function(n){var p=window.STYLE_PRESETS[n];return '<div class="pc'+(rc.preset===n?' on':'')+'" data-ps="'+E(n)+'"><div class="pcn">'+E(n)+'</div><div class="pcd">'+E(p.desc)+'</div></div>'}).join('')+'</div></div>';
   h+='<div class="ss"><h4>原子样式</h4>'+AC.map(function(c){return '<div class="ag"><div class="agt">'+c.t+'</div><div class="acs">'+c.a.map(function(a){return '<span class="ac'+(cur[a]?' on':'')+'" data-at="'+a+'">'+a+'</span>'}).join('')+'</div></div>'}).join('')+'</div>';
   h+='<div class="ss"><h4>CSS 覆盖</h4>'+[['color','Color'],['backgroundColor','Background'],['fontSize','Font Size'],['padding','Padding'],['border','Border'],['borderLeft','Border Left'],['borderRadius','Radius'],['fontFamily','Font'],['fontWeight','Weight'],['lineHeight','Line Height'],['boxShadow','Shadow']].map(function(p){return '<div class="sr"><label>'+p[1]+'</label><input type="text" data-cs="'+p[0]+'" value="'+E((rc.style&&rc.style[p[0]])||'')+'"></div>'}).join('')+'</div>';
@@ -1291,12 +1328,20 @@ function eST(ty){
   sted.querySelectorAll('.pc').forEach(function(c){c.addEventListener('click',function(){var n=c.getAttribute('data-ps');var p=window.STYLE_PRESETS[n];if(!p)return;cfg[ty].preset=n;cfg[ty].atoms=p.atoms.slice();cfg[ty].style={};eST(ty)})});
   sted.querySelectorAll('.ac').forEach(function(ch){ch.addEventListener('click',function(){var a=ch.getAttribute('data-at');if(!cfg[ty].atoms)cfg[ty].atoms=[];var at=cfg[ty].atoms;var ca=AC.find(function(c){return c.a.indexOf(a)>-1});if(ca){ca.a.forEach(function(o){var i=at.indexOf(o);if(i>-1)at.splice(i,1)});ch.parentElement.querySelectorAll('.ac').forEach(function(x){x.classList.remove('on')})}var i=at.indexOf(a);if(i>-1){at.splice(i,1);ch.classList.remove('on')}else{at.push(a);ch.classList.add('on')}cfg[ty].preset=null;sted.querySelectorAll('.pc').forEach(function(x){x.classList.remove('on')});uPv()})});
   sted.querySelectorAll('[data-cs]').forEach(function(i){i.addEventListener('input',function(){if(!cfg[ty].style)cfg[ty].style={};var k=i.getAttribute('data-cs');if(i.value)cfg[ty].style[k]=i.value;else delete cfg[ty].style[k];uPv()})});
+  sted.querySelectorAll('[data-tfen]').forEach(function(b){b.addEventListener('click',function(){if(!cfg[ty].transform)cfg[ty].transform={enabled:false,bufferUntil:'json',expression:'',placeholder:''};cfg[ty].transform.enabled=b.getAttribute('data-tfen')==='true';b.parentElement.querySelectorAll('.pl').forEach(function(x){x.classList.remove('on')});b.classList.add('on');uPv()})});
+  sted.querySelectorAll('[data-tf]').forEach(function(i){i.addEventListener('input',function(){if(!cfg[ty].transform)cfg[ty].transform={enabled:false,bufferUntil:'json',expression:'',placeholder:''};cfg[ty].transform[i.getAttribute('data-tf')]=i.value;uPv()})});
   uPv();
 }
 
 function uPv(){
   if(!eType)return;var rc=cfg[eType],st=cS(rc);stPv.removeAttribute('style');stPv.innerHTML='';stPv.className='pmc';Object.assign(stPv.style,st);
   var cp=rc.component||'text',mk=MK[cp]||MK.text;
+  if(rc.transform&&rc.transform.enabled){
+    var _pvMock=mk;if(cp==='json'||cp==='table')_pvMock=mk;else _pvMock='{"func":"search","params":{"q":"test"},"result":"找到 5 条结果"}';
+    var _pvTf=_tfApply(rc,_pvMock);
+    if(_pvTf&&!_pvTf.waiting)mk=_pvTf.value;
+    else if(_pvTf&&_pvTf.waiting)mk=_pvMock;
+  }
   if(cp==='markdown'){stPv.classList.add('md');try{stPv.innerHTML=marked.parse(mk,{breaks:true,gfm:true});stPv.querySelectorAll('pre code').forEach(function(b){hljs.highlightElement(b)})}catch(e){stPv.textContent=mk}}
   else if(cp==='code'){stPv.innerHTML='<pre style="margin:0;background:transparent;border:none;padding:0"><code>'+E(mk)+'</code></pre>';try{stPv.querySelectorAll('code').forEach(function(b){hljs.highlightElement(b)})}catch(e){}}
   else if(cp==='terminal'){stPv.style.whiteSpace='pre-wrap';stPv.style.fontFamily='var(--mono)';stPv.textContent=mk}

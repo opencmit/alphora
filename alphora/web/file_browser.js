@@ -47,6 +47,8 @@ function _fileKind(name) {
   return 'file';
 }
 
+var SVG_UPLOAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
+
 var _endpoint = '';
 var _sessionId = '';
 var _cwd = '/';
@@ -56,6 +58,9 @@ var _breadEl = null;
 var _toolbarEl = null;
 var _prevNames = null;
 var _available = false;
+var _uploading = false;
+var _uploadInput = null;
+var _onUploadDone = null;
 
 function _escape(s) {
   var d = document.createElement('div');
@@ -535,10 +540,101 @@ function _downloadFile(path) {
     });
 }
 
+function upload(fileList, dir) {
+  if (!_endpoint || !fileList || !fileList.length) return Promise.resolve(null);
+  if (_uploading) return Promise.resolve(null);
+  _uploading = true;
+  _setUploadBtnState(true);
+
+  var fd = new FormData();
+  fd.append('session_id', _sessionId);
+  fd.append('dir', dir || _cwd || '/');
+  for (var i = 0; i < fileList.length; i++) {
+    fd.append('files', fileList[i]);
+  }
+
+  return fetch(_endpoint + '/files/upload', { method: 'POST', body: fd })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Upload failed'); });
+      return r.json();
+    })
+    .then(function(data) {
+      _uploading = false;
+      _setUploadBtnState(false);
+      refresh();
+      if (_onUploadDone) _onUploadDone(null, data);
+      return data;
+    })
+    .catch(function(err) {
+      _uploading = false;
+      _setUploadBtnState(false);
+      if (_onUploadDone) _onUploadDone(err, null);
+      return null;
+    });
+}
+
+function _setUploadBtnState(busy) {
+  if (!_toolbarEl) return;
+  var btn = _toolbarEl.querySelector('.fb-upload');
+  if (!btn) return;
+  btn.disabled = busy;
+  btn.style.opacity = busy ? '0.5' : '';
+}
+
+function _initToolbarUpload() {
+  if (!_toolbarEl) return;
+
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.style.display = 'none';
+  _toolbarEl.appendChild(input);
+  _uploadInput = input;
+
+  var btn = document.createElement('button');
+  btn.className = 'fb-upload';
+  btn.title = '上传文件';
+  btn.innerHTML = SVG_UPLOAD;
+  _toolbarEl.insertBefore(btn, _toolbarEl.firstChild);
+
+  btn.addEventListener('click', function() { input.click(); });
+  input.addEventListener('change', function() {
+    if (input.files && input.files.length) upload(input.files);
+    input.value = '';
+  });
+}
+
+function _initDragDrop() {
+  if (!_listEl) return;
+  _listEl.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    _listEl.classList.add('fb-dragover');
+  });
+  _listEl.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    _listEl.classList.remove('fb-dragover');
+  });
+  _listEl.addEventListener('drop', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    _listEl.classList.remove('fb-dragover');
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+      upload(e.dataTransfer.files);
+    }
+  });
+}
+
+function onUploadDone(fn) {
+  _onUploadDone = fn;
+}
+
 function init(els) {
   _listEl = els.list;
   _breadEl = els.bread;
   _toolbarEl = els.toolbar;
+  _initToolbarUpload();
+  _initDragDrop();
 }
 
 function setEndpoint(baseUrl) {
@@ -614,6 +710,8 @@ window.FileBrowser = {
   stopPolling: stopPolling,
   isAvailable: isAvailable,
   probe: probe,
+  upload: upload,
+  onUploadDone: onUploadDone,
   _downloadFile: _downloadFile,
 };
 

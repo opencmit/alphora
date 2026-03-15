@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import FastAPI, APIRouter, HTTPException, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
@@ -21,6 +21,7 @@ TEXT_MIMES = {
 }
 
 MAX_INLINE_SIZE = 50 * 1024 * 1024  # 50 MB
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB per file
 
 
 class FileListRequest(BaseModel):
@@ -40,9 +41,17 @@ class FileDownloadRequest(BaseModel):
 
 def _resolve_root(base: Path, session_id: str) -> Path:
     if session_id:
+        return (base / session_id).resolve()
+    return base.resolve()
+
+
+def _resolve_root_or_create(base: Path, session_id: str) -> Path:
+    """Like _resolve_root but creates the session directory if it doesn't exist."""
+    if session_id:
         session_dir = base / session_id
-        if session_dir.is_dir():
-            return session_dir.resolve()
+        session_dir.mkdir(parents=True, exist_ok=True)
+        return session_dir.resolve()
+    base.mkdir(parents=True, exist_ok=True)
     return base.resolve()
 
 
@@ -101,6 +110,7 @@ def create_file_router(sandbox_workspace: str, api_path: str) -> APIRouter:
     list_path = f"{prefix}/files/list"
     read_path = f"{prefix}/files/read"
     download_path = f"{prefix}/files/download"
+    upload_path = f"{prefix}/files/upload"
     serve_path = f"{prefix}/files/serve/{{file_path:path}}"
 
     @router.post(list_path)
@@ -200,6 +210,43 @@ def create_file_router(sandbox_workspace: str, api_path: str) -> APIRouter:
             }
         )
 
+    @router.post(upload_path)
+    async def files_upload(
+        files: List[UploadFile] = File(...),
+        session_id: str = Form(""),
+        dir: str = Form("/"),
+    ):
+        root = _resolve_root_or_create(base, session_id)
+        target_dir = _safe_path(root, dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        uploaded = []
+        for f in files:
+            if not f.filename:
+                continue
+            safe_name = Path(f.filename).name
+            if not safe_name or safe_name.startswith('.'):
+                continue
+
+            dest = target_dir / safe_name
+            size = 0
+            with open(dest, 'wb') as out:
+                while True:
+                    chunk = await f.read(64 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > MAX_UPLOAD_SIZE:
+                        out.close()
+                        dest.unlink(missing_ok=True)
+                        raise HTTPException(status_code=413, detail=f"文件 {safe_name} 超过大小限制 ({_fmt_size(MAX_UPLOAD_SIZE)})")
+                    out.write(chunk)
+
+            rel = str(dest.relative_to(root))
+            uploaded.append({"name": safe_name, "path": "/" + rel, "size": size})
+
+        return {"uploaded": uploaded, "session_id": session_id}
+
     @router.get(serve_path)
     async def files_serve(file_path: str, sid: str = Query("")):
         root = _resolve_root(base, sid)
@@ -227,4 +274,4 @@ def publish_file_server(app: FastAPI, sandbox_workspace: str, path: str = "/alph
 
     router = create_file_router(sandbox_workspace, path)
     app.include_router(router)
-    logger.info(f"文件服务已挂载: POST {path}/files/{{list|read|download}}, GET {path}/files/serve/*, workspace={sandbox_workspace}")
+    logger.info(f"文件服务已挂载: POST {path}/files/{{list|read|download|upload}}, GET {path}/files/serve/*, workspace={sandbox_workspace}")
