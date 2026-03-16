@@ -303,6 +303,53 @@ class Sandbox:
         """Get host path to skills directory (None if not configured)"""
         return self._skill_host_path
 
+    def mount_skill(self, source: Union[str, Path, Any]) -> None:
+        """Mount skills into the sandbox. Can be called before or after start().
+
+        Args:
+            source: Skill source -- either a host path (str/Path) containing
+                skill subdirectories, or a ``SkillManager`` instance.
+                When a SkillManager is passed, the host path is inferred
+                automatically and the manager is configured to use sandbox
+                paths for all subsequent output.
+        """
+        from alphora.skills.manager import SkillManager
+
+        if isinstance(source, SkillManager):
+            host_path = self._infer_skill_host_path(source)
+            if host_path is None:
+                return
+            from alphora.sandbox.config import SANDBOX_SKILLS_MOUNT
+            source.sandbox_skill_root = SANDBOX_SKILLS_MOUNT
+        else:
+            host_path = Path(source).expanduser().resolve()
+
+        self._skill_host_path = host_path
+
+        if self.is_running and self._backend:
+            self._backend.mount_skill_path(str(host_path))
+
+    @staticmethod
+    def _infer_skill_host_path(manager: Any) -> Optional[Path]:
+        """Infer the single host directory to mount from a SkillManager."""
+        if manager.search_paths:
+            if len(manager.search_paths) > 1:
+                logger.warning(
+                    "Multiple skill search paths but sandbox supports one mount. "
+                    "Using the first: %s", manager.search_paths[0],
+                )
+            return manager.search_paths[0]
+
+        parents = {skill.path.parent for skill in manager.skills.values()}
+        if len(parents) == 1:
+            return parents.pop()
+        if len(parents) > 1:
+            logger.warning(
+                "Skills come from multiple parent directories %s. "
+                "Pass skill_host_path to Sandbox() explicitly.", parents,
+            )
+        return None
+
     @property
     def mount_mode(self) -> str:
         """Get workspace mount mode."""

@@ -4,22 +4,15 @@
 """
 Skill 内置工具集
 
-提供 LLM 可调用的工具函数，用于在 ReAct 循环中与 Skills 交互。
-这些工具实现了渐进式披露的 Phase 2 和 Phase 3：
+提供 LLM 可调用的工具函数，用于在 ReAct 循环中与 Skills 交互：
 
-- read_skill: 加载 Skill 完整指令（Phase 2）
-- read_skill_resource: 读取资源文件（Phase 3）
+- read_skill: 加载 Skill 完整指令
+- read_skill_resource: 读取资源文件
 - list_skill_resources: 列出资源目录
 
-Skill 脚本的执行由 LLM 自主完成：LLM 读取 SKILL.md 后，
-结合沙箱路径约定，通过 run_shell_command 直接执行。
+工具创建方式::
 
-工具创建方式：
     tools = create_skill_tools(manager)
-
-与 ToolRegistry 集成：
-    for t in create_skill_tools(manager):
-        registry.register(t)
 """
 
 from typing import List, Optional, TYPE_CHECKING
@@ -80,8 +73,8 @@ def create_skill_tools(
             Skill 的完整 Markdown 指令内容
         """
         try:
-            content = manager.activate(skill_name)
-            return content.instructions
+            skill = manager.load(skill_name)
+            return skill.instructions
         except SkillError as e:
             return f"Error: {e}"
 
@@ -171,14 +164,10 @@ def create_filesystem_skill_tools(manager: SkillManager) -> list:
             skill_name: Skill 名称
 
         Returns:
-            SKILL.md 的绝对路径
+            SKILL.md 的绝对路径（沙箱环境下返回沙箱内路径）
         """
         try:
-            props = manager.get_skill(skill_name)
-            if props is None:
-                available = ", ".join(manager.skill_names)
-                return f"Error: Skill '{skill_name}' not found. Available: {available}"
-            return str(props.skill_md_path)
+            return str(manager.resolve_skill_md_path(skill_name))
         except SkillError as e:
             return f"Error: {e}"
 
@@ -198,14 +187,10 @@ def create_filesystem_skill_tools(manager: SkillManager) -> list:
             skill_name: Skill 名称
 
         Returns:
-            Skill 目录的绝对路径
+            Skill 目录的绝对路径（沙箱环境下返回沙箱内路径）
         """
         try:
-            props = manager.get_skill(skill_name)
-            if props is None:
-                available = ", ".join(manager.skill_names)
-                return f"Error: Skill '{skill_name}' not found. Available: {available}"
-            return str(props.path)
+            return str(manager.resolve_skill_path(skill_name))
         except SkillError as e:
             return f"Error: {e}"
 

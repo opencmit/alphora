@@ -10,7 +10,8 @@ ToolCall 是 LLM 返回工具调用时的响应对象。
 """
 
 import json
-from typing import List, Dict, Any, Optional
+import uuid
+from typing import List, Dict, Any, Optional, Union, Tuple
 
 
 class ToolCall(list):
@@ -46,6 +47,63 @@ class ToolCall(list):
         """
         super().__init__(tool_calls or [])
         self.content = content
+
+    @classmethod
+    def create(
+            cls,
+            *calls: Union[Tuple[str, ...], Dict[str, Any]],
+            content: Optional[str] = None
+    ) -> "ToolCall":
+        """
+        便捷创建工具调用
+
+        Args:
+            *calls: 每个 call 可以是:
+                - ("name", {"arg": "value"})  元组: 工具名 + 参数字典
+                - ("name",)                    元组: 无参数工具
+                - {"id": ..., "function": ...} 原始字典 (直接透传)
+            content: assistant 的文本内容 (可选)
+
+        Returns:
+            ToolCall 实例
+
+        Example:
+            # 单工具调用
+            tc = ToolCall.create(
+                ("read_todolist", {"list_id": "main"}),
+                content="好的我需要先读取一下ToDoList"
+            )
+
+            # 多工具调用
+            tc = ToolCall.create(
+                ("get_weather", {"city": "北京"}),
+                ("get_time", {"timezone": "Asia/Shanghai"}),
+                content="让我同时查询天气和时间"
+            )
+
+            # 无参数工具
+            tc = ToolCall.create(("list_all_tasks",))
+        """
+        tool_calls = []
+        for call in calls:
+            if isinstance(call, dict):
+                tool_calls.append(call)
+            elif isinstance(call, (tuple, list)):
+                name = call[0]
+                arguments = call[1] if len(call) > 1 else {}
+                if isinstance(arguments, dict):
+                    arguments = json.dumps(arguments, ensure_ascii=False)
+                tool_calls.append({
+                    "id": f"call_{uuid.uuid4().hex[:12]}",
+                    "type": "function",
+                    "function": {"name": name, "arguments": arguments}
+                })
+            else:
+                raise TypeError(
+                    f"每个 call 应为 tuple 或 dict，收到 {type(call).__name__}"
+                )
+
+        return cls(tool_calls=tool_calls, content=content)
 
     @property
     def tool_calls(self) -> List[Dict[str, Any]]:

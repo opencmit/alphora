@@ -45,7 +45,7 @@ from alphora.tools.decorators import Tool, tool
 from alphora.tools.registry import ToolRegistry
 from alphora.tools.executor import ToolExecutor
 from alphora.memory import MemoryManager
-from alphora.skills import SkillManager, create_skill_tools, create_filesystem_skill_tools, setup_skills
+from alphora.skills import SkillManager, setup_skills
 from alphora.hooks import HookEvent, HookContext, HookManager, build_manager
 
 if TYPE_CHECKING:
@@ -123,9 +123,9 @@ class SkillAgent(BaseAgent):
         self._sandbox = sandbox
         self._filesystem_mode = filesystem_mode
 
-        # 一站式 Skill 配置（SkillManager 创建 + sandbox 路径映射 + 工具生成）
+        # 一站式 Skill 配置（SkillManager + sandbox 路径映射 + 工具生成 + sandbox 工具）
         skill_setup = setup_skills(
-            skill_paths=skill_paths,
+            paths=skill_paths,
             skill_manager=skill_manager,
             sandbox=sandbox,
             filesystem_mode=filesystem_mode,
@@ -138,10 +138,11 @@ class SkillAgent(BaseAgent):
         if tools:
             self._registry.register_many(tools)
 
-        self._registry.register_many(skill_setup.tools)
-
-        if sandbox is not None:
-            self._setup_sandbox_tools(sandbox)
+        for t in skill_setup.tools:
+            try:
+                self._registry.register(t)
+            except Exception:
+                pass
 
         self._executor = ToolExecutor(self._registry, hooks=hook_manager)
 
@@ -170,7 +171,7 @@ class SkillAgent(BaseAgent):
         if self._sandbox is not None and user_system_prompt:
             parts.append(self._get_sandbox_prompt())
 
-        skill_instruction = self._skill_manager.to_system_instruction()
+        skill_instruction = self._skill_manager.to_system_prompt()
         if skill_instruction:
             parts.append(skill_instruction)
 
@@ -218,30 +219,6 @@ class SkillAgent(BaseAgent):
             "4. **Use absolute `/mnt/...` paths** in shell commands and "
             "scripts for clarity and consistency.\n"
         )
-
-    def _setup_sandbox_tools(self, sandbox: "Sandbox") -> None:
-        """注册沙箱工具（如果尚未通过 Skill 工具注册脚本执行能力）"""
-        try:
-            from alphora.sandbox import SandboxTools
-
-            sandbox_tools = SandboxTools(sandbox)
-
-            # 仅注册不与 skill 工具冲突的沙箱能力
-            safe_tools = [
-                sandbox_tools.save_file,
-                sandbox_tools.list_files,
-                sandbox_tools.run_shell_command,
-            ]
-
-            for t in safe_tools:
-                try:
-                    self._registry.register(t)
-                except Exception:
-                    # 跳过已注册的同名工具
-                    pass
-
-        except ImportError:
-            logger.debug("Sandbox module not available, skipping sandbox tools")
 
     async def _ensure_sandbox_ready(self) -> None:
         """Auto-start sandbox if configured but not yet running."""

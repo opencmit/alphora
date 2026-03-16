@@ -194,6 +194,14 @@ class LocalBackend(ExecutionBackend):
         except OSError as e:
             logger.warning(f"Failed to create symlink {link} -> {target}: {e}")
     
+    def mount_skill_path(self, host_path: str) -> None:
+        """Dynamically mount a skill directory (create symlinks + update path translation)."""
+        self._skill_host_path = Path(host_path)
+        self._host_skills = str(self._skill_host_path.resolve())
+        target = self._skill_host_path.resolve()
+        self._ensure_symlink(self._mnt_dir / "skills", target)
+        self._ensure_symlink(self._workspace_path / "skills", target)
+
     async def start(self) -> None:
         """Start the backend"""
         self._running = True

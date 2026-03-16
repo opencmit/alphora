@@ -111,6 +111,15 @@ class ExecutionBackend(ABC):
         """
         pass
 
+    def mount_skill_path(self, host_path: str) -> None:
+        """Dynamically mount a skill directory while the backend is running.
+
+        Subclasses should override this to create symlinks (local) or copy
+        files into the container (docker).  The default implementation is a
+        no-op so that backends without skill support do not break.
+        """
+        pass
+
     async def reset(self) -> None:
         """
         Reset the backend to initial state.

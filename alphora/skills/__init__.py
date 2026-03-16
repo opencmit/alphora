@@ -4,44 +4,44 @@
 """
 Alphora Skills - Agent Skills 标准兼容组件
 
-兼容 agentskills.io 开放标准的 Skill 管理模块，支持渐进式披露、
-资源按需加载、自动 prompt 注入等能力。可与社区发布的 Skill 无缝配合。
+快速开始::
 
-快速开始：
+    from alphora.skills import load_skill
+
+    skill = load_skill("./skills/pdf")
+    print(skill.instructions)
+
+多 Skill 管理::
+
     from alphora.skills import SkillManager
 
     manager = SkillManager(["./skills"])
-    print(manager.skill_names)           # 查看可用 skill
-    prompt = manager.to_prompt()         # 生成 system prompt 注入内容
-    content = manager.activate("pdf")    # 激活指定 skill
+    skill = manager.load("pdf")
 
-与 Agent 集成：
-    from alphora.skills import SkillManager, create_skill_tools
+一站式 Agent 集成::
 
-    manager = SkillManager(["./skills"])
-    tools = create_skill_tools(manager)  # 生成 LLM 可调用的工具
+    from alphora.skills import setup_skills
+
+    setup = setup_skills(paths=["./skills"], sandbox=sandbox)
+    registry.register_many(setup.tools)
 """
 
-from .manager import SkillManager
 from .models import (
+    Skill,
     SkillProperties,
     SkillContent,
     SkillResource,
     SkillDirectoryInfo,
     SkillStatus,
 )
-from .parser import (
-    parse_frontmatter,
-    parse_properties,
-    parse_content,
-    validate_skill,
-)
+from .manager import SkillManager
 from .tools import (
     create_skill_tools,
     create_filesystem_skill_tools,
 )
 from .setup import (
     setup_skills,
+    load_skill,
     SkillSetup,
 )
 from .exceptions import (
@@ -49,40 +49,38 @@ from .exceptions import (
     SkillParseError,
     SkillValidationError,
     SkillNotFoundError,
+    SkillLoadError,
     SkillActivationError,
     SkillResourceError,
 )
 
+# parser functions kept importable via alphora.skills.parser but not in __all__
+from .parser import (
+    parse_frontmatter,
+    parse_properties,
+    parse_content,
+    validate_skill,
+)
+
 __all__ = [
-    # 核心管理器
+    # Core
+    "Skill",
     "SkillManager",
+    "setup_skills",
+    "load_skill",
+    "SkillSetup",
 
-    # 数据模型
-    "SkillProperties",
-    "SkillContent",
-    "SkillResource",
-    "SkillDirectoryInfo",
-    "SkillStatus",
-
-    # 解析器
-    "parse_frontmatter",
-    "parse_properties",
-    "parse_content",
-    "validate_skill",
-
-    # 工具创建
+    # Tool creation (advanced)
     "create_skill_tools",
     "create_filesystem_skill_tools",
 
-    # 一站式集成
-    "setup_skills",
-    "SkillSetup",
-
-    # 异常
+    # Exceptions
     "SkillError",
-    "SkillParseError",
-    "SkillValidationError",
     "SkillNotFoundError",
+    "SkillLoadError",
+
+    # Backward compat (deprecated)
+    "SkillProperties",
+    "SkillContent",
     "SkillActivationError",
-    "SkillResourceError",
 ]

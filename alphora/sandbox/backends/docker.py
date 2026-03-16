@@ -339,9 +339,11 @@ class DockerBackend(ExecutionBackend):
             self._container = self._client.containers.run(**container_config)
             self._running = True
             await self._wait_for_ready()
-            await self._ensure_workspace_permissions()
-            if self._is_remote and self._skill_host_path:
-                await self._sync_skills_to_remote()
+            self._init_workspace_dirs()
+            if self._skill_host_path:
+                if self._is_remote:
+                    self._sync_skills_to_container()
+                self._create_skills_symlink()
             logger.info(f"Container {self.container_name} started: {self.container_id[:12]}")
         except Exception as e:
             self._running = False
@@ -476,19 +478,34 @@ class DockerBackend(ExecutionBackend):
             await asyncio.sleep(0.5)
         raise ContainerError(self.container_name, "Container failed to become ready")
 
-    async def _ensure_workspace_permissions(self) -> None:
-        """Ensure workspace subdirs exist and skills symlink is set up."""
+    def _init_workspace_dirs(self) -> None:
+        """Create standard workspace subdirectories (uploads, outputs)."""
         ws = self._container_workspace
-        script = f"mkdir -p {ws}/uploads {ws}/outputs"
-        if self._skill_host_path:
-            script += (
-                f" && {{ test -d {SANDBOX_SKILLS_MOUNT} && ! -e {ws}/skills"
-                f" && ln -s {SANDBOX_SKILLS_MOUNT} {ws}/skills; true; }}"
-            )
-        self._container.exec_run(["sh", "-c", script], user="root")
+        self._container.exec_run(
+            ["sh", "-c", f"mkdir -p {ws}/uploads {ws}/outputs"],
+            user="root",
+        )
 
-    async def _sync_skills_to_remote(self) -> None:
-        """Copy local skills directory into the remote container at /mnt/skills."""
+    def mount_skill_path(self, host_path: str) -> None:
+        """Dynamically mount a skill directory into a running container.
+
+        For local Docker: recreates the container with a proper ``-v``
+        bind-mount so that ``/mnt/skills`` and the workspace symlink
+        work reliably on all platforms (including macOS VirtioFS).
+
+        For remote Docker: copies files via tar + put_archive and creates
+        a symlink, since the host path does not exist on the remote server.
+        """
+        self._skill_host_path = Path(host_path)
+
+        if self._is_remote:
+            self._sync_skills_to_container()
+            self._create_skills_symlink()
+        else:
+            self._recreate_with_skill_volume()
+
+    def _sync_skills_to_container(self) -> None:
+        """Copy local skills directory into the container at /mnt/skills."""
         skill_path = self._skill_host_path
         if not skill_path or not skill_path.is_dir():
             logger.warning(f"Skills path not found locally: {skill_path}")
@@ -512,8 +529,72 @@ class DockerBackend(ExecutionBackend):
                     tar.add(full, arcname=arcname, recursive=False)
         buf.seek(0)
         self._container.put_archive(SANDBOX_SKILLS_MOUNT, buf)
+        logger.info(
+            f"Synced local skills ({skill_path}) to container at {SANDBOX_SKILLS_MOUNT}"
+        )
 
-        logger.info(f"Synced local skills ({skill_path}) to remote container at {SANDBOX_SKILLS_MOUNT}")
+    def _create_skills_symlink(self) -> None:
+        """Create /mnt/workspace/skills -> /mnt/skills symlink in the container.
+
+        Used for remote Docker where volumes cannot be bind-mounted from
+        the local host. On local Docker, prefer ``_recreate_with_skill_volume``.
+        """
+        ws = self._container_workspace
+        script = (
+            f"ln -sfn {SANDBOX_SKILLS_MOUNT} {ws}/skills"
+        )
+        result = self._container.exec_run(["sh", "-c", script], user="root")
+        if result.exit_code != 0:
+            logger.warning(
+                "Failed to create skills symlink in container: %s",
+                result.output.decode(errors="replace") if result.output else "unknown",
+            )
+
+    def _recreate_with_skill_volume(self) -> None:
+        """Recreate the container with a proper Docker bind-mount for skills.
+
+        Docker does not allow adding volumes to a running container, so we
+        stop, remove, and recreate it with the updated volume configuration.
+        This is the reliable approach for local Docker (including macOS
+        with VirtioFS) where symlinks inside bind-mounted directories
+        pointing to container-internal paths do not resolve correctly.
+        """
+        logger.info(
+            "Recreating container with skill volume: %s -> %s",
+            self._skill_host_path, SANDBOX_SKILLS_MOUNT,
+        )
+
+        try:
+            self._container.stop(timeout=5)
+        except Exception:
+            pass
+        try:
+            self._container.remove(force=True)
+        except Exception:
+            pass
+
+        config = self._build_container_config()
+        self._container = self._client.containers.run(**config)
+        self._running = True
+
+        start = time.time()
+        while time.time() - start < 30:
+            try:
+                self._container.reload()
+                if self._container.status == "running":
+                    result = self._container.exec_run("echo ok")
+                    if result.exit_code == 0:
+                        break
+            except Exception:
+                pass
+            time.sleep(0.5)
+
+        self._init_workspace_dirs()
+        self._create_skills_symlink()
+        logger.info(
+            "Container %s restarted with skill volume: %s",
+            self.container_name, self._skill_host_path,
+        )
 
     # ------------------------------------------------------------------ #
     # Code Execution

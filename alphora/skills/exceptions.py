@@ -11,7 +11,7 @@ Skills 组件异常定义
     ├── SkillParseError          # SKILL.md 解析失败
     ├── SkillValidationError     # Skill 格式校验不通过
     ├── SkillNotFoundError       # 指定名称的 Skill 不存在
-    ├── SkillActivationError     # Skill 激活失败
+    ├── SkillLoadError           # Skill 加载失败
     └── SkillResourceError       # 资源文件访问失败
 """
 
@@ -71,8 +71,8 @@ class SkillNotFoundError(SkillError):
         super().__init__(msg)
 
 
-class SkillActivationError(SkillError):
-    """Skill 激活失败
+class SkillLoadError(SkillError):
+    """Skill 加载失败
 
     常见原因：
     - SKILL.md 文件被删除或损坏
@@ -80,6 +80,10 @@ class SkillActivationError(SkillError):
     - 内容超出建议大小限制
     """
     pass
+
+
+# deprecated alias
+SkillActivationError = SkillLoadError
 
 
 class SkillResourceError(SkillError):

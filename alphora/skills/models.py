@@ -3,15 +3,25 @@
 
 """
 Skills 数据模型
-定义 Skill 的元数据、内容、资源等数据结构，
-遵循 agentskills.io 规范。
+
+定义 Skill 的核心数据结构，遵循 agentskills.io 规范。
+
+核心类型:
+    Skill               统一的 Skill 对象（元数据 + 懒加载指令）
+    SkillResource       资源文件
+    SkillDirectoryInfo  目录结构概览
+
+向后兼容:
+    SkillProperties     Skill 的别名（deprecated）
+    SkillContent        包装类（deprecated）
 """
 
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from enum import Enum
+import warnings
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 import re
 
@@ -26,82 +36,81 @@ SKILL_MD_MAX_LINES = 500
 
 class SkillStatus(str, Enum):
     """Skill 生命周期状态"""
-    DISCOVERED = "discovered"       # 仅加载了元数据
-    ACTIVATED = "activated"         # 已加载完整指令
-    ERROR = "error"                 # 加载出错
+    DISCOVERED = "discovered"
+    LOADED = "loaded"
+    ERROR = "error"
+
+    # deprecated aliases
+    ACTIVATED = "loaded"
 
 
-class SkillProperties(BaseModel):
+class Skill(BaseModel):
     """
-    Skill 元数据，从 SKILL.md YAML frontmatter 解析
+    统一的 Skill 对象，包含元数据和懒加载的指令内容。
 
-    对应渐进式披露的 Phase 1（约 50-100 tokens/skill）。
-    启动时仅加载此信息用于 discovery 和 system prompt 注入。
+    discover 时仅填充元数据字段（name, description 等）；
+    指令内容（instructions）在首次访问时自动从 SKILL.md 加载。
 
     Attributes:
-        name: Skill 名称，遵循 kebab-case 命名规范
-        description: Skill 描述，说明功能和触发条件
+        name: Skill 名称，kebab-case
+        description: 功能描述与触发条件
         license: 许可证标识
-        compatibility: 环境要求说明
-        metadata: 自定义键值对元数据
+        compatibility: 环境要求
+        metadata: 自定义键值对
         allowed_tools: 预授权工具列表（实验性）
-        path: Skill 目录的绝对路径
+        path: Skill 目录绝对路径
+        status: 生命周期状态
     """
 
     name: str = Field(
         ...,
         min_length=1,
         max_length=NAME_MAX_LENGTH,
-        description="Skill name in kebab-case"
+        description="Skill name in kebab-case",
     )
     description: str = Field(
         ...,
         min_length=1,
         max_length=DESCRIPTION_MAX_LENGTH,
-        description="What the skill does and when to use it"
+        description="What the skill does and when to use it",
     )
     license: Optional[str] = Field(
         default=None,
-        description="License identifier or file reference"
+        description="License identifier or file reference",
     )
     compatibility: Optional[str] = Field(
         default=None,
         max_length=COMPATIBILITY_MAX_LENGTH,
-        description="Environment requirements"
+        description="Environment requirements",
     )
     metadata: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="Arbitrary key-value metadata"
+        description="Arbitrary key-value metadata",
     )
     allowed_tools: Optional[List[str]] = Field(
         default=None,
-        description="Pre-approved tools (experimental)"
+        description="Pre-approved tools (experimental)",
     )
 
     path: Path = Field(
         ...,
         description="Absolute path to skill directory",
-        exclude=True  # 序列化时排除
+        exclude=True,
     )
     status: SkillStatus = Field(
         default=SkillStatus.DISCOVERED,
-        exclude=True
+        exclude=True,
     )
 
+    _instructions: Optional[str] = PrivateAttr(default=None)
+    _raw_content: Optional[str] = PrivateAttr(default=None)
+
     class Config:
-        frozen = False  # 允许状态更新
+        frozen = False
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
-        """
-        校验名称格式（遵循 agentskills.io 规范）
-
-        规则：
-        - 仅允许小写字母、数字、连字符
-        - 不以连字符开头或结尾
-        - 不包含连续连字符
-        """
         if not NAME_PATTERN.match(v):
             raise ValueError(
                 f"Invalid skill name '{v}'. "
@@ -114,48 +123,92 @@ class SkillProperties(BaseModel):
             )
         return v
 
+    # --- instructions 懒加载 ---
+
+    @property
+    def instructions(self) -> str:
+        """SKILL.md 的 Markdown 正文（首次访问时自动加载）。"""
+        if self._instructions is None:
+            self._load_content()
+        return self._instructions  # type: ignore[return-value]
+
+    @property
+    def raw_content(self) -> str:
+        """SKILL.md 的完整原始内容（首次访问时自动加载）。"""
+        if self._raw_content is None:
+            self._load_content()
+        return self._raw_content  # type: ignore[return-value]
+
+    def _load_content(self) -> None:
+        from .parser import parse_skill_md
+        _, body = parse_skill_md(self.path)
+        self._instructions = body
+        self._raw_content = (self.path / "SKILL.md").read_text(encoding="utf-8")
+
+    def _set_instructions(self, instructions: str, raw_content: str = "") -> None:
+        """由 SkillManager 在显式 load() 时调用，避免重复 IO。"""
+        self._instructions = instructions
+        self._raw_content = raw_content
+
+    def _clear_instructions(self) -> None:
+        """由 SkillManager.unload() 调用，释放缓存。"""
+        self._instructions = None
+        self._raw_content = None
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._instructions is not None
+
+    # --- 便捷路径属性 ---
+
     @property
     def skill_md_path(self) -> Path:
-        """SKILL.md 文件的完整路径"""
         return self.path / "SKILL.md"
 
     @property
     def scripts_dir(self) -> Path:
-        """scripts/ 目录路径"""
         return self.path / "scripts"
 
     @property
     def references_dir(self) -> Path:
-        """references/ 目录路径"""
         return self.path / "references"
 
     @property
     def assets_dir(self) -> Path:
-        """assets/ 目录路径"""
         return self.path / "assets"
+
+    def __str__(self) -> str:
+        loaded = "loaded" if self.is_loaded else "discovered"
+        return f"Skill(name='{self.name}', status={loaded})"
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
+
+# ---------------------------------------------------------------------------
+# Deprecated aliases -- 保留向后兼容，1 个大版本周期后移除
+# ---------------------------------------------------------------------------
+
+# SkillProperties 现在就是 Skill（字段完全一致）
+SkillProperties = Skill
 
 
 class SkillContent(BaseModel):
     """
-    完整的 Skill 内容，包含元数据和指令
+    .. deprecated::
+        Use ``Skill`` directly. ``skill.instructions`` now lazy-loads content.
 
-    对应渐进式披露的 Phase 2（建议 < 5000 tokens）。
-    仅在 Skill 被激活时加载。
-
-    Attributes:
-        properties: Skill 元数据
-        instructions: Markdown 正文内容（指令部分）
-        raw_content: SKILL.md 的完整原始内容
+    保留此类仅为向后兼容，内部包装一个 Skill 对象。
     """
 
-    properties: SkillProperties
+    properties: Skill
     instructions: str = Field(
         ...,
-        description="Markdown body with skill instructions"
+        description="Markdown body with skill instructions",
     )
     raw_content: str = Field(
         default="",
-        description="Full raw content of SKILL.md"
+        description="Full raw content of SKILL.md",
     )
 
     class Config:

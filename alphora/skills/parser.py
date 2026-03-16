@@ -18,7 +18,7 @@ import re
 
 import yaml
 
-from .models import SkillProperties, SkillContent, NAME_PATTERN
+from .models import Skill, SkillContent, NAME_PATTERN
 from .exceptions import SkillParseError, SkillValidationError
 
 logger = logging.getLogger(__name__)
@@ -116,26 +116,21 @@ def parse_skill_md(skill_dir: Path) -> Tuple[Dict[str, Any], str]:
     return parse_frontmatter(content)
 
 
-def parse_properties(skill_dir: Path) -> SkillProperties:
+def parse_properties(skill_dir: Path) -> Skill:
     """
-    解析 Skill 元数据（Phase 1: Discovery）
-
-    仅解析 YAML frontmatter，不加载 Markdown 正文。
-    适用于启动时批量扫描 Skill 目录。
+    解析 Skill 元数据（仅 frontmatter，不加载正文）。
 
     Args:
         skill_dir: Skill 目录路径
 
     Returns:
-        SkillProperties 实例
+        Skill 实例（instructions 尚未加载，首次访问时懒加载）
 
     Raises:
         SkillParseError: 解析失败
-        SkillValidationError: 校验不通过
     """
     frontmatter, _ = parse_skill_md(skill_dir)
 
-    # 必需字段检查
     if "name" not in frontmatter:
         raise SkillParseError(
             f"Missing required field 'name' in {skill_dir}/SKILL.md frontmatter."
@@ -145,7 +140,6 @@ def parse_properties(skill_dir: Path) -> SkillProperties:
             f"Missing required field 'description' in {skill_dir}/SKILL.md frontmatter."
         )
 
-    # 处理 allowed-tools（YAML 中的 key 用连字符，Python 用下划线）
     if "allowed-tools" in frontmatter:
         raw = frontmatter.pop("allowed-tools")
         if isinstance(raw, str):
@@ -153,24 +147,25 @@ def parse_properties(skill_dir: Path) -> SkillProperties:
         elif isinstance(raw, list):
             frontmatter["allowed_tools"] = raw
 
-    # 注入路径
     frontmatter["path"] = skill_dir.resolve()
 
     try:
-        props = SkillProperties(**frontmatter)
+        skill = Skill(**frontmatter)
     except Exception as e:
         raise SkillParseError(
-            f"Failed to create SkillProperties from {skill_dir}/SKILL.md: {e}"
+            f"Failed to create Skill from {skill_dir}/SKILL.md: {e}"
         )
 
-    return props
+    return skill
 
 
 def parse_content(skill_dir: Path) -> SkillContent:
     """
-    解析 Skill 完整内容（Phase 2: Activation）
+    解析 Skill 完整内容（frontmatter + 正文）。
 
-    加载 YAML frontmatter 和 Markdown 正文。
+    .. deprecated::
+        Prefer ``parse_properties()`` which returns a ``Skill`` with lazy
+        instructions. This function is kept for backward compatibility.
 
     Args:
         skill_dir: Skill 目录路径
@@ -180,13 +175,12 @@ def parse_content(skill_dir: Path) -> SkillContent:
     """
     frontmatter, body = parse_skill_md(skill_dir)
 
-    # 复用 parse_properties 的逻辑来创建 properties
-    props = parse_properties(skill_dir)
+    skill = parse_properties(skill_dir)
 
     raw_content = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
 
     return SkillContent(
-        properties=props,
+        properties=skill,
         instructions=body,
         raw_content=raw_content,
     )
