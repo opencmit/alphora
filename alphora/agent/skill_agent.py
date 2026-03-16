@@ -185,7 +185,11 @@ class SkillAgent(BaseAgent):
 - **任务理解**：准确理解用户意图，必要时主动确认关键细节
 - **Skill 选择**：根据任务需求从可用 Skills 中选择最合适的方案
 - **工具组合**：灵活组合多个工具协作完成复杂任务
-- **结果交付**：提供清晰、完整、可直接使用的结果"""
+- **结果交付**：提供清晰、完整、可直接使用的结果
+
+## 铁律
+- **必须遵循Skill**：必须按照Skill中的指引进行操作，如果环境中不满足Skill中所需的依赖，请使用shell工具进行安装
+"""
 
         if self._sandbox is not None:
             prompt += self._get_sandbox_prompt()
