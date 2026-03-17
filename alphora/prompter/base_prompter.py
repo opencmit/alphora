@@ -32,7 +32,7 @@ from alphora.server.stream_responser import DataStreamer, StreamCallback
 from json_repair import repair_json
 
 from alphora.models.llms.base import BaseLLM
-from alphora.models.llms.stream_helper import BaseGenerator, GeneratorOutput
+from alphora.models.llms.stream_helper import BaseGenerator
 from alphora.models.llms.types import ToolCall
 
 from alphora.memory.history_payload import HistoryPayload, is_valid_history_payload
@@ -502,50 +502,6 @@ class BasePrompt:
         return self
 
     @staticmethod
-    def _apply_pp_to_string_sync(text: str, postprocessor) -> str:
-        """对已完成的字符串应用后处理器（同步版本），用于 tools 传入但未发生工具调用的场景。"""
-        class _StringGen(BaseGenerator):
-            def __init__(self, s):
-                super().__init__('char')
-                self._s = s
-            def generate(self):
-                yield GeneratorOutput(content=self._s, content_type='char')
-
-        gen = _StringGen(text)
-        if isinstance(postprocessor, list):
-            for p in postprocessor:
-                gen = p(gen)
-        else:
-            gen = postprocessor(gen)
-
-        result = ''
-        for chunk in gen:
-            result += chunk.content
-        return result
-
-    @staticmethod
-    async def _apply_pp_to_string_async(text: str, postprocessor) -> str:
-        """对已完成的字符串应用后处理器（异步版本），用于 tools 传入但未发生工具调用的场景。"""
-        class _StringGen(BaseGenerator):
-            def __init__(self, s):
-                super().__init__('char')
-                self._s = s
-            async def agenerate(self):
-                yield GeneratorOutput(content=self._s, content_type='char')
-
-        gen = _StringGen(text)
-        if isinstance(postprocessor, list):
-            for p in postprocessor:
-                gen = p(gen)
-        else:
-            gen = postprocessor(gen)
-
-        result = ''
-        async for chunk in gen:
-            result += chunk.content
-        return result
-
-    @staticmethod
     def _normalize_tools(tools) -> Optional[List[Dict]]:
         """将多种 tools 输入格式统一转换为 OpenAI Function Calling schema。
 
@@ -744,9 +700,11 @@ class BasePrompt:
                 else:
                     generator = self.llm.get_streaming_response(**gen_kwargs)
 
-                # tools 存在时不包裹 postprocessor，避免破坏 tool_call 类 chunk
-                # 以及丢失原始 generator 上的 collected_tool_calls 属性
-                if postprocessor and not tools:
+                # tools 存在时保留原始 generator 引用，用于获取 collected_tool_calls 和原始内容
+                # pp 仍然应用到流上以处理显示输出
+                original_generator = generator if tools else None
+
+                if postprocessor:
                     if isinstance(postprocessor, List):
                         for p in postprocessor:
                             generator = p(generator)
@@ -804,13 +762,13 @@ class BasePrompt:
                         output_str += content
 
                 # 流结束后，检查工具调用
-                collected_tools = getattr(generator, 'collected_tool_calls', None)
-
                 if tools:
-                    # 传了 tools 但未发生工具调用时，对文本内容应用后处理器
-                    if not collected_tools and postprocessor:
-                        output_str = self._apply_pp_to_string_sync(output_str, postprocessor)
-                    response = ToolCall(tool_calls=collected_tools, content=output_str)
+                    collected_tools = getattr(original_generator, 'collected_tool_calls', None)
+                    if postprocessor:
+                        raw_content = getattr(original_generator, '_full_content', output_str)
+                    else:
+                        raw_content = output_str
+                    response = ToolCall(tool_calls=collected_tools, content=raw_content)
                     after_ctx = HookContext(
                         event=HookEvent.LLM_AFTER_CALL,
                         component="llm",
@@ -1006,9 +964,11 @@ class BasePrompt:
                 else:
                     generator = await self.llm.aget_streaming_response(**gen_kwargs)
 
-                # tools 存在时不包裹 postprocessor，避免破坏 tool_call 类 chunk
-                # 以及丢失原始 generator 上的 collected_tool_calls 属性
-                if postprocessor and not tools:
+                # tools 存在时保留原始 generator 引用，用于获取 collected_tool_calls 和原始内容
+                # pp 仍然应用到流上以处理显示输出
+                original_generator = generator if tools else None
+
+                if postprocessor:
                     if isinstance(postprocessor, List):
                         for p in postprocessor:
                             generator = p(generator)
@@ -1084,13 +1044,14 @@ class BasePrompt:
                             output_str += content
 
                 # 流结束后，检查工具调用
-                collected_tools = getattr(generator, 'collected_tool_calls', None)
-
                 if tools:
-                    # 传了 tools 但未发生工具调用时，对文本内容应用后处理器
-                    if not collected_tools and postprocessor:
-                        output_str = await self._apply_pp_to_string_async(output_str, postprocessor)
-                    response = ToolCall(tool_calls=collected_tools, content=output_str)
+                    collected_tools = getattr(original_generator, 'collected_tool_calls', None)
+                    if postprocessor:
+                        # pp 已作用于流式显示，返回值使用原始 generator 的未处理内容
+                        raw_content = getattr(original_generator, '_full_content', output_str)
+                    else:
+                        raw_content = output_str
+                    response = ToolCall(tool_calls=collected_tools, content=raw_content)
                     after_ctx = HookContext(
                         event=HookEvent.LLM_AFTER_CALL,
                         component="llm",
