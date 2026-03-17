@@ -959,6 +959,7 @@ class BasePrompt:
                     "is_stream": is_stream,
                     "force_json": force_json,
                     "long_response": long_response,
+                    "agent_id": self.agent_id
                 },
             ),
         )

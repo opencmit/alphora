@@ -10,6 +10,7 @@ from .checkpoint import (
     list_checkpoints,
 )
 from .usage import UsageTracker
+from .message_inspector import MessageInspector
 
 __all__ = [
     "log_event",
@@ -25,4 +26,5 @@ __all__ = [
     "create_memory_from_checkpoint",
     "list_checkpoints",
     "UsageTracker",
+    "MessageInspector",
 ]

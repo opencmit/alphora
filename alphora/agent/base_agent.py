@@ -78,7 +78,8 @@ class BaseAgent(object):
                  **kwargs):
 
         self.callback = callback
-        self.agent_id = agent_id or str(uuid4())
+
+        self.agent_id = agent_id or self.__class__.__name__
 
         self.verbose = verbose
 
@@ -219,6 +220,7 @@ class BaseAgent(object):
             template_desc: str = "",
             content_type: Optional[str] = None,
             system_prompt: Optional[str] = None,
+            hooks: Optional[Union[HookManager, Dict[Any, Any]]] = None,
     ) -> BasePrompt:
         """
         快速创建提示词模板
@@ -256,6 +258,7 @@ class BaseAgent(object):
             template_desc: 提示词描述
             content_type: 当调用 acall 方法时，输出的流的 content_type
             system_prompt: 系统提示词（新模式，支持占位符）
+            hooks:钩子
 
         Returns:
             BasePrompt 实例
@@ -272,6 +275,7 @@ class BaseAgent(object):
             content_type=content_type,
             system_prompt=system_prompt,
             agent_id=self.agent_id,
+            hooks=hooks,
         )
 
         try:
