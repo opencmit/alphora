@@ -51,7 +51,7 @@ class ToolCall(list):
     @classmethod
     def create(
             cls,
-            *calls: Union[Tuple[str, ...], Dict[str, Any]],
+            *calls: Union[Tuple, Dict[str, Any]],
             content: Optional[str] = None
     ) -> "ToolCall":
         """

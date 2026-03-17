@@ -293,9 +293,13 @@ class BasePrompt:
         Constructs the sequence of messages in the following order:
         1. JSON Constraint (if enforced)
         2. Pre-configured System Prompts
-        3. Runtime System Prompts
-        4. Historical Context (from MemoryManager)
-        5. User Input
+        3. User Query
+        4. Historical Context (from MemoryManager, deduplicated against query)
+        5. Runtime System Prompts
+
+        When ``history`` is provided, the query is placed **before** the history
+        to preserve chronological order. Duplicate user messages (same content
+        as ``query``) are automatically removed from history.
 
         Args:
             query: The current user input string.
@@ -307,7 +311,7 @@ class BasePrompt:
             List[Dict[str, str]]: A list of message dictionaries compliant with Chat Completion API.
 
         Raises:
-            TypeError: If the provided `history` object is not a valid `HistoryPayload`.
+            TypeError: If the provided ``history`` object is not a valid ``HistoryPayload``.
         """
 
         before_ctx = HookContext(
@@ -341,12 +345,11 @@ class BasePrompt:
             if content.strip():
                 messages.append({"role": "system", "content": content})
 
-        # 3. 运行时动态追加的 System Prompts
-        if runtime_system_prompt:
-            extras = [runtime_system_prompt] if isinstance(runtime_system_prompt, str) else runtime_system_prompt
-            for content in extras:
-                if content:
-                    messages.append({"role": "system", "content": content})
+        # 3. User Query（放在 system prompts 之后、history 之前）
+        user_content = ""
+        if query:
+            user_content = self._render_user_content(query)
+            messages.append({"role": "user", "content": user_content})
 
         # 4. 插入历史记录 (来自 HistoryPayload)
         if history is not None:
@@ -356,25 +359,28 @@ class BasePrompt:
                     f"Got: {type(history).__name__}"
                 )
 
-            # 检查工具链完整性警告
             if history.has_tool_calls and not history.tool_chain_valid:
                 logger.warning(
                     f"History contains incomplete tool chain (session={history.session_id}). "
                     "This may cause LLM errors."
                 )
 
-            # 合并历史消息
-            messages.extend(history.to_list())
+            history_msgs = history.to_list()
 
-        # 5. User Content (skip if history already contains the same user message)
-        if query is not None:
-            user_content = self._render_user_content(query)
-            already_in_history = any(
-                msg.get("role") == "user" and msg.get("content") == user_content
-                for msg in messages
-            )
-            if not already_in_history:
-                messages.append({"role": "user", "content": user_content})
+            if user_content:
+                history_msgs = [
+                    msg for msg in history_msgs
+                    if not (msg.get("role") == "user" and msg.get("content") == user_content)
+                ]
+
+            messages.extend(history_msgs)
+
+        # 5. 运行时动态追加的 System Prompts
+        if runtime_system_prompt:
+            extras = [runtime_system_prompt] if isinstance(runtime_system_prompt, str) else runtime_system_prompt
+            for content in extras:
+                if content:
+                    messages.append({"role": "system", "content": content})
 
         after_ctx = HookContext(
             event=HookEvent.PROMPTER_AFTER_BUILD_MESSAGES,
