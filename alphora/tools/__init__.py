@@ -9,6 +9,8 @@ from .exceptions import (
     ToolExecutionError,
 )
 
+from alphora.models.llms.types import ToolCall
+
 
 __all__ = [
     "Tool",
@@ -20,5 +22,6 @@ __all__ = [
     "ToolRegistrationError",
     "ToolValidationError",
     "ToolExecutionError",
+    "ToolCall"
 ]
 

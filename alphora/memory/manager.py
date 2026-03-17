@@ -328,8 +328,8 @@ class MemoryManager:
                 - str: 普通文本回复
                 - PrompterOutput: 普通文本回复 (会自动转为 str)
                 - ToolCall 对象: 自动提取 tool_calls 和 content
-                - None: 仅当有 tool_calls 参数时使用
-            tool_calls: 工具调用列表 (可选，如果 content 是 ToolCall 则自动提取)
+                - None: 无内容
+            tool_calls: [已废弃] 工具调用列表。请直接将 ToolCall 对象传入 content 参数。
             session_id: 会话ID
             **metadata: 额外元数据
 
@@ -343,12 +343,23 @@ class MemoryManager:
 
             # 方式 2: 普通文本回复
             memory.add_assistant("你好！有什么可以帮你的？")
-
-            # 方式 3: 显式工具调用
-            memory.add_assistant(tool_calls=[...])
         """
+        import warnings
+
+        if tool_calls is not None:
+            warnings.warn(
+                "add_assistant() 的 tool_calls 参数已废弃，将在未来版本中移除。"
+                "请直接将 ToolCall 对象传入 content 参数，例如: "
+                "memory.add_assistant(response)  # response 为 ToolCall 对象",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if content is None:
+                from alphora.models.llms.types import ToolCall as LLMToolCall
+                content = LLMToolCall(tool_calls=tool_calls)
+
         actual_content = content
-        actual_tool_calls = tool_calls
+        actual_tool_calls = None
 
         # 智能识别 ToolCall 对象 （models/llms/type里面的ToolCall）
         if isinstance(content, list) and hasattr(content, 'content'):
