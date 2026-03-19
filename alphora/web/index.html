@@ -57,7 +57,7 @@ input,select,textarea{font-family:inherit;outline:none}
 
 /* Sidebar brand */
 .sb-brand{display:flex;align-items:center;gap:12px;padding:20px 16px 12px;user-select:none}
-.sb-brand img{width:34px;height:34px;border-radius:9px;object-fit:contain}
+.sb-brand img{height:26px;width:auto;border-radius:3px;object-fit:contain}
 .sb-brand span{font-size:16px;font-weight:700;color:var(--t1);letter-spacing:-.3px;flex:1 1 0%}
 
 /* New chat button */
@@ -87,9 +87,14 @@ input,select,textarea{font-family:inherit;outline:none}
 .sb-menu.open~#sbSettings .sb-arrow{transform:rotate(180deg)}
 
 /* Expand button (floating when sidebar collapsed) */
-.sb-toggle{position:fixed;top:14px;left:14px;display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;color:var(--t4);transition:all .2s ease;z-index:110;background:var(--white);border:1px solid var(--border);box-shadow:var(--shadow-sm)}
+.sb-toggle{position:fixed;top:20%;left:14px;display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;color:var(--t4);transition:all .2s ease;z-index:110;background:var(--white);border:1px solid var(--border);box-shadow:var(--shadow-sm);cursor:pointer}
 .sb-toggle:hover{background:var(--bg);color:var(--t2)}
 .sb-toggle svg{width:18px;height:18px}
+
+/* Chat top bar (logo area when sidebar collapsed) */
+.chat-topbar{display:none;align-items:center;padding:14px 20px 8px;flex:0 0 auto;background:var(--white);position:relative;z-index:2}
+.chat-topbar::after{content:'';position:absolute;left:0;right:0;bottom:-28px;height:28px;background:linear-gradient(to bottom,var(--white),transparent);pointer-events:none}
+.chat-topbar img{height:26px;width:auto;user-select:none}
 
 /* ===== BODY ===== */
 #body{flex:1 1 0%;display:flex;flex-direction:row;overflow:hidden}
@@ -136,10 +141,10 @@ input,select,textarea{font-family:inherit;outline:none}
 /* Empty chat: center everything vertically */
 .pg-chat.empty .cmain{justify-content:center;padding-bottom:6vh}
 .pg-chat.empty .msgs{flex:0 0 auto;overflow:visible}
-.pg-chat.empty .wl{height:auto;padding:0 0 10px}
+.pg-chat.empty .wl{height:auto;padding:0 32px 10px}
 .pg-chat.empty .ina{flex:0 0 auto}
 .pg-chat.empty .inh{display:none}
-.pg-chat.empty .inw{max-width:780px}
+.pg-chat.empty .inw{max-width:800px}
 .pg-chat.empty .inb{border-radius:18px;box-shadow:var(--shadow-md);border:1px solid var(--border)}
 .pg-chat.empty .inr{padding:18px 16px 18px 22px;min-height:110px;align-items:flex-start}
 .pg-chat.empty .ita{min-height:70px;font-size:15px}
@@ -147,7 +152,7 @@ input,select,textarea{font-family:inherit;outline:none}
 .pg-chat.empty .wl-foot{display:block;margin-top:14px}
 
 /* Welcome screen */
-.wl{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-end;height:100%;padding:40px 28px 16px;max-width:780px;margin:0 auto;width:100%}
+.wl{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-end;height:100%;padding:40px 32px 16px;max-width:800px;margin:0 auto;width:100%}
 .wl-hero{display:flex;align-items:center;gap:16px}
 .wl-logo{width:64px;height:64px;border-radius:14px;overflow:hidden;flex:0 0 64px}
 .wl-logo img{width:100%;height:100%;object-fit:contain}
@@ -581,7 +586,7 @@ input,select,textarea{font-family:inherit;outline:none}
 <div id="body">
   <!-- SIDEBAR (always visible) -->
   <div class="hsb" id="hsb">
-    <div class="sb-brand"><img src="/asset/image/logo.png" alt="九天AlphaData"><span>九天AlphaData</span></div>
+    <div class="sb-brand"><img src="/asset/image/new_logo.png" alt="九天AlphaData"></div>
     <button class="new-chat-btn" id="bNew"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>发起新对话</button>
     <div class="hsh"><h3>历史对话</h3><div class="hsh-acts"><button class="sb" id="bClearAll" title="清空所有对话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button><button class="sb" id="bCollapse" title="收起侧栏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg></button></div></div>
     <div class="hsl" id="hsl"></div>
@@ -604,10 +609,10 @@ input,select,textarea{font-family:inherit;outline:none}
   <div class="pages">
     <!-- CHAT -->
     <div class="pg pg-chat" id="pgChat" data-on="1">
+      <div class="chat-topbar" id="chatTopbar"><img src="/asset/image/new_logo.png" alt="九天AlphaData"></div>
       <div class="cmain">
         <div class="msgs" id="msgs"><div class="wl" id="wl">
           <div class="wl-hero">
-            <div class="wl-logo"><img src="/asset/image/logo.png" alt="九天AlphaData"></div>
             <div class="wl-hero-text">
               <div class="wl-greeting-text">九天AlphaData</div>
               <div class="wl-headline" id="wlHL"><span class="wl-cursor"></span></div>
@@ -769,11 +774,12 @@ apopOverlay.addEventListener('click',function(){apop.classList.remove('open');ap
 document.addEventListener('click',function(e){if(!apop.contains(e.target)&&e.target!==apopOverlay&&!$('sbApi').contains(e.target)){apop.classList.remove('open');apopOverlay.classList.remove('open')}});
 
 /* Sidebar collapse/expand */
-var hsb=$('hsb'),bExpand=$('bExpand'),sbCollapsed=false;
+var hsb=$('hsb'),bExpand=$('bExpand'),chatTopbar=$('chatTopbar'),sbCollapsed=false;
 try{sbCollapsed=localStorage.getItem('ac_sb_col')==='1'}catch(e){}
 function setSB(col){
   sbCollapsed=col;hsb.classList.toggle('collapsed',col);
   bExpand.style.display=col?'flex':'none';
+  chatTopbar.style.display=col?'flex':'none';
   try{localStorage.setItem('ac_sb_col',col?'1':'0')}catch(e){}
 }
 setSB(sbCollapsed);
@@ -801,23 +807,15 @@ function ppToggle(open){
   if(open){
     ppSbWasOpen=!sbCollapsed;
     if(ppSbWasOpen)setSB(true);
-    bExpand.style.display='none';
     $('ppExpand').classList.remove('show');
   }else{
-    if(ppSbWasOpen){setSB(false)}else{bExpand.style.display=sbCollapsed?'flex':'none'}
+    if(ppSbWasOpen)setSB(false);
     ppSbWasOpen=false;
   }
 }
 var ppExpandBtn=$('ppExpand');
 $('ppClose').addEventListener('click',function(){ppToggle(false);ppUserClosed=true;_ppShowExpand()});
 ppExpandBtn.addEventListener('click',function(e){e.stopPropagation();ppUserClosed=false;ppToggle(true);ppExpandBtn.classList.remove('show')});
-document.addEventListener('click',function(e){
-  if(!ppIsOpen)return;
-  if(ppPanel.contains(e.target))return;
-  if(ppSummaryEl&&ppSummaryEl.contains(e.target))return;
-  if(ppExpandBtn.contains(e.target))return;
-  ppToggle(false);ppUserClosed=true;_ppShowExpand();
-});
 function _ppShowExpand(){if(_fbAvailable||Object.keys(ppAgents).length)ppExpandBtn.classList.add('show')}
 
 function ppRoute(bub,idx,ct,content){
@@ -1031,6 +1029,7 @@ function dC(id){var wasPending=_newConvPending&&aid===id;cvs=cvs.filter(function
 function lC(id){
   aid=id;sV();rH();switchPage('pgChat');
   var c=cC();if(!c)return;
+  _fbProbeAndOpen(c.session_id||c.id);
   msgs.innerHTML='';msgs.appendChild(wl);
   if(!c.messages.length&&!(strm&&streamConvId===id&&streamBubRow)){wl.style.display='';setEmpty(true);return}
   wl.style.display='none';setEmpty(false);

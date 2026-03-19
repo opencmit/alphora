@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl gcc g++ make cmake \
     libgomp1 libffi-dev \
     fonts-noto-cjk \
+    sshpass openssh-client rsync wget git jq zip unzip \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && npm config set registry https://registry.npmmirror.com \

@@ -224,7 +224,13 @@ class DockerConfig:
     # Security
     read_only_root: bool = False
     cap_drop: list = field(default_factory=lambda: ["ALL"])
-    cap_add: list = field(default_factory=lambda: ["CHOWN", "SETUID", "SETGID"])
+    cap_add: list = field(default_factory=lambda: [
+        "CHOWN", "SETUID", "SETGID",
+        "DAC_OVERRIDE",
+        "FOWNER",
+        "KILL",
+        "NET_BIND_SERVICE",
+    ])
     security_opt: list = field(default_factory=lambda: ["no-new-privileges:true"])
     
     # Volumes

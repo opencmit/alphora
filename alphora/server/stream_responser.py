@@ -115,7 +115,8 @@ class DataStreamer:
                     id=tc_data.get("id") or None,
                     function={"name": tc_data.get("name", "")},
                 )]
-                delta_kwargs["content"] = None
+                # delta_kwargs["content"] = None
+                delta_kwargs['content'] = tc_data.get("name", "")  # 260319修改 tool_call 为函数工具名称
             elif content_type == "tool_call_args":
                 tc_data = json.loads(content)
                 delta_kwargs["tool_calls"] = [ToolCallDelta(
@@ -123,7 +124,8 @@ class DataStreamer:
                     id=tc_data.get("id") or None,
                     function={"arguments": tc_data.get("arguments", "")},
                 )]
-                delta_kwargs["content"] = None
+                # delta_kwargs["content"] = None
+                delta_kwargs['content'] = tc_data.get("arguments", "")  # 260319 修改为工具的参数
             else:
                 delta_kwargs["content"] = content
 

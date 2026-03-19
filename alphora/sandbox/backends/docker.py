@@ -479,10 +479,10 @@ class DockerBackend(ExecutionBackend):
         raise ContainerError(self.container_name, "Container failed to become ready")
 
     def _init_workspace_dirs(self) -> None:
-        """Create standard workspace subdirectories (uploads, outputs)."""
+        """Create standard workspace subdirectories and fix ownership."""
         ws = self._container_workspace
         self._container.exec_run(
-            ["sh", "-c", f"mkdir -p {ws}/uploads {ws}/outputs"],
+            ["sh", "-c", f"mkdir -p {ws}/uploads {ws}/outputs && chown -R root:root {ws}"],
             user="root",
         )
 
@@ -715,6 +715,7 @@ class DockerBackend(ExecutionBackend):
         full_path = self._resolve_path(path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content, encoding="utf-8")
+        full_path.chmod(0o666)
 
     async def write_file_bytes(self, path: str, content: bytes) -> None:
         """Write bytes to file in container workspace"""
@@ -724,6 +725,7 @@ class DockerBackend(ExecutionBackend):
         full_path = self._resolve_path(path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_bytes(content)
+        full_path.chmod(0o666)
     
     async def delete_file(self, path: str) -> bool:
         """Delete file from container workspace"""
