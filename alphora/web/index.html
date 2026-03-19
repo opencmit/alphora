@@ -169,7 +169,7 @@ input,select,textarea{font-family:inherit;outline:none}
 @keyframes mi{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .mi{max-width:800px;margin:0 auto;padding:0 32px;display:flex;gap:0}
 .msg.user .mi{justify-content:flex-end}
-.msg.user .mb{color:var(--t1);padding:10px 16px;max-width:33%;word-break:break-word;font-size:14px;line-height:1.7;background:var(--bg);border-radius:18px 18px 4px 18px;width:fit-content;margin-left:auto;flex:0 1 auto}
+.msg.user .mb{color:var(--t1);padding:10px 16px;max-width:60%;word-break:break-word;font-size:14px;line-height:1.7;background:var(--bg);border-radius:18px 18px 4px 18px;width:fit-content;margin-left:auto;flex:0 1 auto}
 .msg.assistant .mi{align-items:flex-start}
 .mav{display:none}
 .mb{flex:1 1 0%;min-width:0}
@@ -1257,7 +1257,7 @@ function doSSE(url,opts,bub,bks,dbg){
     if(!r.ok)throw new Error('HTTP '+r.status);var rd=r.body.getReader(),dc=new TextDecoder(),bf='';
     function pump(){return rd.read().then(function(res){if(res.done)return;bf+=dc.decode(res.value,{stream:true});var ls=bf.split('\n');bf=ls.pop();
       for(var i=0;i<ls.length;i++){var l=ls[i].trim();if(!l)continue;dbg.response.raw_lines.push(l);if(l.indexOf('data: ')!==0)continue;var d=l.slice(6);if(d==='[DONE]'){dbg.response.parsed_events.push({event:'DONE'});return}
-        try{var obj=JSON.parse(d);dbg.response.parsed_events.push(obj);var ch=obj.choices[0];if(!ch)continue;var dt=ch.delta||{};var ct=dt.content_type||'text';if(ch.finish_reason)continue;if(dt.content){if(ct==='tool_call'){try{var _tn=JSON.parse(dt.content);bks._toolName=_tn.name||dt.content||''}catch(e){bks._toolName=dt.content||''}}var pm=ct.match(/^parallel_([^:]+):(.+)$/);if(pm){if(bks._ppGap){ppCleanup();ppNewBatch();bks._ppGap=false}ppRoute(bub,pm[1],pm[2],dt.content)}else{if(Object.keys(ppAgents).length)bks._ppGap=true;var bi=gB(bub,ct,bks);pC(bi,dt.content,true)}}}catch(e){dbg.response.parsed_events.push({parse_error:e.message,raw:d})}}return pump()})}return pump()});
+        try{var obj=JSON.parse(d);dbg.response.parsed_events.push(obj);var ch=obj.choices[0];if(!ch)continue;var dt=ch.delta||{};var ct=dt.content_type||'text';if(ch.finish_reason)continue;if(ct==='parallel_batch_start'){if(Object.keys(ppAgents).length){ppCleanup();ppNewBatch()}bks._ppGap=false;continue}if(dt.content){if(ct==='tool_call'){try{var _tn=JSON.parse(dt.content);bks._toolName=_tn.name||dt.content||''}catch(e){bks._toolName=dt.content||''}}var pm=ct.match(/^parallel_([^:]+):(.+)$/);if(pm){if(bks._ppGap){ppCleanup();ppNewBatch();bks._ppGap=false}ppRoute(bub,pm[1],pm[2],dt.content)}else{if(Object.keys(ppAgents).length)bks._ppGap=true;var bi=gB(bub,ct,bks);pC(bi,dt.content,true)}}}catch(e){dbg.response.parsed_events.push({parse_error:e.message,raw:d})}}return pump()})}return pump()});
 }
 function doJSON(url,opts,bub,bks,dbg){
   return fetch(url,opts).then(function(r){
@@ -1267,7 +1267,7 @@ function doJSON(url,opts,bub,bks,dbg){
     dbg.response.raw_body=txt;
     var data;try{data=JSON.parse(txt)}catch(e){throw new Error('Invalid JSON: '+e.message)}
     dbg.response.parsed_body=data;
-    var ch=data.choices?data.choices[0]:null;if(!ch)return;var ct=(ch.delta?ch.delta.content_type:null)||'text';var cn=(ch.delta?ch.delta.content:null)||(ch.message?ch.message.content:null)||'';if(ct==='tool_call'){try{var _tn=JSON.parse(cn);bks._toolName=_tn.name||cn||''}catch(e){bks._toolName=cn||''}}var pm=ct.match(/^parallel_([^:]+):(.+)$/);if(pm){if(bks._ppGap){ppCleanup();ppNewBatch();bks._ppGap=false}ppRoute(bub,pm[1],pm[2],cn)}else{if(Object.keys(ppAgents).length)bks._ppGap=true;var bi=gB(bub,ct,bks);pC(bi,cn,false)}});
+    var ch=data.choices?data.choices[0]:null;if(!ch)return;var ct=(ch.delta?ch.delta.content_type:null)||'text';var cn=(ch.delta?ch.delta.content:null)||(ch.message?ch.message.content:null)||'';if(ct==='parallel_batch_start'){if(Object.keys(ppAgents).length){ppCleanup();ppNewBatch()}bks._ppGap=false;return}if(ct==='tool_call'){try{var _tn=JSON.parse(cn);bks._toolName=_tn.name||cn||''}catch(e){bks._toolName=cn||''}}var pm=ct.match(/^parallel_([^:]+):(.+)$/);if(pm){if(bks._ppGap){ppCleanup();ppNewBatch();bks._ppGap=false}ppRoute(bub,pm[1],pm[2],cn)}else{if(Object.keys(ppAgents).length)bks._ppGap=true;var bi=gB(bub,ct,bks);pC(bi,cn,false)}});
 }
 
 /* Export */

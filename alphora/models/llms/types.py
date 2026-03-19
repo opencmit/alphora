@@ -278,6 +278,33 @@ class ToolCall(list):
         else:
             return ""
 
+    def __eq__(self, other):
+        """语义对比：忽略自动生成的 id，只比较函数名称、参数和 content"""
+        if not isinstance(other, ToolCall):
+            return NotImplemented
+        if len(self) != len(other):
+            return False
+        if self.content != other.content:
+            return False
+        for a, b in zip(self, other):
+            func_a = a.get("function", {})
+            func_b = b.get("function", {})
+            if func_a.get("name") != func_b.get("name"):
+                return False
+            args_a = func_a.get("arguments", "{}")
+            args_b = func_b.get("arguments", "{}")
+            try:
+                parsed_a = json.loads(args_a) if isinstance(args_a, str) else args_a
+            except (json.JSONDecodeError, TypeError):
+                parsed_a = args_a
+            try:
+                parsed_b = json.loads(args_b) if isinstance(args_b, str) else args_b
+            except (json.JSONDecodeError, TypeError):
+                parsed_b = args_b
+            if parsed_a != parsed_b:
+                return False
+        return True
+
     def __bool__(self):
         """
         布尔判断：有工具调用或有内容时为 True

@@ -397,6 +397,9 @@ class BaseAgent(object):
         if cli_streamer is not None:
             cli_streamer.start()
 
+        if effective_callback and hasattr(effective_callback, 'send_data'):
+            await effective_callback.send_data("parallel_batch_start", str(len(tasks)))
+
         try:
             coros = [agent.run(task=query) for agent, query in tasks]
             if timeout is not None:
