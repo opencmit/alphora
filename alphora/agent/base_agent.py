@@ -385,7 +385,10 @@ class BaseAgent(object):
             effective_callback = cli_streamer
 
         for i, (agent, _) in enumerate(tasks):
-            wrapped = _PrefixedCallback(effective_callback, f"parallel_{i}")
+            # 用随机编码替代
+            subagent_id = str(uuid4())[-8:]
+            wrapped = _PrefixedCallback(effective_callback, f"parallel_{subagent_id}")
+            # wrapped = _PrefixedCallback(effective_callback, f"parallel_{i}")
             agent.callback = wrapped
             agent.stream = Stream(callback=wrapped)
             if hasattr(agent, '_prompt') and agent._prompt:
