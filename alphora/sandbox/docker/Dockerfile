@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fontconfig \
     libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 shared-mime-info \
     graphviz \
+    pandoc binutils \
     tree file bc sqlite3 procps \
     xz-utils bzip2 ca-certificates \
     iputils-ping dnsutils net-tools \
