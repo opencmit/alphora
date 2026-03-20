@@ -61,6 +61,7 @@ var _available = false;
 var _uploading = false;
 var _uploadInput = null;
 var _onUploadDone = null;
+var _backBtn = null;
 
 function _escape(s) {
   var d = document.createElement('div');
@@ -581,6 +582,22 @@ function _setUploadBtnState(busy) {
   btn.style.opacity = busy ? '0.5' : '';
 }
 
+function _initToolbarBack() {
+  if (!_toolbarEl) return;
+  var btn = document.createElement('button');
+  btn.className = 'fb-back';
+  btn.title = '返回上级目录';
+  btn.innerHTML = SVG_BACK;
+  btn.style.display = 'none';
+  _toolbarEl.insertBefore(btn, _toolbarEl.firstChild);
+  btn.addEventListener('click', function() { load(_parentDir(_cwd)); });
+  _backBtn = btn;
+}
+
+function _updateBackBtn() {
+  if (_backBtn) _backBtn.style.display = _cwd === '/' ? 'none' : '';
+}
+
 function _initToolbarUpload() {
   if (!_toolbarEl) return;
 
@@ -595,7 +612,7 @@ function _initToolbarUpload() {
   btn.className = 'fb-upload';
   btn.title = '上传文件';
   btn.innerHTML = SVG_UPLOAD;
-  _toolbarEl.insertBefore(btn, _toolbarEl.firstChild);
+  _toolbarEl.insertBefore(btn, _backBtn ? _backBtn.nextSibling : _toolbarEl.firstChild);
 
   btn.addEventListener('click', function() { input.click(); });
   input.addEventListener('change', function() {
@@ -633,6 +650,7 @@ function init(els) {
   _listEl = els.list;
   _breadEl = els.bread;
   _toolbarEl = els.toolbar;
+  _initToolbarBack();
   _initToolbarUpload();
   _initDragDrop();
 }
@@ -649,6 +667,7 @@ function load(dir) {
   dir = dir || '/';
   _cwd = dir;
   _renderBread(dir);
+  _updateBackBtn();
   if (!_endpoint) {
     if (_listEl) _listEl.innerHTML = '<div class="fb-empty">未配置 API 地址</div>';
     return Promise.resolve(false);

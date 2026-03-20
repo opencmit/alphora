@@ -337,6 +337,7 @@ input,select,textarea{font-family:inherit;outline:none}
 .fb-meta{font-size:11px;color:var(--t4);margin-top:1px;letter-spacing:.01em}
 .fb-dl{background:none;border:none;color:var(--t4);cursor:pointer;padding:4px;border-radius:4px;transition:all .15s;flex:0 0 auto;display:flex;align-items:center;justify-content:center}.fb-dl:hover{color:var(--accent);background:var(--bg)}
 .fb-dl svg{width:14px;height:14px}
+.fb-back{background:none;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;color:var(--t3);transition:all .15s;display:flex;align-items:center;justify-content:center}.fb-back:hover{color:var(--accent);background:var(--bg)}.fb-back svg{display:block;width:14px;height:14px}
 .fb-upload{background:none;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;color:var(--t3);transition:all .15s;display:flex;align-items:center;justify-content:center;margin-right:auto}.fb-upload:hover{color:var(--accent);background:var(--bg)}
 .fb-upload svg{display:block;width:14px;height:14px}
 .fb-dragover{outline:2px dashed var(--accent);outline-offset:-4px;background:rgba(99,102,241,.04);border-radius:8px}
@@ -491,6 +492,30 @@ input,select,textarea{font-family:inherit;outline:none}
 .cfg-modal-acts .btn-go{color:#fff;background:linear-gradient(135deg,var(--accent),#a855f7);box-shadow:0 2px 8px rgba(99,102,241,.3)}
 .cfg-modal-acts .btn-go:hover{box-shadow:0 4px 12px rgba(99,102,241,.4);transform:translateY(-1px)}
 
+/* Username modal */
+.user-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:399;display:none;animation:fadeIn .2s ease}
+.user-modal-overlay.open{display:flex;align-items:center;justify-content:center}
+.user-modal{background:var(--white);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-lg);padding:28px 26px 22px;width:400px;max-width:calc(100vw - 32px);animation:apopIn .25s ease}
+.user-modal-icon{width:48px;height:48px;border-radius:14px;background:var(--abg);display:flex;align-items:center;justify-content:center;margin-bottom:16px}
+.user-modal-icon svg{width:24px;height:24px;color:var(--accent)}
+.user-modal h3{font-size:16px;font-weight:700;color:var(--t1);margin-bottom:6px}
+.user-modal p{font-size:13px;color:var(--t3);line-height:1.7;margin-bottom:16px}
+.user-modal input{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;color:var(--t1);background:var(--bg);transition:border-color .2s}
+.user-modal input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+.user-modal input::placeholder{color:var(--t4)}
+.user-modal-acts{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+.user-modal-acts button{padding:8px 20px;border-radius:10px;font-size:13px;font-weight:600;transition:all .2s ease}
+.user-modal-acts .btn-go{color:#fff;background:linear-gradient(135deg,var(--accent),#a855f7);box-shadow:0 2px 8px rgba(99,102,241,.3)}
+.user-modal-acts .btn-go:hover{box-shadow:0 4px 12px rgba(99,102,241,.4);transform:translateY(-1px)}
+.user-modal-acts .btn-go:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.sb-user{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:10px;font-size:13px;color:var(--t2);cursor:pointer;transition:all .2s ease;margin-bottom:2px}
+.sb-user:hover{background:rgba(0,0,0,.04);color:var(--t1)}
+[data-theme="dark"] .sb-user:hover{background:rgba(255,255,255,.06);color:var(--t1)}
+.sb-user svg{width:16px;height:16px;opacity:.7;flex:0 0 16px}
+.sb-user-name{flex:1 1 0%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-user-edit{font-size:11px;color:var(--t4);padding:2px 6px;border-radius:4px;transition:all .15s}
+.sb-user:hover .sb-user-edit{color:var(--accent)}
+
 /* Docs button (top-right) */
 .docs-btn{position:fixed;top:14px;right:14px;z-index:110;display:flex;align-items:center;gap:6px;padding:0;border:none;background:none;box-shadow:none;font-size:13px;font-weight:500;color:var(--t2);transition:color .2s ease;cursor:pointer}
 .docs-btn:hover{color:var(--accent)}
@@ -555,6 +580,18 @@ input,select,textarea{font-family:inherit;outline:none}
 <div id="nav"></div>
 <button class="sb-toggle" id="bExpand" title="展开侧栏" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
 <button class="docs-btn" id="docsBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>文档中心</button>
+<!-- Username modal -->
+<div class="user-modal-overlay" id="userModal">
+  <div class="user-modal">
+    <div class="user-modal-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
+    <h3>设置用户名</h3>
+    <p>请输入您的用户名，用于标识您的身份。设置后将保存在浏览器中。</p>
+    <input type="text" id="userNameInput" placeholder="请输入用户名" maxlength="50" autocomplete="off">
+    <div class="user-modal-acts">
+      <button class="btn-go" id="userNameConfirm">确认</button>
+    </div>
+  </div>
+</div>
 <!-- Config prompt modal -->
 <div class="cfg-modal-overlay" id="cfgModal">
   <div class="cfg-modal">
@@ -591,6 +628,7 @@ input,select,textarea{font-family:inherit;outline:none}
     <div class="hsh"><h3>历史对话</h3><div class="hsh-acts"><button class="sb" id="bClearAll" title="清空所有对话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button><button class="sb" id="bCollapse" title="收起侧栏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg></button></div></div>
     <div class="hsl" id="hsl"></div>
     <div class="sb-footer">
+      <div class="sb-user" id="sbUser" title="点击修改用户名"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span class="sb-user-name" id="sbUserName">未设置</span><span class="sb-user-edit">修改</span></div>
       <div class="sb-menu" id="sbMenu">
         <div class="sb-fi" id="sbApi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>API 设置</div>
         <div class="sb-fi" id="sbRenderer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>渲染器</div>
@@ -738,6 +776,22 @@ cfgHost.addEventListener('input',saveApiCfg);
 cfgPath.addEventListener('input',saveApiCfg);
 cfgModel.addEventListener('input',saveApiCfg);
 cfgStream.addEventListener('change',saveApiCfg);
+
+/* Cookie helpers & username management */
+function setCookie(name,val,days){var d=new Date();d.setTime(d.getTime()+(days||365)*864e5);document.cookie=name+'='+encodeURIComponent(val)+';expires='+d.toUTCString()+';path=/;SameSite=Lax'}
+function getCookie(name){var m=document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));return m?decodeURIComponent(m[1]):''}
+var _acUser=getCookie('ac_user')||'';
+var userModal=$('userModal'),userNameInput=$('userNameInput'),userNameConfirm=$('userNameConfirm'),sbUserName=$('sbUserName');
+function updateUserDisplay(){sbUserName.textContent=_acUser||'未设置'}
+updateUserDisplay();
+function showUserModal(){userModal.classList.add('open');userNameInput.value=_acUser;setTimeout(function(){userNameInput.focus()},100);userNameConfirm.disabled=!userNameInput.value.trim()}
+function hideUserModal(){userModal.classList.remove('open')}
+function confirmUserName(){var v=userNameInput.value.trim();if(!v)return;_acUser=v;setCookie('ac_user',v,365);updateUserDisplay();hideUserModal()}
+userNameConfirm.addEventListener('click',confirmUserName);
+userNameInput.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();confirmUserName()}});
+userNameInput.addEventListener('input',function(){userNameConfirm.disabled=!userNameInput.value.trim()});
+$('sbUser').addEventListener('click',showUserModal);
+if(!_acUser)setTimeout(showUserModal,600);
 
 function toast(m,t){var e=document.createElement('div');e.className='to'+(t==='ok'?' ok':'')+(t==='err'?' err':'');e.innerHTML=(t==='ok'?'<span class="to-icon">✓</span>':t==='err'?'<span class="to-icon">✕</span>':'')+E(m);$('tw').appendChild(e);setTimeout(function(){e.style.opacity='0';e.style.transition='opacity .25s';setTimeout(function(){e.remove()},250)},2800)}
 
@@ -1220,7 +1274,7 @@ function send(){
   var dbg={timestamp:new Date().toISOString(),request:{},response:{},duration_ms:0};
   var t0=performance.now();
   function doReq(){
-    var body=JSON.stringify({model:mod,messages:am,stream:st,session_id:sid});
+    var body=JSON.stringify({model:mod,messages:am,stream:st,session_id:sid,user:_acUser||undefined});
     var opts={method:'POST',headers:{'Content-Type':'application/json'},body:body,signal:abortCtrl.signal};
     dbg.request={url:url,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.parse(body)};
     return (st?doSSE(url,opts,bub,bks,dbg):doJSON(url,opts,bub,bks,dbg)).catch(function(err){

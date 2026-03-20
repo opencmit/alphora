@@ -39,15 +39,40 @@ class FileDownloadRequest(BaseModel):
     path: str
 
 
+def _find_session_dir(base: Path, session_id: str) -> Path | None:
+    """在 base 及其一级子目录中查找 session_id 目录。
+
+    支持两种目录结构：
+    - 扁平结构：{base}/{session_id}/
+    - 多用户结构：{base}/{user_id}/{session_id}/
+    """
+    direct = base / session_id
+    if direct.is_dir():
+        return direct.resolve()
+    try:
+        for sub in base.iterdir():
+            if sub.is_dir() and not sub.name.startswith('.'):
+                candidate = sub / session_id
+                if candidate.is_dir():
+                    return candidate.resolve()
+    except (PermissionError, OSError):
+        pass
+    return None
+
+
 def _resolve_root(base: Path, session_id: str) -> Path:
     if session_id:
-        return (base / session_id).resolve()
+        found = _find_session_dir(base, session_id)
+        return found if found else (base / session_id).resolve()
     return base.resolve()
 
 
 def _resolve_root_or_create(base: Path, session_id: str) -> Path:
     """Like _resolve_root but creates the session directory if it doesn't exist."""
     if session_id:
+        found = _find_session_dir(base, session_id)
+        if found:
+            return found
         session_dir = base / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
         return session_dir.resolve()
