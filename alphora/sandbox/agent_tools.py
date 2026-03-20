@@ -11,6 +11,7 @@ import json
 from alphora.sandbox.tools.editor.file_editor import sandbox_file_editor
 from alphora.sandbox.tools.inspector import file_inspector
 from alphora.sandbox.tools.analyzer import code_analyzer
+from alphora.sandbox.tools.exporter import markdown_to_pdf as _markdown_to_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ class SandboxTools:
         文件编辑:  edit_file（增量搜索替换 或 全量重写）
         文件检查:  inspect_file（查看/搜索/大纲/对比/元信息，支持 Excel/PDF/PPT）
         代码分析:  analyze_code（lint 检查与自动修复）
+        文件导出:  markdown_to_pdf（Markdown 报告转 PDF，自动内嵌本地图片）
         包管理:    install_pip_package, install_pip_packages, uninstall_pip_package, list_installed_packages, check_package_installed
         环境变量:  set_environment_variable, get_environment_variable
         沙箱管理:  get_sandbox_status, get_resource_usage, reset_sandbox
@@ -70,6 +72,7 @@ class SandboxTools:
             "get_sandbox_status": self.get_sandbox_status,
             "get_resource_usage": self.get_resource_usage,
             "reset_sandbox": self.reset_sandbox,
+            "markdown_to_pdf": self.markdown_to_pdf,
         }
     
     @property
@@ -816,6 +819,80 @@ class SandboxTools:
         try:
             await self._sandbox.restart()
             return self._success("Sandbox reset successfully")
+        except Exception as e:
+            return self._error(str(e))
+
+    # ━━ 导出工具 ━━
+
+    async def markdown_to_pdf(
+        self,
+        markdown_path: str,
+        output_path: str = "",
+        title: str = "",
+        page_size: str = "A4",
+        timeout: int = 120,
+    ) -> Dict[str, Any]:
+        """
+        将 Markdown 报告转换为 PDF 文件，自动内嵌所有本地图片。
+
+        Markdown 报告中引用的沙箱内图片（如 matplotlib 生成的图表、截图等）
+        会被自动读取并以 base64 编码嵌入 PDF，确保用户下载后可离线查看完整报告。
+
+        ━━ 适用场景 ━━
+
+        - 数据分析报告：包含 matplotlib/seaborn 等生成的图表
+        - 研究报告：包含多张插图和表格
+        - 任何需要将沙箱内 Markdown + 图片打包为单一可分发文件的场景
+
+        ━━ 参数说明 ━━
+
+            markdown_path: Markdown 文件路径（沙箱内路径），如 "report/analysis.md"
+            output_path:   PDF 输出路径，默认与 Markdown 文件同名同目录
+                           例如 "report/analysis.md" → "report/analysis.pdf"
+            title:         PDF 标题（显示在文档属性中），默认从 Markdown 的 H1 标题自动提取
+            page_size:     页面大小，支持 "A4"（默认）/ "A3" / "Letter" / "Legal"
+            timeout:       转换超时时间（秒），默认 120。图片较多时可适当增大
+
+        ━━ 返回结构 ━━
+
+            success:         bool，是否转换成功
+            output:          str，结果摘要信息
+            pdf_path:        str，生成的 PDF 文件路径
+            pdf_size:        int，PDF 文件大小（字节）
+            pdf_size_human:  str，PDF 文件大小（可读格式，如 "2.3 MB"）
+            images_embedded: int，成功内嵌的图片数量
+            title:           str，PDF 标题
+            error:           str，错误信息（成功时为空）
+
+        ━━ 典型用法 ━━
+
+        # 将分析报告转为 PDF（自动同目录输出）
+        markdown_to_pdf("report/analysis.md")
+
+        # 指定输出路径和标题
+        markdown_to_pdf("report/analysis.md", output_path="outputs/final_report.pdf", title="Q4 数据分析报告")
+
+        # 使用 Letter 纸张大小
+        markdown_to_pdf("report/analysis.md", page_size="Letter")
+        """
+        try:
+            result = await _markdown_to_pdf(
+                sandbox=self._sandbox,
+                md_path=markdown_path,
+                output_path=output_path,
+                title=title,
+                page_size=page_size,
+                timeout=timeout,
+            )
+            if result.get("success"):
+                pdf_path = result.get("pdf_path", "")
+                size_human = result.get("pdf_size_human", "")
+                images = result.get("images_embedded", 0)
+                result["output"] = (
+                    f"PDF saved: {pdf_path} ({size_human}, "
+                    f"{images} image(s) embedded)"
+                )
+            return result
         except Exception as e:
             return self._error(str(e))
 

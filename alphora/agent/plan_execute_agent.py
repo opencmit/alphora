@@ -349,7 +349,7 @@ class PlanExecuteAgent(BaseAgent):
         try:
             from alphora.sandbox import SandboxTools
             sandbox_tools = SandboxTools(sandbox)
-            for t in [sandbox_tools.save_file, sandbox_tools.list_files, sandbox_tools.run_shell_command]:
+            for t in [sandbox_tools.save_file, sandbox_tools.list_files, sandbox_tools.run_shell_command, sandbox_tools.markdown_to_pdf]:
                 try:
                     self._registry.register(t)
                 except Exception:

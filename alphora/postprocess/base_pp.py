@@ -6,26 +6,47 @@
 例如
 Translator = Translator >> BadResponseFilter(bad_words=['xx'])
 Translator = Translator >> StreamPatternMatch(pattern='<a>.*?</a>')
+
+也支持对 ToolCall 结果的后处理:
+pp = ToolCallFilterPP(include_tools=["get_weather"])
+result = prompt.call(query="...", tools=tools, postprocessor=pp)
 """
 
-from abc import ABC, abstractmethod
+from __future__ import annotations
+
+from abc import ABC
+from typing import TYPE_CHECKING
+
 from alphora.models.llms.stream_helper import BaseGenerator, GeneratorOutput
+
+if TYPE_CHECKING:
+    from alphora.models.llms.types import ToolCall
 
 
 class BasePostProcessor(ABC):
-    """后处理器基类，定义了后处理器的基本接口"""
+    """后处理器基类，定义了后处理器的基本接口。
 
-    @abstractmethod
+    子类可按需覆盖:
+    - ``process``            处理流式 Generator 输出
+    - ``process_tool_call``  处理 ToolCall 结果（工具调用场景）
+
+    两者默认均为透传，子类只需覆盖自己关心的方法即可。
+    """
+
     def process(self, generator: BaseGenerator[GeneratorOutput]) -> BaseGenerator[GeneratorOutput]:
-        """
-        处理单个GeneratorOutput对象
-        返回处理后的对象，如果返回None则表示过滤掉该输出
-        """
-        pass
+        """处理流式 Generator 输出，默认透传。"""
+        return generator
 
-    def __call__(self, generator: BaseGenerator) -> BaseGenerator:
-        """使后处理器实例可以作为函数调用，用于流式处理生成器"""
-        return self.process(generator)
+    def process_tool_call(self, tool_call: "ToolCall") -> "ToolCall":
+        """处理 ToolCall 结果，默认透传。"""
+        return tool_call
+
+    def __call__(self, generator_or_tool_call):
+        """使后处理器实例可以作为函数调用，自动识别输入类型。"""
+        from alphora.models.llms.types import ToolCall
+        if isinstance(generator_or_tool_call, ToolCall):
+            return self.process_tool_call(generator_or_tool_call)
+        return self.process(generator_or_tool_call)
 
     def __rshift__(self, other: "BasePostProcessor") -> "BasePostProcessor":
         if not isinstance(other, BasePostProcessor):
@@ -36,9 +57,12 @@ class BasePostProcessor(ABC):
 
         class ChainedPostProcessor(BasePostProcessor):
             def process(self, generator: BaseGenerator[GeneratorOutput]) -> BaseGenerator[GeneratorOutput]:
-                # 先用 left 处理，再用 right 处理结果
                 intermediate = left.process(generator)
                 return right.process(intermediate)
+
+            def process_tool_call(self, tool_call: "ToolCall") -> "ToolCall":
+                intermediate = left.process_tool_call(tool_call)
+                return right.process_tool_call(intermediate)
 
         return ChainedPostProcessor()
     #

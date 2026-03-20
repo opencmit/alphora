@@ -2,5 +2,6 @@ from alphora.postprocess.replace import ReplacePP
 from alphora.postprocess.json_key_extractor import JsonKeyExtractorPP
 from alphora.postprocess.dynamic_type import DynamicTypePP
 from alphora.postprocess.filter import FilterPP
-
-
+from alphora.postprocess.tool_call_filter import ToolCallFilterPP
+from alphora.postprocess.tool_call_arg_extractor import ToolCallArgExtractorPP
+from alphora.postprocess.tool_call_arg_stream import ToolCallArgStreamPP

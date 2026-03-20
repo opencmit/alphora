@@ -1,12 +1,15 @@
 # 基础镜像
 FROM python:3.11-slim AS base
 
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
-    PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
     WORKSPACE_DIR=/mnt/workspace \
     SKILLS_DIR=/mnt/skills \
     OUTPUT_DIR=/output \
@@ -20,10 +23,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 libffi-dev \
     fonts-noto-cjk \
     fontconfig \
+    libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 shared-mime-info \
+    graphviz \
+    tree file bc sqlite3 procps \
+    xz-utils bzip2 ca-certificates \
+    iputils-ping dnsutils net-tools \
+    default-mysql-client postgresql-client \
     sshpass openssh-client rsync wget git jq zip unzip \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && npm config set registry https://registry.npmmirror.com \
+    && npm install -g yarn pnpm typescript \
     && apt-get purge -y gcc g++ make cmake \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
@@ -53,21 +63,14 @@ COPY SourceHanSansCN-Regular.otf /usr/share/fonts/chinese/
 RUN fc-cache -fv
 
 # 3. 注入 sitecustomize（让 matplotlib 自动识别字体 family）
-RUN python - <<'PY'
-import site, os
-
-site_packages = site.getsitepackages()[0]
-path = os.path.join(site_packages, "sitecustomize.py")
-
-with open(path, "w") as f:
-    f.write("""
-import matplotlib.font_manager as fm
-
-try:
-    fm.fontManager.addfont("/usr/share/fonts/chinese/SourceHanSansCN-Regular.otf")
-except Exception:
-    pass
-""")
-PY
+RUN SITE_PKG=$(python -c "import site; print(site.getsitepackages()[0])") && \
+    printf '%s\n' \
+      'import matplotlib.font_manager as fm' \
+      '' \
+      'try:' \
+      '    fm.fontManager.addfont("/usr/share/fonts/chinese/SourceHanSansCN-Regular.otf")' \
+      'except Exception:' \
+      '    pass' \
+      > "$SITE_PKG/sitecustomize.py"
 
 # ====== ↑↑↑ 中文字体固化 ↑↑↑ ======

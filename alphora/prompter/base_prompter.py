@@ -574,6 +574,18 @@ class BasePrompt:
             f"Expected HistoryPayload, got {type(history).__name__}. {hint}"
         )
 
+    @staticmethod
+    def _apply_tool_call_postprocessor(response, postprocessor):
+        """对 ToolCall 结果应用 postprocessor 的 process_tool_call 方法。"""
+        if postprocessor is None:
+            return response
+        if isinstance(postprocessor, list):
+            for p in postprocessor:
+                response = p.process_tool_call(response)
+        else:
+            response = postprocessor.process_tool_call(response)
+        return response
+
     def call(self,
              query: str = None,
              is_stream: bool = False,
@@ -664,6 +676,7 @@ class BasePrompt:
             response = self.llm.get_non_stream_response(
                 message=msg_payload, tools=tools, prompt_id=self.prompt_id
             )
+            response = self._apply_tool_call_postprocessor(response, postprocessor)
             after_ctx = HookContext(
                 event=HookEvent.LLM_AFTER_CALL,
                 component="llm",
@@ -769,6 +782,7 @@ class BasePrompt:
                     else:
                         raw_content = output_str
                     response = ToolCall(tool_calls=collected_tools, content=raw_content)
+                    response = self._apply_tool_call_postprocessor(response, postprocessor)
                     after_ctx = HookContext(
                         event=HookEvent.LLM_AFTER_CALL,
                         component="llm",
@@ -927,6 +941,7 @@ class BasePrompt:
             tool_resp = await self.llm.aget_non_stream_response(
                 message=msg_payload, system_prompt=None, tools=tools, prompt_id=self.prompt_id
             )
+            tool_resp = self._apply_tool_call_postprocessor(tool_resp, postprocessor)
             after_ctx = HookContext(
                 event=HookEvent.LLM_AFTER_CALL,
                 component="llm",
@@ -1052,6 +1067,7 @@ class BasePrompt:
                     else:
                         raw_content = output_str
                     response = ToolCall(tool_calls=collected_tools, content=raw_content)
+                    response = self._apply_tool_call_postprocessor(response, postprocessor)
                     after_ctx = HookContext(
                         event=HookEvent.LLM_AFTER_CALL,
                         component="llm",

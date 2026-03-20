@@ -135,6 +135,7 @@ from alphora.sandbox.tools import (
     file_inspector,
     FileContent,
     code_analyzer,
+    markdown_to_pdf,
 )
 
 __all__ = [
@@ -199,4 +200,5 @@ __all__ = [
     "file_inspector",
     "FileContent",
     "code_analyzer",
+    "markdown_to_pdf",
 ]

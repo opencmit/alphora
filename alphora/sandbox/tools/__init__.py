@@ -10,6 +10,7 @@ from alphora.sandbox.tools.editor import (
 from alphora.sandbox.tools.inspector import file_inspector
 from alphora.sandbox.tools.inspector.readers import FileContent
 from alphora.sandbox.tools.analyzer import code_analyzer
+from alphora.sandbox.tools.exporter import markdown_to_pdf
 
 __all__ = [
     "file_editor",
@@ -21,4 +22,5 @@ __all__ = [
     "file_inspector",
     "FileContent",
     "code_analyzer",
+    "markdown_to_pdf",
 ]

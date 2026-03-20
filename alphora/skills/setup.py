@@ -103,7 +103,7 @@ def setup_skills(
         try:
             from alphora.sandbox import SandboxTools
             sbt = SandboxTools(sandbox)
-            sandbox_methods = [sbt.run_shell_command, sbt.save_file, sbt.list_files]
+            sandbox_methods = [sbt.run_shell_command, sbt.save_file, sbt.list_files, sbt.markdown_to_pdf]
             for m in sandbox_methods:
                 tools.append(Tool.from_function(m))
         except ImportError:

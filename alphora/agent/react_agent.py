@@ -135,6 +135,7 @@ class ReActAgent(BaseAgent):
         self._registry.register(self._sandbox_tools.save_file)
         self._registry.register(self._sandbox_tools.list_files)
         self._registry.register(self._sandbox_tools.run_shell_command)
+        self._registry.register(self._sandbox_tools.markdown_to_pdf)
         # self._registry.register(self._sandbox_tools.read_file)
 
     async def run(
