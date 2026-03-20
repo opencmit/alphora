@@ -99,8 +99,9 @@ def main():
 
     handler = lambda *args, **kw: Handler(*args, directory=str(DIR), **kw)
 
-    with socketserver.TCPServer((a.host, a.port), handler) as s:
+    with socketserver.ThreadingTCPServer((a.host, a.port), handler) as s:
         s.allow_reuse_address = True
+        s.daemon_threads = True
         url = f'http://{a.host}:{a.port}'
         display_url = f'http://localhost:{a.port}' if a.host in ('0.0.0.0', '') else url
         print(f'\n  九天AlphaData → {display_url}')

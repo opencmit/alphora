@@ -788,7 +788,7 @@ function showUserModal(){userModal.classList.add('open');userNameInput.value=_ac
 function hideUserModal(){userModal.classList.remove('open')}
 function confirmUserName(){var v=userNameInput.value.trim();if(!v)return;_acUser=v;setCookie('ac_user',v,365);updateUserDisplay();hideUserModal()}
 userNameConfirm.addEventListener('click',confirmUserName);
-userNameInput.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();confirmUserName()}});
+userNameInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.isComposing){e.preventDefault();confirmUserName()}});
 userNameInput.addEventListener('input',function(){userNameConfirm.disabled=!userNameInput.value.trim()});
 $('sbUser').addEventListener('click',showUserModal);
 if(!_acUser)setTimeout(showUserModal,600);
@@ -1347,7 +1347,7 @@ $('sbDebug').addEventListener('click',function(){
 });
 
 /* Input */
-uIn.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
+uIn.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send()}});
 uIn.addEventListener('input',function(){uIn.style.height='auto';uIn.style.height=Math.min(uIn.scrollHeight,180)+'px'});
 sBtn.addEventListener('click',function(){if(strm&&abortCtrl){abortCtrl.abort();return}send()});
 document.addEventListener('keydown',function(e){var m=e.metaKey||e.ctrlKey;if(m&&e.key==='k'){e.preventDefault();uIn.focus()}if(m&&e.key==='n'){e.preventDefault();nC()}});
