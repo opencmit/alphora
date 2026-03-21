@@ -47,12 +47,10 @@ result = await agent.run("Analyze sales.xlsx and find the top-performing regions
 </p>
 
 <p align="center">
-  <a href="https://github.com/user-attachments/assets/a3c0d366-cb94-49a1-a06f-f7b7a3db35f6E">
-    <img src="https://github.com/user-attachments/assets/a3c0d366-cb94-49a1-a06f-f7b7a3db35f6" width="600" alt="Alphora Demo: Data Analysis Agent">
-  </a>
+  <em>See it in action — a full data analysis workflow from upload to insight:</em>
 </p>
 
-<!-- Replace the links above with your actual GitHub video/thumbnail URLs after uploading. -->
+https://github.com/user-attachments/assets/a3c0d366-cb94-49a1-a06f-f7b7a3db35f6
 
 ## Installation
 
