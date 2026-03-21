@@ -1,26 +1,23 @@
-<h1 align="center">
-  <img src="asset/image/logo.png" width="70" style="vertical-align:middle; margin-right:8px;">
-  <span style="font-size:46px; vertical-align:middle;">Alphora</span>
-</h1>
+<p align="center">
+  <img src="asset/image/new_logo.png" width="360" alt="Alphora">
+</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.9+-blue.svg" alt="Python">
+  <img src="https://img.shields.io/badge/version-1.2.3-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Python-3.11+-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/License-Apache%202.0-green.svg" alt="License">
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome">
 </p>
 
 <p align="center">
-  <strong>A Production-Ready Framework for Building Composable AI Agents</strong>
-</p>
-
-<p align="center">
+  <strong>A Production-Ready Framework for Building Composable AI Agents</strong><br>
   Build powerful, modular, and maintainable AI agent applications with ease.
 </p>
 
 <p align="center">
-  <a href="docs/ARCHITECTURE.md">Docs</a> •
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#examples">Examples</a> •
+  <a href="docs/ARCHITECTURE.md">Docs</a> &nbsp;·&nbsp;
+  <a href="#quick-start">Quick Start</a> &nbsp;·&nbsp;
+  <a href="#examples">Examples</a> &nbsp;·&nbsp;
   <a href="README.cn.md">中文</a>
 </p>
 
@@ -31,23 +28,31 @@
 Alphora is a full-stack framework for building production AI agents. It provides everything you need — agent orchestration, tool execution, memory management, secure code sandbox, skills ecosystem, streaming, and deployment — all with an async-first, OpenAI-compatible design.
 
 ```python
-from alphora.agent import ReActAgent
+from alphora.agent import SkillAgent
 from alphora.models import OpenAILike
-from alphora.tools import tool
+from alphora.sandbox import Sandbox
 
-@tool
-def get_weather(city: str) -> str:
-    """Get current weather for a city."""
-    return f"Weather in {city}: 22°C, Sunny"
-
-agent = ReActAgent(
+agent = SkillAgent(
     llm=OpenAILike(model_name="gpt-4"),
-    tools=[get_weather],
-    system_prompt="You are a helpful assistant.",
+    skill_paths=["./skills"],
+    sandbox=Sandbox(runtime="docker"),
+    system_prompt="You are a data analyst. Explore data before coding.",
 )
 
-result = await agent.run("What's the weather in BeiJing?")
+result = await agent.run("Analyze sales.xlsx and find the top-performing regions.")
 ```
+
+<p align="center">
+  <em>See it in action — a full data analysis workflow from upload to insight:</em>
+</p>
+
+<p align="center">
+  <a href="https://github.com/user-attachments/assets/a3c0d366-cb94-49a1-a06f-f7b7a3db35f6E">
+    <img src="https://github.com/user-attachments/assets/a3c0d366-cb94-49a1-a06f-f7b7a3db35f6" width="600" alt="Alphora Demo: Data Analysis Agent">
+  </a>
+</p>
+
+<!-- Replace the links above with your actual GitHub video/thumbnail URLs after uploading. -->
 
 ## Installation
 
@@ -57,81 +62,50 @@ pip install alphora
 
 ---
 
+## Why Alphora?
+
+A quick comparison with popular agent frameworks:
+
+| Capability | Alphora | LangChain / LangGraph | Agno | CrewAI |
+|:-----------|:--------|:----------------------|:-----|:-------|
+| **Agent Orchestration** | ✅ ReAct, Plan-Execute, hierarchical derive | ✅ Graph-based StateGraph, most flexible | ✅ Team-based, 5 abstraction levels | ✅ Role-based crews |
+| **Tool System** | ✅ `@tool`, auto schema, parallel exec | ✅ `@tool` + 700+ integrations | ✅ `@tool` + Toolkit | ✅ `@tool` + delegation |
+| **Memory** | ✅ Processor pipeline, pin/tag, undo/redo | ✅ Multiple classes, Redis/Postgres | ✅ Auto session + unified DB | ⚠️ Basic short/long-term |
+| **Code Sandbox** | ✅ Built-in Local / Docker / Remote | ⚠️ Requires 3rd-party (E2B, etc.) | ❌ Not built-in | ❌ Not built-in |
+| **Typed Streaming** | ✅ SSE with `think`, `result`, `sql`, `chart` | ⚠️ SSE (plain text) | ⚠️ SSE (plain text) | ⚠️ SSE (plain text) |
+| **Hooks & Observability** | ✅ Unified hooks across all components | ⚠️ Callbacks + LangSmith (SaaS) | ⚠️ Basic metrics via AgentOS | ❌ Limited |
+| **Prompt Engine** | ✅ Jinja2, ParallelPrompt, auto continuation | ✅ Own templates, RunnableParallel | ⚠️ String / Jinja2 | ⚠️ String templates |
+| **One-Line Deploy** | ✅ `publish_agent_api()`, OpenAI-compatible | ✅ LangServe / LangGraph Platform | ✅ Built-in FastAPI routes | ✅ Built-in serve |
+| **Skills Ecosystem** | ✅ [agentskills.io](https://agentskills.io), 3-phase loading | ⚠️ Hub (community chains) | ❌ Not built-in | ❌ Not built-in |
+| **LLM Load Balancing** | ✅ Built-in round-robin / random | ⚠️ Via LangSmith routing | ❌ Not built-in | ❌ Not built-in |
+| **Multi-Model Support** | ✅ Any OpenAI-compatible API | ✅ 700+ model integrations | ✅ Multi-provider, ~3μs init | ✅ Multi-provider |
+
+**In short:** Alphora provides a self-contained, production-ready stack — especially strong in **built-in sandbox**, **full-lifecycle hooks**, and **typed streaming** — without requiring external SaaS or plugin sprawl.
+
+---
+
 ## Features
 
-### Agent System
-
-- **ReAct Loop** — Built-in reasoning-action loop with automatic tool orchestration, retry logic, and iteration control.
-- **Agent Derivation** — Child agents inherit LLM, memory, and config from parents. Build hierarchies that share context.
-- **Streaming First** — Native async streaming with OpenAI SSE format. Multiple content types: `char`, `think`, `result`, `sql`, `chart`.
+- **ReAct & Plan-Execute** — Built-in reasoning-action loops with automatic tool orchestration, retry logic, and iteration control. Plan first, then execute.
+- **Agent Derivation** — Child agents inherit LLM, memory, and config from parents via `derive()`. Build hierarchies that share context efficiently.
+- **Zero-Config Tools** — `@tool` decorator auto-generates OpenAI function calling schema from type hints and docstrings. Pydantic V2 validation, parallel execution, instance method support.
+- **Smart Memory** — Multi-session isolation with composable processor pipeline (`keep_last`, `token_budget`, `summarize`, etc.), pin/tag system, and undo/redo.
+- **Code Sandbox** — Run agent-generated code in Local / Docker / Remote Docker environments with file isolation, package management, and security policies.
+- **Skills Ecosystem** — [agentskills.io](https://agentskills.io) compatible. 3-phase progressive loading (metadata → instructions → resources) to optimize token budget.
+- **Typed Streaming** — Native async SSE with content types (`char`, `think`, `result`, `sql`, `chart`) so frontends can render each type differently.
+- **Prompt Engine** — Jinja2 templates, `ParallelPrompt` for concurrent execution, and auto long-text continuation to bypass token limits.
+- **Unified Hooks** — One event system across tools, memory, LLM, sandbox, and agent lifecycle. Fail-open by default, with priority, timeout, and error policy controls.
+- **Multi-Model Support** — Works with any OpenAI-compatible API (GPT, Claude, Qwen, DeepSeek, local models). Multimodal input (text, image, audio, video).
+- **LLM Load Balancing** — Combine multiple backends with `llm1 + llm2` for automatic round-robin / random load balancing and failover.
+- **Thinking Mode** — First-class support for reasoning models with separate thinking / content streams.
+- **One-Line Deploy** — `publish_agent_api(agent)` serves any agent as an OpenAI-compatible REST API with built-in session management and SSE streaming.
 - **Debug Tracing** — Built-in visual debugger for agent execution flow, LLM calls, and tool invocations.
-
-### Model Layer
-
-- **OpenAI Compatible** — Works with any OpenAI-compatible API: GPT, Claude, Qwen, DeepSeek, local models.
-- **Multimodal Support** — Unified `Message` class for text, images, audio, and video inputs.
-- **Load Balancing** — Built-in round-robin/random load balancing across multiple LLM backends.
-- **Thinking Mode** — Support for reasoning models (Qwen3, etc.) with separate thinking/content streams.
-- **Embedding API** — Unified text embedding interface with batch processing.
-
-### Tool System
-
-- **Zero-Config Tools** — `@tool` decorator auto-generates OpenAI function calling schema from type hints and docstrings.
-- **Type Safety** — Pydantic V2 validation for all tool parameters. Automatic error feedback to LLM.
-- **Async Native** — Async tools run natively; sync tools auto-execute in thread pool.
-- **Parallel Execution** — Execute multiple tool calls concurrently for better performance.
-- **Instance Methods** — Register class methods as tools with access to `self` context (DB connections, user state, etc.).
-
-### Prompt Engine
-
-- **Jinja2 Templates** — Dynamic prompts with variable interpolation, conditionals, loops, and includes.
-- **Long Text Continuation** — Auto-detect truncation and continue generation to bypass token limits.
-- **Parallel Prompts** — Execute multiple prompts concurrently with `ParallelPrompt`.
-- **Post-Processors** — Transform streaming output with pluggable processor pipeline.
-- **Template Files** — Load prompts from external files for better organization.
-
-### Memory & Storage
-
-- **Session Memory** — Multi-session conversation management with full OpenAI message format support.
-- **Tool Call Tracking** — Complete function calling chain management with validation.
-- **Pin/Tag System** — Protect important messages from being trimmed or modified.
-- **Undo/Redo** — Rollback conversation operations when needed.
-- **Multiple Backends** — In-memory, JSON file, SQLite storage options.
-- **TTL Support** — Automatic session cleanup with time-to-live.
-
-### Skills ([agentskills.io](https://agentskills.io) compatible)
-
-- **Progressive Disclosure** — 3-phase loading (metadata → instructions → resources) to optimize token budget.
-- **Ecosystem Ready** — Use community skills published for Anthropic / OpenAI / Copilot style workflows.
-- **Safe Resource Access** — Path traversal detection and file-size limits by default.
-- **SkillAgent** — Works out-of-the-box with `SkillAgent` or can be plugged into `ReActAgent`.
-
-### Sandbox
-
-- **Secure Execution** — Run agent-generated code in isolated environments with resource limits and security policies.
-- **Local / Docker Backends** — Fast local runs for development, stronger container isolation for production.
-- **Remote Docker (TCP)** — Connect to remote Docker daemons via `docker_host="tcp://..."`. Auto image validation, local skills sync, and container-API file operations.
-- **Agent-Friendly Paths** — `uploads/` and `outputs/` live inside the workspace (aligned with OpenAI Code Interpreter conventions). Agents use simple relative paths.
-- **File & Package Management** — Full file operations (read/write/list/copy/move/delete) and pip package management inside the sandbox.
-
-### Hooks (Extension & Governance)
-
-- **Unified Events** — One hook system across tools, memory, prompter/LLM, sandbox, and agent lifecycle.
-- **Stable Defaults** — Fail-open by default (hook failures won't break the main flow).
-- **Operational Controls** — Ordering, timeout, error policy (fail-open / fail-close), and basic metrics/audit patterns.
-
-### Deployment
-
-- **One-Line API** — Publish any agent as OpenAI-compatible REST API with `publish_agent_api()`.
-- **FastAPI Integration** — Built on FastAPI with automatic OpenAPI documentation.
-- **SSE Streaming** — Server-Sent Events for real-time streaming responses.
-- **Session Management** — Built-in session handling with configurable TTL.
 
 ---
 
 ## Quick Start
 
-### 1. ReAct Agent with Tools
+### 1. Agent with Tools
 
 ```python
 from alphora.agent import ReActAgent
@@ -143,46 +117,23 @@ def get_weather(city: str, unit: str = "celsius") -> str:
     """Get current weather for a city."""
     return f"Weather in {city}: 22°{unit[0].upper()}, Sunny"
 
-@tool
-async def search_docs(query: str, limit: int = 5) -> list:
-    """Search internal documents."""
-    return [{"title": "Result 1", "score": 0.95}]
-
 agent = ReActAgent(
     llm=OpenAILike(model_name="gpt-4"),
-    tools=[get_weather, search_docs],
+    tools=[get_weather],
     system_prompt="You are a helpful assistant.",
-    max_iterations=10,
 )
 
 result = await agent.run("What's the weather in Tokyo?")
 ```
 
-### 2. Sandbox (Secure Code Execution)
+### 2. Code Sandbox
 
-Build the sandbox Docker image first:
-
-```bash
-# Auto-build: The image is built automatically on first use if not found locally.
-
-# Manual build: Navigate to the Docker directory and build the image.
-cd alphora/sandbox/docker
-docker build --target base -t alphora-sandbox:latest .
-
-# If you've updated the Dockerfile, force a rebuild without cache:
-docker build --no-cache --target base -t alphora-sandbox:latest .
-```
-
-The image includes Python 3.11, Node.js 20, npm, and common data-processing packages (numpy, pandas, matplotlib, etc.).
+Run agent-generated code in an isolated Docker container. The image is built automatically on first use. See the [Sandbox docs](docs/components/cn/sandbox_readme.md) for Docker build, remote Docker, and TLS configuration.
 
 ```python
 from alphora.sandbox import Sandbox
 
-async with Sandbox(
-    runtime="docker",
-    workspace_root="/data/workspace",
-    image="alphora-sandbox:latest",
-) as sandbox:
+async with Sandbox(runtime="docker", workspace_root="/data/workspace") as sandbox:
     result = await sandbox.execute_code("print(6 * 7)")
     print(result.stdout)  # 42
 
@@ -190,84 +141,19 @@ async with Sandbox(
     files = await sandbox.list_files()
 ```
 
-Remote Docker (TLS):
+### 3. Deploy as API
+
+Publish any agent as an OpenAI-compatible REST API in one line:
 
 ```python
-from alphora.sandbox import Sandbox, DockerHost
+from alphora.server.quick_api import publish_agent_api
 
-async with Sandbox(
-    runtime="docker",
-    docker_host=DockerHost(
-        url="tcp://your-server:2376",
-        tls_verify=True,
-        tls_ca_cert="/path/to/ca.pem",
-        tls_client_cert="/path/to/cert.pem",
-        tls_client_key="/path/to/key.pem",
-    ),
-    workspace_root="/data/sandboxes",
-    skill_host_path="./local-skills",
-    image="alphora-sandbox:latest",
-) as sandbox:
-    result = await sandbox.execute_code("print('Hello from remote!')")
-```
-
-### 3. Skills (Community & Standard)
-
-```python
-from alphora.agent import SkillAgent
-from alphora.models import OpenAILike
-
-agent = SkillAgent(
-    llm=OpenAILike(model_name="gpt-4"),
-    skill_paths=["./alphora_community/skills"],
-    system_prompt="You are a helpful assistant.",
-)
-
-result = await agent.run("Help me do a deep research on AI agents.")
-```
-
-### 4. Memory Management
-
-```python
-from alphora.memory import MemoryManager
-
-memory = MemoryManager()
-
-memory.add_user(session_id="user_123", content="Hello")
-memory.add_assistant(session_id="user_123", content="Hi there!")
-
-history = memory.build_history(session_id="user_123")
-```
-
-### 5. Load Balancing
-
-```python
-llm1 = OpenAILike(model_name="gpt-4", api_key="key1", base_url="https://api1.com/v1")
-llm2 = OpenAILike(model_name="gpt-4", api_key="key2", base_url="https://api2.com/v1")
-
-llm = llm1 + llm2  # Automatic round-robin load balancing
-
-response = await llm.ainvoke("Hello")
-```
-
-### 6. Deploy as API
-
-```python
-from alphora.server.quick_api import publish_agent_api, APIPublisherConfig
-
-config = APIPublisherConfig(
-    path="/alphadata",
-    api_title="My Agent API",
-    memory_ttl=3600,
-)
-
-app = publish_agent_api(agent=agent, method="run", config=config)
-
-# Run: uvicorn main:app --port 8000
+app = publish_agent_api(agent)
+# uvicorn main:app --port 8000
 ```
 
 ```bash
-curl -X POST http://localhost:8000/alphadata/chat/completions \
+curl -X POST http://localhost:8000/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"messages": [{"role": "user", "content": "Hello!"}], "stream": true}'
 ```
@@ -276,12 +162,10 @@ curl -X POST http://localhost:8000/alphadata/chat/completions \
 
 ## Examples
 
-| Example                                     | Description |
-|---------------------------------------------|-------------|
-| [ChatExcel](./examples/chatexcel)           | Data analysis agent with sandbox code execution |
-| [RAG Agent](./examples/rag-agent)           | Retrieval-augmented generation with vector search |
-| [Multi-Agent](./examples/multi-agent)       | Hierarchical agents with tool-as-agent pattern |
-| [Streaming Chat](./examples/streaming-chat) | Real-time chat with thinking mode |
+| Example | Description |
+|---------|-------------|
+| [ChatExcel](./examples/chat_excel) | Data analysis agent with skill-driven workflow and sandbox code execution |
+| [Deep Research](./examples/deep_research) | Multi-step research agent with web search and report generation |
 
 
 ---
@@ -293,22 +177,9 @@ export LLM_API_KEY="your-api-key"
 export LLM_BASE_URL="https://api.openai.com/v1"
 export DEFAULT_LLM="gpt-4"
 
-# Optional: Embedding
+# Optional
 export EMBEDDING_API_KEY="your-key"
 export EMBEDDING_BASE_URL="https://api.openai.com/v1"
-```
-
-```python
-from alphora.models import OpenAILike
-
-llm = OpenAILike(
-    model_name="gpt-4",
-    api_key="sk-xxx",
-    base_url="https://api.openai.com/v1",
-    temperature=0.7,
-    max_tokens=4096,
-    is_multimodal=True,
-)
 ```
 
 ---
