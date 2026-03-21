@@ -46,10 +46,6 @@ result = await agent.run("Analyze sales.xlsx and find the top-performing regions
   <em>See it in action — a full data analysis workflow from upload to insight:</em>
 </p>
 
-<p align="center">
-  <em>See it in action — a full data analysis workflow from upload to insight:</em>
-</p>
-
 https://github.com/user-attachments/assets/a3c0d366-cb94-49a1-a06f-f7b7a3db35f6
 
 ## Installation
