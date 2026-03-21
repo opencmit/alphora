@@ -106,8 +106,11 @@ class LocalBackend(ExecutionBackend):
         self._env_vars: Dict[str, str] = {}
         self._python_path = python_path or sys.executable
         self._process_pool: List[asyncio.subprocess.Process] = []
-        self._path_resolver = PathResolver(Workspace(host_root=self._workspace_path))
         self._skill_host_path = Path(skill_host_path) if skill_host_path else None
+        self._path_resolver = PathResolver(
+            Workspace(host_root=self._workspace_path),
+            skills_host_root=self._skill_host_path,
+        )
         self._uploads_dir = self._workspace_path / "uploads"
         self._outputs_dir = self._workspace_path / "outputs"
 
@@ -198,6 +201,7 @@ class LocalBackend(ExecutionBackend):
         """Dynamically mount a skill directory (create symlinks + update path translation)."""
         self._skill_host_path = Path(host_path)
         self._host_skills = str(self._skill_host_path.resolve())
+        self._path_resolver.skills_host_root = self._skill_host_path
         target = self._skill_host_path.resolve()
         self._ensure_symlink(self._mnt_dir / "skills", target)
         self._ensure_symlink(self._workspace_path / "skills", target)
@@ -444,18 +448,21 @@ class LocalBackend(ExecutionBackend):
     
     async def write_file(self, path: str, content: str) -> None:
         """Write text to file"""
+        self._ensure_writable(path)
         full_path = self._validate_path(path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content, encoding="utf-8")
     
     async def write_file_bytes(self, path: str, content: bytes) -> None:
         """Write bytes to file"""
+        self._ensure_writable(path)
         full_path = self._validate_path(path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_bytes(content)
     
     async def delete_file(self, path: str) -> bool:
         """Delete file or directory"""
+        self._ensure_writable(path)
         full_path = self._validate_path(path)
         
         if not full_path.exists():
@@ -468,6 +475,13 @@ class LocalBackend(ExecutionBackend):
             full_path.unlink()
         
         return True
+
+    def _ensure_writable(self, path: str) -> None:
+        """Raise if path points to a read-only area (e.g. skills mount)."""
+        if self._path_resolver.is_skills_path(path):
+            raise PathTraversalError(
+                str(path), message=f"Skills directory is read-only: {path}"
+            )
     
     async def file_exists(self, path: str) -> bool:
         """Check if file exists"""
@@ -483,6 +497,7 @@ class LocalBackend(ExecutionBackend):
         recursive: bool = False
     ) -> List[Dict[str, Any]]:
         """List directory contents"""
+        is_skills = self._path_resolver.is_skills_path(path) if path else False
         full_path = self._validate_path(path) if path else self._workspace_path
         
         if not full_path.exists():
@@ -498,11 +513,14 @@ class LocalBackend(ExecutionBackend):
         for item in iterator:
             try:
                 stat = item.stat()
-                rel_path = item.relative_to(self._workspace_path)
+                if is_skills:
+                    display_path = self._path_resolver.skills_to_sandbox(item)
+                else:
+                    display_path = str(item.relative_to(self._workspace_path))
                 
                 results.append({
                     "name": item.name,
-                    "path": str(rel_path),
+                    "path": display_path,
                     "size": stat.st_size if item.is_file() else 0,
                     "is_directory": item.is_dir(),
                     "modified_time": datetime.fromtimestamp(stat.st_mtime).isoformat(),

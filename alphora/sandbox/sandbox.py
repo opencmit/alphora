@@ -257,7 +257,10 @@ class Sandbox:
             self._workspace_path = self._base_path
         else:
             self._workspace_path = self._base_path / self._sandbox_id
-        self._path_resolver = PathResolver(Workspace(host_root=self._workspace_path))
+        self._path_resolver = PathResolver(
+            Workspace(host_root=self._workspace_path),
+            skills_host_root=self._skill_host_path,
+        )
 
         # State
         self._status = SandboxStatus.CREATED
@@ -325,6 +328,7 @@ class Sandbox:
             host_path = Path(source).expanduser().resolve()
 
         self._skill_host_path = host_path
+        self._path_resolver.skills_host_root = host_path
 
         if self.is_running and self._backend:
             self._backend.mount_skill_path(str(host_path))

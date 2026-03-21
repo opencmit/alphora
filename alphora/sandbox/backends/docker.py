@@ -154,7 +154,8 @@ class DockerBackend(ExecutionBackend):
         self._container_workspace = self._docker_config.working_dir
         self._env_vars: Dict[str, str] = {}
         self._path_resolver = PathResolver(
-            Workspace(host_root=self._workspace_path, sandbox_root=self._container_workspace)
+            Workspace(host_root=self._workspace_path, sandbox_root=self._container_workspace),
+            skills_host_root=self._skill_host_path,
         )
 
     @property
@@ -497,6 +498,7 @@ class DockerBackend(ExecutionBackend):
         a symlink, since the host path does not exist on the remote server.
         """
         self._skill_host_path = Path(host_path)
+        self._path_resolver.skills_host_root = self._skill_host_path
 
         if self._is_remote:
             self._sync_skills_to_container()
@@ -709,6 +711,7 @@ class DockerBackend(ExecutionBackend):
     
     async def write_file(self, path: str, content: str) -> None:
         """Write file to container workspace"""
+        self._ensure_writable(path)
         if self._is_remote:
             await self._remote_write_file(path, content.encode("utf-8"))
             return
@@ -719,6 +722,7 @@ class DockerBackend(ExecutionBackend):
 
     async def write_file_bytes(self, path: str, content: bytes) -> None:
         """Write bytes to file in container workspace"""
+        self._ensure_writable(path)
         if self._is_remote:
             await self._remote_write_file(path, content)
             return
@@ -729,6 +733,7 @@ class DockerBackend(ExecutionBackend):
     
     async def delete_file(self, path: str) -> bool:
         """Delete file from container workspace"""
+        self._ensure_writable(path)
         if self._is_remote:
             container_path = self._to_container_path(path)
             result = self._container.exec_run(["sh", "-c", f"rm -rf '{container_path}'"])
@@ -742,6 +747,13 @@ class DockerBackend(ExecutionBackend):
         else:
             full_path.unlink()
         return True
+
+    def _ensure_writable(self, path: str) -> None:
+        """Raise if path points to a read-only area (e.g. skills mount)."""
+        if self._path_resolver.is_skills_path(path):
+            raise PathTraversalError(
+                str(path), message=f"Skills directory is read-only: {path}"
+            )
     
     async def file_exists(self, path: str) -> bool:
         """Check if file exists in workspace"""
@@ -763,18 +775,24 @@ class DockerBackend(ExecutionBackend):
         """List directory contents"""
         if self._is_remote:
             return await self._remote_list_directory(path, recursive)
+
+        is_skills = self._path_resolver.is_skills_path(path) if path else False
         full_path = self._resolve_path(path) if path else self._workspace_path
         if not full_path.exists():
             return []
+
         results = []
         iterator = full_path.rglob("*") if recursive else full_path.iterdir()
         for item in iterator:
             try:
                 stat = item.stat()
-                rel_path = item.relative_to(self._workspace_path)
+                if is_skills:
+                    display_path = self._path_resolver.skills_to_sandbox(item)
+                else:
+                    display_path = str(item.relative_to(self._workspace_path))
                 results.append({
                     "name": item.name,
-                    "path": str(rel_path),
+                    "path": display_path,
                     "size": stat.st_size if item.is_file() else 0,
                     "is_directory": item.is_dir(),
                     "file_type": FileType.from_extension(item.name).value,
