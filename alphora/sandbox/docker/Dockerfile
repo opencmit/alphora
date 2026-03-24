@@ -12,7 +12,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
     WORKSPACE_DIR=/mnt/workspace \
     SKILLS_DIR=/mnt/skills \
-    OUTPUT_DIR=/output \
+    UPLOADS_DIR=/mnt/uploads \
+    OUTPUT_DIR=/mnt/outputs \
     SANDBOX_USER=sandbox \
     SANDBOX_UID=1000 \
     SANDBOX_GID=1000
@@ -49,9 +50,9 @@ COPY requirements-runtime.txt .
 RUN pip install --no-cache-dir -r requirements-runtime.txt
 
 # Mount-point directories
-RUN mkdir -p /mnt/workspace /mnt/workspace/uploads /mnt/workspace/outputs /mnt/skills
+RUN mkdir -p /mnt/workspace /mnt/uploads /mnt/outputs /mnt/skills
 
-WORKDIR /mnt/workspace
+WORKDIR /mnt
 COPY . .
 
 # ====== ↓↓↓ 中文字体固化 ↓↓↓ ======

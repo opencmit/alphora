@@ -16,7 +16,12 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from alphora.sandbox.backends.base import ExecutionBackend, BackendFactory
-from alphora.sandbox.config import SANDBOX_WORKSPACE, SANDBOX_SKILLS_MOUNT
+from alphora.sandbox.config import (
+    SANDBOX_WORKSPACE,
+    SANDBOX_UPLOADS_MOUNT,
+    SANDBOX_OUTPUTS_MOUNT,
+    SANDBOX_SKILLS_MOUNT,
+)
 from alphora.sandbox.path_resolver import PathResolver
 from alphora.sandbox.types import (
     ExecutionResult,
@@ -107,15 +112,19 @@ class LocalBackend(ExecutionBackend):
         self._python_path = python_path or sys.executable
         self._process_pool: List[asyncio.subprocess.Process] = []
         self._skill_host_path = Path(skill_host_path) if skill_host_path else None
+        self._uploads_dir = self._workspace_path.parent / "uploads"
+        self._outputs_dir = self._workspace_path.parent / "outputs"
         self._path_resolver = PathResolver(
             Workspace(host_root=self._workspace_path),
             skills_host_root=self._skill_host_path,
+            uploads_host_root=self._uploads_dir,
+            outputs_host_root=self._outputs_dir,
         )
-        self._uploads_dir = self._workspace_path / "uploads"
-        self._outputs_dir = self._workspace_path / "outputs"
 
         self._host_workspace = str(self._workspace_path.resolve())
         self._host_workspace_raw = str(self._workspace_path)
+        self._host_uploads = str(self._uploads_dir.resolve())
+        self._host_outputs = str(self._outputs_dir.resolve())
         self._host_skills: Optional[str] = (
             str(self._skill_host_path.resolve()) if self._skill_host_path else None
         )
@@ -125,9 +134,12 @@ class LocalBackend(ExecutionBackend):
     def _to_host(self, text: str) -> str:
         """Translate sandbox virtual paths to real host paths.
 
-        Order matters — longest prefixes first so ``/mnt/workspace`` and
-        ``/mnt/skills`` are matched before the catch-all ``/mnt``.
+        Order matters -- longest/most-specific prefixes first so that
+        ``/mnt/uploads`` is matched before the workspace catch-all ``/mnt/workspace``,
+        which in turn is matched before ``/mnt``.
         """
+        text = text.replace(SANDBOX_UPLOADS_MOUNT, self._host_uploads)
+        text = text.replace(SANDBOX_OUTPUTS_MOUNT, self._host_outputs)
         text = text.replace(SANDBOX_WORKSPACE, self._host_workspace)
         if self._host_skills:
             text = text.replace(SANDBOX_SKILLS_MOUNT, self._host_skills)
@@ -136,6 +148,8 @@ class LocalBackend(ExecutionBackend):
 
     def _to_sandbox(self, text: str) -> str:
         """Translate real host paths to sandbox virtual paths in output."""
+        text = text.replace(self._host_uploads, SANDBOX_UPLOADS_MOUNT)
+        text = text.replace(self._host_outputs, SANDBOX_OUTPUTS_MOUNT)
         text = text.replace(self._host_workspace, SANDBOX_WORKSPACE)
         if self._host_workspace_raw != self._host_workspace:
             text = text.replace(self._host_workspace_raw, SANDBOX_WORKSPACE)
@@ -169,7 +183,9 @@ class LocalBackend(ExecutionBackend):
         """Build a local directory that mirrors Docker's ``/mnt`` structure.
 
             .alphora_mnt_<id>/
-            ├── workspace -> <workspace_path>
+            ├── workspace -> <sandbox_base>/workspace
+            ├── uploads   -> <sandbox_base>/uploads
+            ├── outputs   -> <sandbox_base>/outputs
             └── skills    -> <skill_host_path>   (if configured)
 
         This lets ``cd /mnt && find .`` produce the same output as Docker mode.
@@ -178,6 +194,8 @@ class LocalBackend(ExecutionBackend):
         """
         self._mnt_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_symlink(self._mnt_dir / "workspace", self._workspace_path.resolve())
+        self._ensure_symlink(self._mnt_dir / "uploads", self._uploads_dir.resolve())
+        self._ensure_symlink(self._mnt_dir / "outputs", self._outputs_dir.resolve())
         if self._skill_host_path and self._skill_host_path.is_dir():
             target = self._skill_host_path.resolve()
             self._ensure_symlink(self._mnt_dir / "skills", target)
@@ -341,7 +359,7 @@ class LocalBackend(ExecutionBackend):
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=str(self._workspace_path),
+                cwd=str(self._mnt_dir),
                 env=env
             )
             
@@ -391,7 +409,7 @@ class LocalBackend(ExecutionBackend):
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=str(self._workspace_path),
+                cwd=str(self._mnt_dir),
                 env=env
             )
             
@@ -477,10 +495,10 @@ class LocalBackend(ExecutionBackend):
         return True
 
     def _ensure_writable(self, path: str) -> None:
-        """Raise if path points to a read-only area (e.g. skills mount)."""
-        if self._path_resolver.is_skills_path(path):
+        """Raise if path points to a read-only area (skills or uploads mount)."""
+        if self._path_resolver.is_readonly_path(path):
             raise PathTraversalError(
-                str(path), message=f"Skills directory is read-only: {path}"
+                str(path), message=f"Read-only mount path: {path}"
             )
     
     async def file_exists(self, path: str) -> bool:

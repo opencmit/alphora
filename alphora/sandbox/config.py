@@ -22,7 +22,10 @@ from alphora.sandbox.exceptions import (
 )
 
 
+SANDBOX_MNT_ROOT = "/mnt"
 SANDBOX_WORKSPACE = "/mnt/workspace"
+SANDBOX_UPLOADS_MOUNT = "/mnt/uploads"
+SANDBOX_OUTPUTS_MOUNT = "/mnt/outputs"
 SANDBOX_SKILLS_MOUNT = "/mnt/skills"
 
 
@@ -213,7 +216,7 @@ class DockerConfig:
     auto_remove: bool = True
     privileged: bool = False
     user: Optional[str] = None
-    working_dir: str = SANDBOX_WORKSPACE
+    working_dir: str = SANDBOX_MNT_ROOT
     
     # Resource limits
     memory_limit: str = "512m"

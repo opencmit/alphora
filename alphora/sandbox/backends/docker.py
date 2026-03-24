@@ -27,7 +27,10 @@ from alphora.sandbox.workspace import Workspace
 from alphora.sandbox.config import (
     DockerHost,
     DockerConfig,
+    SANDBOX_WORKSPACE,
     SANDBOX_SKILLS_MOUNT,
+    SANDBOX_UPLOADS_MOUNT,
+    SANDBOX_OUTPUTS_MOUNT,
 )
 from alphora.sandbox.exceptions import (
     DockerError,
@@ -151,11 +154,16 @@ class DockerBackend(ExecutionBackend):
 
         self._container = None
         self._client = None
-        self._container_workspace = self._docker_config.working_dir
+        self._container_cwd = self._docker_config.working_dir
+        self._container_workspace = SANDBOX_WORKSPACE
+        self._uploads_path = self._workspace_path.parent / "uploads"
+        self._outputs_path = self._workspace_path.parent / "outputs"
         self._env_vars: Dict[str, str] = {}
         self._path_resolver = PathResolver(
             Workspace(host_root=self._workspace_path, sandbox_root=self._container_workspace),
             skills_host_root=self._skill_host_path,
+            uploads_host_root=self._uploads_path,
+            outputs_host_root=self._outputs_path,
         )
 
     @property
@@ -287,8 +295,8 @@ class DockerBackend(ExecutionBackend):
                 self._client.images.pull(self._docker_image)
 
         self._workspace_path.mkdir(parents=True, exist_ok=True)
-        (self._workspace_path / "uploads").mkdir(parents=True, exist_ok=True)
-        (self._workspace_path / "outputs").mkdir(parents=True, exist_ok=True)
+        self._uploads_path.mkdir(parents=True, exist_ok=True)
+        self._outputs_path.mkdir(parents=True, exist_ok=True)
 
     async def _build_custom_image(self) -> None:
         """Build custom image from local Dockerfile."""
@@ -410,7 +418,7 @@ class DockerBackend(ExecutionBackend):
             "detach": True,
             "tty": True,
             "stdin_open": True,
-            "working_dir": self._container_workspace,
+            "working_dir": self._container_cwd,
             "network_mode": network_mode,
             "mem_limit": f"{limits.memory_mb}m",
             "cpu_period": config.cpu_period,
@@ -439,13 +447,22 @@ class DockerBackend(ExecutionBackend):
         """Build volume mount configuration.
 
         ``workspace_path`` is always the Docker-host path used as volume source.
-        uploads/ and outputs/ live inside workspace, no separate mounts needed.
+        uploads and outputs get their own bind mounts at ``/mnt/uploads`` (ro)
+        and ``/mnt/outputs`` (rw).
         For remote mode, skills are NOT bind-mounted (local path doesn't exist
         on the remote server); they are copied into the container after start.
         """
         volumes = {
             str(self._workspace_path.resolve()): {
                 "bind": self._container_workspace,
+                "mode": "rw",
+            },
+            str(self._uploads_path.resolve()): {
+                "bind": SANDBOX_UPLOADS_MOUNT,
+                "mode": "ro",
+            },
+            str(self._outputs_path.resolve()): {
+                "bind": SANDBOX_OUTPUTS_MOUNT,
                 "mode": "rw",
             },
         }
@@ -480,10 +497,13 @@ class DockerBackend(ExecutionBackend):
         raise ContainerError(self.container_name, "Container failed to become ready")
 
     def _init_workspace_dirs(self) -> None:
-        """Create standard workspace subdirectories and fix ownership."""
-        ws = self._container_workspace
+        """Ensure mount-point directories exist and fix ownership."""
         self._container.exec_run(
-            ["sh", "-c", f"mkdir -p {ws}/uploads {ws}/outputs && chown -R root:root {ws}"],
+            ["sh", "-c", (
+                f"mkdir -p {self._container_workspace} "
+                f"{SANDBOX_UPLOADS_MOUNT} {SANDBOX_OUTPUTS_MOUNT} "
+                f"&& chown -R root:root {self._container_workspace}"
+            )],
             user="root",
         )
 
@@ -658,7 +678,7 @@ class DockerBackend(ExecutionBackend):
             def run_exec():
                 return self._container.exec_run(
                     ["sh", "-c", command],
-                    workdir=self._container_workspace,
+                    workdir=self._container_cwd,
                     environment=self._env_vars,
                     demux=True,
                 )
@@ -749,10 +769,10 @@ class DockerBackend(ExecutionBackend):
         return True
 
     def _ensure_writable(self, path: str) -> None:
-        """Raise if path points to a read-only area (e.g. skills mount)."""
-        if self._path_resolver.is_skills_path(path):
+        """Raise if path points to a read-only area (skills or uploads mount)."""
+        if self._path_resolver.is_readonly_path(path):
             raise PathTraversalError(
-                str(path), message=f"Skills directory is read-only: {path}"
+                str(path), message=f"Read-only mount path: {path}"
             )
     
     async def file_exists(self, path: str) -> bool:

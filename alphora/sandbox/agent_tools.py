@@ -213,7 +213,7 @@ class SandboxTools:
 
     async def upload_file(self, file_name: str, base64_data: str) -> Dict[str, Any]:
         """
-        上传文件到沙箱的 /mnt/workspace/uploads/ 目录。
+        上传文件到沙箱的 /mnt/uploads/ 目录。
 
         接收 Base64 编码的文件内容，适用于上传用户提供的二进制文件（Excel、图片、PDF 等）。
 

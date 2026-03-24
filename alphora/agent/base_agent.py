@@ -128,14 +128,13 @@ class BaseAgent(object):
             from difflib import get_close_matches
             similar = get_close_matches(key, self.config.keys(), n=1, cutoff=0.6)
             if similar:
-                raise KeyError(
-                    f"Config '{key}' not found. Did you mean '{similar[0]}'?"
-                )
+                logger.warning(f"Config '{key}' not found. Did you mean '{similar[0]}'?")
+                return None
+
             else:
                 available = list(self.config.keys())
-                raise KeyError(
-                    f"Config '{key}' not found. Available: {available}"
-                )
+                logger.warning(f"Config '{key}' not found. Available: {available}")
+                return None
         return self.config.get(key)
 
     def _reinitialize(self, **new_kwargs) -> None:

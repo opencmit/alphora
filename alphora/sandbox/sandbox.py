@@ -171,7 +171,8 @@ class Sandbox:
         Initialize sandbox.
 
         Args:
-            workspace_root: Host path used as workspace mount root/path
+            workspace_root: Host base directory for sandbox. Subdirectories
+                ``workspace/``, ``uploads/``, ``outputs/`` are created under it.
             mount_mode: "direct" uses workspace_root directly, "isolated" uses workspace_root/<sandbox_id>
             runtime: Execution runtime ("local" or "docker")
             image: Docker image when backend is docker
@@ -254,12 +255,17 @@ class Sandbox:
 
         self._base_path = Path(workspace_root)
         if self._mount_mode == "direct":
-            self._workspace_path = self._base_path
+            self._sandbox_base = self._base_path
         else:
-            self._workspace_path = self._base_path / self._sandbox_id
+            self._sandbox_base = self._base_path / self._sandbox_id
+        self._workspace_path = self._sandbox_base / "workspace"
+        self._uploads_path = self._sandbox_base / "uploads"
+        self._outputs_path = self._sandbox_base / "outputs"
         self._path_resolver = PathResolver(
             Workspace(host_root=self._workspace_path),
             skills_host_root=self._skill_host_path,
+            uploads_host_root=self._uploads_path,
+            outputs_host_root=self._outputs_path,
         )
 
         # State
@@ -300,6 +306,16 @@ class Sandbox:
     def workspace_path(self) -> Path:
         """Get workspace directory path"""
         return self._workspace_path
+
+    @property
+    def uploads_path(self) -> Path:
+        """Get host path to uploads directory"""
+        return self._uploads_path
+
+    @property
+    def outputs_path(self) -> Path:
+        """Get host path to outputs directory"""
+        return self._outputs_path
 
     @property
     def skill_host_path(self) -> Optional[Path]:
@@ -411,6 +427,8 @@ class Sandbox:
                 )
                 if not is_remote_docker:
                     self._workspace_path.mkdir(parents=True, exist_ok=True)
+                    self._uploads_path.mkdir(parents=True, exist_ok=True)
+                    self._outputs_path.mkdir(parents=True, exist_ok=True)
 
                 # Create backend
                 self._backend = self._create_backend()
@@ -508,17 +526,17 @@ class Sandbox:
         logger.info(f"Sandbox {self._sandbox_id} destroyed")
 
     async def _cleanup(self) -> None:
-        """Clean up workspace directory"""
-        # Never remove user-provided workspace root in direct mode.
+        """Clean up sandbox base directory (workspace + uploads + outputs)."""
+        # Never remove user-provided root in direct mode.
         if self._mount_mode == "direct":
             return
 
         import shutil
-        if self._workspace_path.exists():
+        if self._sandbox_base.exists():
             try:
-                shutil.rmtree(self._workspace_path)
+                shutil.rmtree(self._sandbox_base)
             except Exception as e:
-                logger.warning(f"Failed to cleanup workspace: {e}")
+                logger.warning(f"Failed to cleanup sandbox base: {e}")
 
     def _create_backend(self) -> ExecutionBackend:
         """Create execution backend instance"""
@@ -791,14 +809,14 @@ class Sandbox:
 
     async def upload_file(self, file_name: str, base64_data: str) -> FileInfo:
         """
-        Upload a file to /mnt/workspace/uploads/.
+        Upload a file to /mnt/uploads/.
 
         Supports raw Base64 strings and data URLs (data:*;base64,...).
 
         Usage::
 
             info = await sb.upload_file("report.xlsx", base64_string)
-            # info.path == "/mnt/workspace/uploads/report.xlsx"
+            # info.path == "/mnt/uploads/report.xlsx"
 
         Args:
             file_name: Target file name, e.g. ``"data.xlsx"``.
@@ -817,7 +835,7 @@ class Sandbox:
             base64_str = base64_data.split(',')[1]
 
         clean_name = file_name.lstrip("/")
-        sandbox_path = f"/mnt/workspace/uploads/{clean_name}"
+        sandbox_path = f"/mnt/uploads/{clean_name}"
 
         decoded_data = base64.urlsafe_b64decode(base64_str)
         await self._backend.write_file_bytes(sandbox_path, decoded_data)
