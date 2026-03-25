@@ -838,7 +838,14 @@ class Sandbox:
         sandbox_path = f"/mnt/uploads/{clean_name}"
 
         decoded_data = base64.urlsafe_b64decode(base64_str)
-        await self._backend.write_file_bytes(sandbox_path, decoded_data)
+
+        # Write directly to host uploads dir, bypassing backend's read-only
+        # check.  The Docker ro mount still prevents container code from
+        # writing to /mnt/uploads; this only allows the host-side upload API.
+        host_path = self._uploads_path / clean_name
+        host_path.parent.mkdir(parents=True, exist_ok=True)
+        host_path.write_bytes(decoded_data)
+        host_path.chmod(0o644)
 
         return FileInfo(
             name=Path(sandbox_path).name,
