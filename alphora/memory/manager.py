@@ -781,93 +781,54 @@ class MemoryManager:
         keep_pinned = before_ctx.data.get("keep_pinned", keep_pinned)
         keep_tagged = before_ctx.data.get("keep_tagged", keep_tagged)
 
-        # ===================== 2026 03 26 ==============
-        # # 过滤 system 消息 (如果不需要)
-        # if not include_system:
-        #     messages = [m for m in messages if m.role != "system"]
-        #
-        # # 按轮数限制
-        # if max_rounds:
-        #     messages = self._limit_by_rounds(messages, max_rounds)
-        #
-        # # 按消息数限制
-        # if max_messages and len(messages) > max_messages:
-        #     messages = messages[-max_messages:]
-        #
-        # # 处理便捷参数 (转换为处理器链)
-        # convenience_processors: List[Processor] = []
-        #
-        # if exclude_roles:
-        #     from alphora.memory.processors import exclude_roles as _exclude_roles
-        #     convenience_processors.append(_exclude_roles(*exclude_roles))
-        #
-        # if keep_pinned or keep_tagged:
-        #     from alphora.memory.processors import keep_important_and_last
-        #     # 便捷参数的 keep_pinned/keep_tagged 配合 max_messages 使用
-        #     n = max_messages if max_messages else len(messages)
-        #     convenience_processors.append(
-        #         keep_important_and_last(
-        #             n=n,
-        #             include_pinned=keep_pinned,
-        #             include_tags=keep_tagged
-        #         )
-        #     )
-        #
-        # # 应用便捷参数处理器
-        # for proc in convenience_processors:
-        #     messages = proc(messages)
-        #
-        # # 应用自定义处理器
-        # if processor:
-        #     if callable(processor) and not isinstance(processor, list):
-        #         messages = processor(messages)
-        #     elif isinstance(processor, list):
-        #         for proc in processor:
-        #             messages = proc(messages)
-        #
-        # # 转换为 OpenAI 格式
-        # openai_messages = [m.to_openai_format() for m in messages]
-        #
-        # # 计算轮数
-        # round_count = sum(1 for m in messages if m.role == "user")
-        # ================================================
+        # 过滤 system 消息 (如果不需要)
+        if not include_system:
+            messages = [m for m in messages if m.role != "system"]
 
-        # ===== 核心过滤逻辑（Rust）=====
-        import alphora_pri
+        # 按轮数限制
+        if max_rounds:
+            messages = self._limit_by_rounds(messages, max_rounds)
 
-        raw = [m.to_openai_format() for m in messages]
+        # 按消息数限制
+        if max_messages and len(messages) > max_messages:
+            messages = messages[-max_messages:]
 
-        filtered, round_count = alphora_pri.filter_history(
-            messages=raw,
-            max_rounds=max_rounds,
-            max_messages=max_messages,
-            include_system=include_system,
-            exclude_roles=exclude_roles,
-        )
+        # 处理便捷参数 (转换为处理器链)
+        convenience_processors: List[Processor] = []
 
-        openai_messages = list(filtered)
+        if exclude_roles:
+            from alphora.memory.processors import exclude_roles as _exclude_roles
+            convenience_processors.append(_exclude_roles(*exclude_roles))
 
         if keep_pinned or keep_tagged:
-            filtered_contents = {m.get("content") for m in openai_messages}
-            for m in messages:
-                if m.to_openai_format().get("content") not in filtered_contents:
-                    if keep_pinned and m.is_pinned:
-                        openai_messages.insert(0, m.to_openai_format())
-                    elif keep_tagged and any(m.has_tag(t) for t in keep_tagged):
-                        openai_messages.insert(0, m.to_openai_format())
+            from alphora.memory.processors import keep_important_and_last
+            # 便捷参数的 keep_pinned/keep_tagged 配合 max_messages 使用
+            n = max_messages if max_messages else len(messages)
+            convenience_processors.append(
+                keep_important_and_last(
+                    n=n,
+                    include_pinned=keep_pinned,
+                    include_tags=keep_tagged
+                )
+            )
 
+        # 应用便捷参数处理器
+        for proc in convenience_processors:
+            messages = proc(messages)
+
+        # 应用自定义处理器
         if processor:
             if callable(processor) and not isinstance(processor, list):
-                proc_msgs = [Message.from_openai_format(m) for m in openai_messages]
-                proc_msgs = processor(proc_msgs)
-                openai_messages = [m.to_openai_format() for m in proc_msgs]
+                messages = processor(messages)
             elif isinstance(processor, list):
-                proc_msgs = [Message.from_openai_format(m) for m in openai_messages]
                 for proc in processor:
-                    proc_msgs = proc(proc_msgs)
-                openai_messages = [m.to_openai_format() for m in proc_msgs]
+                    messages = proc(messages)
 
-        # end rust
+        # 转换为 OpenAI 格式
+        openai_messages = [m.to_openai_format() for m in messages]
+
+        # 计算轮数
+        round_count = sum(1 for m in messages if m.role == "user")
 
         # 创建 HistoryPayload
         history_payload = HistoryPayload.create(
