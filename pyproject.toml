@@ -40,5 +40,6 @@ include = ["alphora", "alphora.*"]
 
 [tool.setuptools.package-data]
 alphora = ["*", "*.tmpl"]
+"alphora.extension" = ["*.whl"]
 "alphora.sandbox" = ["docker/*"]
 "alphora.web" = ["*.html", "*.js", "*.css", "*.json", "*.md", "asset/image/*.png", "asset/image/*.svg", "asset/image/*.ico"]

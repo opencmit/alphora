@@ -419,6 +419,9 @@ class BaseAgent(object):
             else:
                 results.append(r if r is not None else "")
 
+        if effective_callback and hasattr(effective_callback, 'send_data'):
+            await effective_callback.send_data("parallel_batch_end", str(len(tasks)))
+
         return results
 
     async def run(self, task: str) -> ...:

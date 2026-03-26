@@ -35,4 +35,7 @@ myexamples
 myexamples/*
 zmy_tutorials/
 zmy_tutorials/*
+
+rust/
+rust/*
 .DS_Store
