@@ -372,7 +372,7 @@ class MemoryManager:
                 actual_tool_calls = None
         elif content is not None and not isinstance(content, str):
             actual_content = str(content)
-
+        actual_content = actual_content.replace("</think>", "").replace("<think>", "")
         msg = Message.assistant(actual_content, actual_tool_calls, **metadata)
         return self._add_message(msg, session_id)
 
