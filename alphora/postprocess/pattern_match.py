@@ -2,7 +2,7 @@ from alphora.models.llms.stream_helper import BaseGenerator, GeneratorOutput
 from alphora.postprocess.base_pp import BasePostProcessor
 import random
 from enum import Enum, auto
-from typing import Iterator, Optional, Literal
+from typing import Iterator, Optional, Literal, AsyncIterator
 
 
 class PatternMatcherPP(BasePostProcessor):
@@ -96,7 +96,9 @@ class PatternMatcherPP(BasePostProcessor):
                 self.start_buffer = ""          # 开始标记缓冲区
                 self.end_buffer = ""            # 结束标记缓冲区
                 self.text_buffer = ""           # 不匹配状态的小文本缓冲区
+                self.text_buffer_type = None    # text_buffer 对应的内容类型
                 self.match_buffer = ""          # 匹配内容中的小文本缓冲区
+                self.match_buffer_type = None   # match_buffer 对应的内容类型
                 self.bos_buffer = ""            # 存储开始标记，用于include_bos=False的情况
                 self.eos_buffer = ""            # 存储结束标记，用于include_eos=False的情况
 
@@ -127,22 +129,34 @@ class PatternMatcherPP(BasePostProcessor):
                                 # 当前字符与开头标识的第一个字符匹配
                                 # 输出缓冲区中的内容
                                 if self.text_buffer and self.output_mode != 'only_matched':
-                                    output_type = self.unmatched_type if self.unmatched_type is not None else content_type
+                                    output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
                                     yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
                                     self.text_buffer = ""
+                                    self.text_buffer_type = None
 
                                 # 开始匹配开头标识
                                 self.start_buffer = char
                                 self.state = PatternMatcherPP.State.PARTIAL_START_MATCH
                             else:
                                 # 当前字符不匹配开头标识，添加到小缓冲区
+                                # 如果缓冲区为空或类型变化，先输出之前的内容
+                                if self.text_buffer and self.text_buffer_type != content_type:
+                                    if self.output_mode != 'only_matched':
+                                        output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
+                                        yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
+                                    self.text_buffer = ""
+                                    self.text_buffer_type = None
+
+                                if not self.text_buffer:
+                                    self.text_buffer_type = content_type
                                 self.text_buffer += char
 
                                 # 缓冲区达到指定大小，输出内容
                                 if len(self.text_buffer) >= self.current_text_buffer_size and self.output_mode != 'only_matched':
-                                    output_type = self.unmatched_type if self.unmatched_type is not None else content_type
+                                    output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
                                     yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
                                     self.text_buffer = ""
+                                    self.text_buffer_type = None
                                     # 随机化下一次缓冲区大小
                                     self.current_text_buffer_size = self.get_random_buffer_size(
                                         self.buffer_size, self.min_buffer_size, self.max_buffer_size
@@ -170,15 +184,26 @@ class PatternMatcherPP(BasePostProcessor):
                             else:
                                 # 当前字符不匹配开头标识的下一个字符
                                 # 将缓冲区中的部分匹配内容添加到文本缓冲区
+                                # 注意：这部分内容应该保持原始类型
+                                if self.text_buffer and self.text_buffer_type != content_type:
+                                    if self.output_mode != 'only_matched':
+                                        output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
+                                        yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
+                                    self.text_buffer = ""
+                                    self.text_buffer_type = None
+
+                                if not self.text_buffer:
+                                    self.text_buffer_type = content_type
                                 self.text_buffer += self.start_buffer + char
                                 self.start_buffer = ""
                                 self.state = PatternMatcherPP.State.NOT_MATCHING
 
                                 # 缓冲区达到指定大小，输出内容
                                 if len(self.text_buffer) >= self.current_text_buffer_size and self.output_mode != 'only_matched':
-                                    output_type = self.unmatched_type if self.unmatched_type is not None else content_type
+                                    output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
                                     yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
                                     self.text_buffer = ""
+                                    self.text_buffer_type = None
                                     # 随机化下一次缓冲区大小
                                     self.current_text_buffer_size = self.get_random_buffer_size(
                                         self.buffer_size, self.min_buffer_size, self.max_buffer_size
@@ -192,7 +217,16 @@ class PatternMatcherPP(BasePostProcessor):
                             if char == self.end_marker[0]:
                                 # 当前字符与结束标识的第一个字符匹配
                                 self.end_buffer = char
-                                self.state = PatternMatcherPP.State.PARTIAL_END_MATCH
+
+                                # 特殊情况：如果 end_marker 长度为 1，直接完成匹配
+                                if len(self.end_marker) == 1:
+                                    self.eos_buffer = self.end_buffer
+                                    self.end_buffer = ""
+                                    if self.include_eos and self.output_mode != 'exclude_matched':
+                                        yield GeneratorOutput(content=self.eos_buffer, content_type=self.matched_type)
+                                    self.state = PatternMatcherPP.State.FULL_END_MATCH
+                                else:
+                                    self.state = PatternMatcherPP.State.PARTIAL_END_MATCH
                             else:
                                 # 当前字符不匹配结束标识，添加到匹配缓冲区
                                 self.match_buffer += char
@@ -221,7 +255,16 @@ class PatternMatcherPP(BasePostProcessor):
 
                                 # 开始匹配结束标识
                                 self.end_buffer = char
-                                self.state = PatternMatcherPP.State.PARTIAL_END_MATCH
+
+                                # 特殊情况：如果 end_marker 长度为 1，直接完成匹配
+                                if len(self.end_marker) == 1:
+                                    self.eos_buffer = self.end_buffer
+                                    self.end_buffer = ""
+                                    if self.include_eos and self.output_mode != 'exclude_matched':
+                                        yield GeneratorOutput(content=self.eos_buffer, content_type=self.matched_type)
+                                    self.state = PatternMatcherPP.State.FULL_END_MATCH
+                                else:
+                                    self.state = PatternMatcherPP.State.PARTIAL_END_MATCH
                             else:
                                 # 当前字符不匹配结束标识，添加到匹配缓冲区
                                 self.match_buffer += char
@@ -254,6 +297,8 @@ class PatternMatcherPP(BasePostProcessor):
                                         yield GeneratorOutput(content=self.eos_buffer, content_type=self.matched_type)
 
                                     self.state = PatternMatcherPP.State.FULL_END_MATCH
+                                    # 继续处理下一个字符，避免当前字符被重复处理
+                                    continue
                             else:
                                 # 当前字符不匹配结束标识的下一个字符
                                 # 将缓冲区中的部分匹配内容添加到匹配内容中
@@ -274,13 +319,16 @@ class PatternMatcherPP(BasePostProcessor):
                                 self.state = PatternMatcherPP.State.PARTIAL_START_MATCH
                             else:
                                 # 当前字符不匹配开头标识，添加到小缓冲区
+                                if not self.text_buffer:
+                                    self.text_buffer_type = content_type
                                 self.text_buffer += char
 
                                 # 缓冲区达到指定大小，输出内容
                                 if len(self.text_buffer) >= self.current_text_buffer_size and self.output_mode != 'only_matched':
-                                    output_type = self.unmatched_type if self.unmatched_type is not None else content_type
+                                    output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
                                     yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
                                     self.text_buffer = ""
+                                    self.text_buffer_type = None
                                     # 随机化下一次缓冲区大小
                                     self.current_text_buffer_size = self.get_random_buffer_size(
                                         self.buffer_size, self.min_buffer_size, self.max_buffer_size
@@ -288,7 +336,7 @@ class PatternMatcherPP(BasePostProcessor):
 
                 # 处理可能剩余的缓冲区内容
                 if self.text_buffer and self.output_mode != 'only_matched':
-                    output_type = self.unmatched_type if self.unmatched_type is not None else content_type
+                    output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
                     yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
 
                 if self.match_buffer and self.output_mode != 'exclude_matched':
@@ -297,9 +345,11 @@ class PatternMatcherPP(BasePostProcessor):
                 # 处理可能未完成的匹配
                 if self.start_buffer:
                     # 将未完成的开始标记添加到文本缓冲区并输出
+                    if not self.text_buffer:
+                        self.text_buffer_type = content_type
                     self.text_buffer += self.start_buffer
                     if self.text_buffer and self.output_mode != 'only_matched':
-                        output_type = self.unmatched_type if self.unmatched_type is not None else content_type
+                        output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
                         yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
 
                 if self.end_buffer:
@@ -308,7 +358,7 @@ class PatternMatcherPP(BasePostProcessor):
                     if self.match_buffer and self.output_mode != 'exclude_matched':
                         yield GeneratorOutput(content=self.match_buffer, content_type=self.matched_type)
 
-            async def agenerate(self) -> Iterator[GeneratorOutput]:
+            async def agenerate(self) -> AsyncIterator[GeneratorOutput]:
                 """生成处理后的输出"""
                 content_type: str = 'text'
 
@@ -326,22 +376,34 @@ class PatternMatcherPP(BasePostProcessor):
                                 # 当前字符与开头标识的第一个字符匹配
                                 # 输出缓冲区中的内容
                                 if self.text_buffer and self.output_mode != 'only_matched':
-                                    output_type = self.unmatched_type if self.unmatched_type is not None else content_type
+                                    output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
                                     yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
                                     self.text_buffer = ""
+                                    self.text_buffer_type = None
 
                                 # 开始匹配开头标识
                                 self.start_buffer = char
                                 self.state = PatternMatcherPP.State.PARTIAL_START_MATCH
                             else:
                                 # 当前字符不匹配开头标识，添加到小缓冲区
+                                # 如果缓冲区为空或类型变化，先输出之前的内容
+                                if self.text_buffer and self.text_buffer_type != content_type:
+                                    if self.output_mode != 'only_matched':
+                                        output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
+                                        yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
+                                    self.text_buffer = ""
+                                    self.text_buffer_type = None
+
+                                if not self.text_buffer:
+                                    self.text_buffer_type = content_type
                                 self.text_buffer += char
 
                                 # 缓冲区达到指定大小，输出内容
                                 if len(self.text_buffer) >= self.current_text_buffer_size and self.output_mode != 'only_matched':
-                                    output_type = self.unmatched_type if self.unmatched_type is not None else content_type
+                                    output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
                                     yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
                                     self.text_buffer = ""
+                                    self.text_buffer_type = None
                                     # 随机化下一次缓冲区大小
                                     self.current_text_buffer_size = self.get_random_buffer_size(
                                         self.buffer_size, self.min_buffer_size, self.max_buffer_size
@@ -369,15 +431,26 @@ class PatternMatcherPP(BasePostProcessor):
                             else:
                                 # 当前字符不匹配开头标识的下一个字符
                                 # 将缓冲区中的部分匹配内容添加到文本缓冲区
+                                # 注意：这部分内容应该保持原始类型
+                                if self.text_buffer and self.text_buffer_type != content_type:
+                                    if self.output_mode != 'only_matched':
+                                        output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
+                                        yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
+                                    self.text_buffer = ""
+                                    self.text_buffer_type = None
+
+                                if not self.text_buffer:
+                                    self.text_buffer_type = content_type
                                 self.text_buffer += self.start_buffer + char
                                 self.start_buffer = ""
                                 self.state = PatternMatcherPP.State.NOT_MATCHING
 
                                 # 缓冲区达到指定大小，输出内容
                                 if len(self.text_buffer) >= self.current_text_buffer_size and self.output_mode != 'only_matched':
-                                    output_type = self.unmatched_type if self.unmatched_type is not None else content_type
+                                    output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
                                     yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
                                     self.text_buffer = ""
+                                    self.text_buffer_type = None
                                     # 随机化下一次缓冲区大小
                                     self.current_text_buffer_size = self.get_random_buffer_size(
                                         self.buffer_size, self.min_buffer_size, self.max_buffer_size
@@ -391,7 +464,16 @@ class PatternMatcherPP(BasePostProcessor):
                             if char == self.end_marker[0]:
                                 # 当前字符与结束标识的第一个字符匹配
                                 self.end_buffer = char
-                                self.state = PatternMatcherPP.State.PARTIAL_END_MATCH
+
+                                # 特殊情况：如果 end_marker 长度为 1，直接完成匹配
+                                if len(self.end_marker) == 1:
+                                    self.eos_buffer = self.end_buffer
+                                    self.end_buffer = ""
+                                    if self.include_eos and self.output_mode != 'exclude_matched':
+                                        yield GeneratorOutput(content=self.eos_buffer, content_type=self.matched_type)
+                                    self.state = PatternMatcherPP.State.FULL_END_MATCH
+                                else:
+                                    self.state = PatternMatcherPP.State.PARTIAL_END_MATCH
                             else:
                                 # 当前字符不匹配结束标识，添加到匹配缓冲区
                                 self.match_buffer += char
@@ -420,7 +502,16 @@ class PatternMatcherPP(BasePostProcessor):
 
                                 # 开始匹配结束标识
                                 self.end_buffer = char
-                                self.state = PatternMatcherPP.State.PARTIAL_END_MATCH
+
+                                # 特殊情况：如果 end_marker 长度为 1，直接完成匹配
+                                if len(self.end_marker) == 1:
+                                    self.eos_buffer = self.end_buffer
+                                    self.end_buffer = ""
+                                    if self.include_eos and self.output_mode != 'exclude_matched':
+                                        yield GeneratorOutput(content=self.eos_buffer, content_type=self.matched_type)
+                                    self.state = PatternMatcherPP.State.FULL_END_MATCH
+                                else:
+                                    self.state = PatternMatcherPP.State.PARTIAL_END_MATCH
                             else:
                                 # 当前字符不匹配结束标识，添加到匹配缓冲区
                                 self.match_buffer += char
@@ -453,6 +544,8 @@ class PatternMatcherPP(BasePostProcessor):
                                         yield GeneratorOutput(content=self.eos_buffer, content_type=self.matched_type)
 
                                     self.state = PatternMatcherPP.State.FULL_END_MATCH
+                                    # 继续处理下一个字符，避免当前字符被重复处理
+                                    continue
                             else:
                                 # 当前字符不匹配结束标识的下一个字符
                                 # 将缓冲区中的部分匹配内容添加到匹配内容中
@@ -473,13 +566,16 @@ class PatternMatcherPP(BasePostProcessor):
                                 self.state = PatternMatcherPP.State.PARTIAL_START_MATCH
                             else:
                                 # 当前字符不匹配开头标识，添加到小缓冲区
+                                if not self.text_buffer:
+                                    self.text_buffer_type = content_type
                                 self.text_buffer += char
 
                                 # 缓冲区达到指定大小，输出内容
                                 if len(self.text_buffer) >= self.current_text_buffer_size and self.output_mode != 'only_matched':
-                                    output_type = self.unmatched_type if self.unmatched_type is not None else content_type
+                                    output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
                                     yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
                                     self.text_buffer = ""
+                                    self.text_buffer_type = None
                                     # 随机化下一次缓冲区大小
                                     self.current_text_buffer_size = self.get_random_buffer_size(
                                         self.buffer_size, self.min_buffer_size, self.max_buffer_size
@@ -487,7 +583,7 @@ class PatternMatcherPP(BasePostProcessor):
 
                 # 处理可能剩余的缓冲区内容
                 if self.text_buffer and self.output_mode != 'only_matched':
-                    output_type = self.unmatched_type if self.unmatched_type is not None else content_type
+                    output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
                     yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
 
                 if self.match_buffer and self.output_mode != 'exclude_matched':
@@ -496,9 +592,11 @@ class PatternMatcherPP(BasePostProcessor):
                 # 处理可能未完成的匹配
                 if self.start_buffer:
                     # 将未完成的开始标记添加到文本缓冲区并输出
+                    if not self.text_buffer:
+                        self.text_buffer_type = content_type
                     self.text_buffer += self.start_buffer
                     if self.text_buffer and self.output_mode != 'only_matched':
-                        output_type = self.unmatched_type if self.unmatched_type is not None else content_type
+                        output_type = self.unmatched_type if self.unmatched_type is not None else self.text_buffer_type
                         yield GeneratorOutput(content=self.text_buffer, content_type=output_type)
 
                 if self.end_buffer:
