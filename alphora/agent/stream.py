@@ -13,6 +13,8 @@ from alphora.models.llms.stream_helper import BaseGenerator, GeneratorOutput
 from alphora.postprocess.base_pp import BasePostProcessor
 
 import logging
+import asyncio
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -56,7 +58,14 @@ class Stream:
                         num_chars = random.randint(1, 5)
                         chunk = self.content[index:index + num_chars]
                         index += num_chars
-                        time.sleep(self.interval)
+
+                        # time.sleep(self.interval)  # 260402修复
+
+                        #  确保每次 chunk 产出之间都是真正的异步让出，而不是阻塞事件循环，否则缺少异步让出时机，
+                        #  导致 SSE 消费端 data_generator() 拿不到调度机会，就会出现前面都攒着，最后一次性喷给客户端。
+
+                        await asyncio.sleep(self.interval)
+
                         yield GeneratorOutput(content=chunk, content_type=self.content_type)
                 else:
                     yield GeneratorOutput(content=self.content, content_type=self.content_type)
