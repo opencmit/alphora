@@ -23,6 +23,7 @@ class StreamCallback(Protocol):
 
     async def send_data(self, content_type: str, content: str = None) -> None: ...
     async def stop(self, stop_reason: str = "stop") -> None: ...
+    async def usage(self, prompt_tokens: int = 0, completion_tokens: int = 0, total_tokens: int = 0) -> None: ...
 
 
 class ToolCallDelta(BaseModel):
@@ -47,12 +48,19 @@ class Choice(BaseModel):
     finish_reason: Optional[str] = None
 
 
+class Usage(BaseModel):
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
 class ChatCompletionChunk(BaseModel):
     id: str
     object: str = "chat.completion.chunk"
     created: int
     model: str
     choices: List[Choice]
+    usage: Optional[Usage] = None
     system_fingerprint: Optional[str] = None
 
 
@@ -64,6 +72,8 @@ class ChatCompletionResponse(BaseModel):
     model: str
     choices: List[Choice]
     system_fingerprint: Optional[str] = None
+
+    usage: Optional[Usage] = None
 
 
 class DataStreamer:
@@ -78,23 +88,33 @@ class DataStreamer:
         self.full_content = []
         self.finish_reason = None
 
-    async def send_data(self, content_type: str, content: str = None):
+    async def send_data(self, content_type: str = None, content: str = None, usage: dict = None):
         """由智能体调用：向流中发送数据"""
         if self._closed:
             return
 
         await self.data_queue.put({
             "type": content_type,
-            "content": content
+            "content": content,
+            "usage": usage,
         })
 
     async def stop(self, stop_reason: str = 'stop'):
         """发送结束信号"""
         await self.send_data(content_type="stop", content=stop_reason)
 
+    async def usage(self, prompt_tokens: int = 0, completion_tokens: int = 0, total_tokens: int = 0):
+
+        usage = {"prompt_tokens": prompt_tokens,
+                 "completion_tokens": completion_tokens,
+                 "total_tokens": total_tokens}
+
+        await self.send_data(content_type=None, content=None, usage=usage)
+
     def _generate_sse_chunk(self,
-                            content: str,
-                            content_type: str,
+                            content: str = None,
+                            content_type: str = None,
+                            usage: Usage = None,
                             finish_reason: Optional[str] = None) -> str:
         """
         生成 SSE 数据块，符合 OpenAI chat.completion.chunk 结构
@@ -108,26 +128,37 @@ class DataStreamer:
         try:
             delta_kwargs: Dict[str, Any] = {"content_type": content_type}
 
-            if "tool_call" in content_type:
-                tc_data = json.loads(content)
-                delta_kwargs["tool_calls"] = [ToolCallDelta(
-                    index=tc_data.get("index", 0),
-                    id=tc_data.get("id") or None,
-                    function={"name": tc_data.get("name", "")},
-                )]
-                # delta_kwargs["content"] = None
-                delta_kwargs['content'] = tc_data.get("name", "")  # 260319修改 tool_call 为函数工具名称
-            elif "tool_call_args" in content_type:
-                tc_data = json.loads(content)
-                delta_kwargs["tool_calls"] = [ToolCallDelta(
-                    index=tc_data.get("index", 0),
-                    id=tc_data.get("id") or None,
-                    function={"arguments": tc_data.get("arguments", "")},
-                )]
-                # delta_kwargs["content"] = None
-                delta_kwargs['content'] = tc_data.get("arguments", "")  # 260319 修改为工具的参数
+            if content_type:
+                if "tool_call" in content_type:
+                    tc_data = json.loads(content)
+                    delta_kwargs["tool_calls"] = [ToolCallDelta(
+                        index=tc_data.get("index", 0),
+                        id=tc_data.get("id") or None,
+                        function={"name": tc_data.get("name", "")},
+                    )]
+                    # delta_kwargs["content"] = None
+                    delta_kwargs['content'] = tc_data.get("name", "")  # 260319修改 tool_call 为函数工具名称
+
+                elif "tool_call_args" in content_type:
+                    tc_data = json.loads(content)
+                    delta_kwargs["tool_calls"] = [ToolCallDelta(
+                        index=tc_data.get("index", 0),
+                        id=tc_data.get("id") or None,
+                        function={"arguments": tc_data.get("arguments", "")},
+                    )]
+                    # delta_kwargs["content"] = None
+                    delta_kwargs['content'] = tc_data.get("arguments", "")  # 260319 修改为工具的参数
+
+                else:
+                    delta_kwargs["content"] = content
+
             else:
                 delta_kwargs["content"] = content
+
+            if usage:
+                usage = Usage(prompt_tokens=usage.get("prompt_tokens", 0),
+                              completion_tokens=usage.get("completion_tokens", 0),
+                              total_tokens=usage.get("total_tokens", 0))
 
             chunk = ChatCompletionChunk(
                 id=self.completion_id,
@@ -137,9 +168,11 @@ class DataStreamer:
                     index=0,
                     delta=ChoiceDelta(**delta_kwargs),
                     finish_reason=finish_reason
-                )]
+                )],
+                usage=usage
             )
             return f"data: {chunk.model_dump_json()}\n\n"
+
         except Exception as e:
             chunk = ChatCompletionChunk(
                 id=self.completion_id,
@@ -150,7 +183,8 @@ class DataStreamer:
                     delta=ChoiceDelta(content=str(e),
                                       content_type='sse error'),
                     finish_reason=finish_reason
-                )]
+                )],
+                usage=usage
             )
             return f"data: {chunk.model_dump_json()}\n\n"
 
@@ -177,7 +211,10 @@ class DataStreamer:
                     yield self._generate_sse_chunk(content='', content_type='stop', finish_reason=data['content'])
                     break
                 else:
-                    yield self._generate_sse_chunk(content=data['content'], content_type=data['type'])
+
+                    yield self._generate_sse_chunk(content=data['content'],
+                                                   content_type=data['type'],
+                                                   usage=data['usage'])
 
         finally:
             self._closed = True

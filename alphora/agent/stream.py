@@ -126,6 +126,15 @@ class Stream:
         else:
             _cli_print(f"\n[Stream stopped: {stop_reason}]\n")
 
+    async def astream_usage(self, prompt_tokens: int = 0, completion_tokens: int = 0, total_tokens: int = 0):
+        """
+        流式输出用量
+        """
+        if self.callback:
+            await self.callback.usage(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens, total_tokens=total_tokens)
+        else:
+            pass
+
     def stop(self, stop_reason: str = 'end') -> None:
         """
         终结流式输出
