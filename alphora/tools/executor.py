@@ -42,6 +42,8 @@ import json
 import asyncio
 import logging
 from typing import List, Dict, Any, Union, Optional, Callable
+
+from alphora.memory.manager import DEFAULT_SESSION, _UNSET, _resolve_memory_id
 from pydantic import BaseModel
 
 from .core import Tool
@@ -485,7 +487,9 @@ async def execute_tools(
 def add_tool_results_to_memory(
         memory: "MemoryManager",
         results: List[ToolExecutionResult],
-        session_id: str = "default"
+        memory_id: str = DEFAULT_SESSION,
+        *,
+        session_id: Any = _UNSET,
 ) -> None:
     """
     将工具执行结果添加到记忆
@@ -493,17 +497,23 @@ def add_tool_results_to_memory(
     Args:
         memory: MemoryManager 实例
         results: ToolExecutionResult 列表
-        session_id: 会话ID
+        memory_id: 记忆分区 ID
+        session_id: [已弃用] 请使用 memory_id
 
     Example:
         results = await executor.execute(tool_calls)
         add_tool_results_to_memory(memory, results)
     """
+    mid = _resolve_memory_id(
+        memory_id=memory_id,
+        session_id=session_id,
+        method="add_tool_results_to_memory",
+    )
     for result in results:
         memory.add_tool_result(
             tool_call_id=result.tool_call_id,
             name=result.tool_name,
             content=result.content,
-            session_id=session_id
+            memory_id=mid,
         )
 

@@ -138,12 +138,12 @@ memory.clear()
 多会话支持:
 
 ```python
-# 使用不同的 session_id 管理多个对话
-memory.add_user("你好", session_id="user_001")
-memory.add_user("Hello", session_id="user_002")
+# 使用不同的 memory_id 管理多个对话
+memory.add_user("你好", memory_id="user_001")
+memory.add_user("Hello", memory_id="user_002")
 
 # 获取指定会话的历史
-history = memory.build_history(session_id="user_001")
+history = memory.build_history(memory_id="user_001")
 
 # 列出所有会话
 sessions = memory.list_sessions()
@@ -153,7 +153,12 @@ memory.delete_session("user_001")
 ```
 """
 
-from alphora.memory.manager import MemoryManager, Position
+from alphora.memory.manager import (
+    MemoryManager,
+    Position,
+    DEFAULT_SESSION,
+    DEFAULT_MEMORY_ID,
+)
 from alphora.memory.message import Message, MessageRole, ToolCall
 from alphora.memory.history_payload import (
     HistoryPayload,
@@ -166,6 +171,8 @@ from alphora.memory import processors
 
 __all__ = [
     "MemoryManager",
+    "DEFAULT_SESSION",
+    "DEFAULT_MEMORY_ID",
     "Message",
     "MessageRole",
     "ToolCall",

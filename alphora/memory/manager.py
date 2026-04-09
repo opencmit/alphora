@@ -31,6 +31,7 @@ import time
 import json
 import logging
 import copy
+import warnings
 
 from alphora.memory.message import Message, MessageRole, ToolCall
 from alphora.memory.history_payload import (
@@ -65,6 +66,56 @@ class Position:
 
 # 目标类型（用于 pin/tag/remove 等方法）
 Target = Union[str, Callable[[Message], bool], List[str]]
+
+DEFAULT_SESSION = "default"
+DEFAULT_MEMORY_ID = DEFAULT_SESSION
+_UNSET = object()
+
+
+def _resolve_memory_id(
+        *,
+        memory_id: str,
+        session_id: Any,
+        method: str,
+) -> str:
+    """合并 memory_id 与已弃用的 session_id；显式传入 session_id 时发出 DeprecationWarning。"""
+    if session_id is _UNSET:
+        return memory_id
+    warnings.warn(
+        f"{method}() 的参数 session_id 已弃用，请改用 memory_id；"
+        f"该参数将在未来版本中移除。",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    if memory_id != DEFAULT_SESSION and memory_id != session_id:
+        raise TypeError(
+            f"{method}() 不能同时传入相互冲突的 memory_id 与 session_id。"
+        )
+    return session_id
+
+
+def _resolve_memory_id_required(
+        *,
+        memory_id: Optional[str],
+        session_id: Any,
+        method: str,
+) -> str:
+    """用于必须传入一个分区 ID 的方法（如 has_session、delete_session）。"""
+    if session_id is not _UNSET:
+        warnings.warn(
+            f"{method}() 的参数 session_id 已弃用，请改用 memory_id；"
+            f"该参数将在未来版本中移除。",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        if memory_id is not None and memory_id != session_id:
+            raise TypeError(
+                f"{method}() 不能同时传入相互冲突的 memory_id 与 session_id。"
+            )
+        return session_id
+    if memory_id is None:
+        raise TypeError(f"{method}() 缺少必需参数 memory_id")
+    return memory_id
 
 
 class MemoryManager:
@@ -121,7 +172,8 @@ class MemoryManager:
     ```
     """
 
-    DEFAULT_SESSION = "default"
+    DEFAULT_SESSION = DEFAULT_SESSION
+    DEFAULT_MEMORY_ID = DEFAULT_MEMORY_ID
 
     def __init__(
             self,
@@ -257,7 +309,7 @@ class MemoryManager:
         """检查是否需要自动压缩"""
         if self._max_messages and session_id in self._cache:
             if len(self._cache[session_id]) > self._max_messages:
-                self.compress(session_id=session_id, keep_last=self._max_messages)
+                self.compress(memory_id=session_id, keep_last=self._max_messages)
 
     def _resolve_target(
             self,
@@ -291,7 +343,9 @@ class MemoryManager:
     def add_user(
             self,
             content: str,
-            session_id: str = DEFAULT_SESSION,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
             **metadata
     ) -> Message:
         """
@@ -299,7 +353,8 @@ class MemoryManager:
 
         Args:
             content: 用户输入内容
-            session_id: 会话ID
+            memory_id: 记忆分区 ID（同一 MemoryManager 内的对话槽位）
+            session_id: [已弃用] 请使用 memory_id
             **metadata: 额外元数据
 
         Returns:
@@ -308,14 +363,19 @@ class MemoryManager:
         Example:
             memory.add_user("你好，帮我查一下天气")
         """
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="add_user",
+        )
         msg = Message.user(content, **metadata)
-        return self._add_message(msg, session_id)
+        return self._add_message(msg, mid)
 
     def add_assistant(
             self,
             content: Optional[Union[str, Any]] = None,
             tool_calls: Optional[List[Union[Dict, ToolCall]]] = None,
-            session_id: str = DEFAULT_SESSION,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
             **metadata
     ) -> Message:
         """
@@ -330,7 +390,8 @@ class MemoryManager:
                 - ToolCall 对象: 自动提取 tool_calls 和 content
                 - None: 无内容
             tool_calls: [已废弃] 工具调用列表。请直接将 ToolCall 对象传入 content 参数。
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
             **metadata: 额外元数据
 
         Returns:
@@ -344,7 +405,9 @@ class MemoryManager:
             # 方式 2: 普通文本回复
             memory.add_assistant("你好！有什么可以帮你的？")
         """
-        import warnings
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="add_assistant",
+        )
 
         if tool_calls is not None:
             warnings.warn(
@@ -375,7 +438,7 @@ class MemoryManager:
         if isinstance(actual_content, str):
             actual_content = actual_content.replace("</think>", "").replace("<think>", "")
         msg = Message.assistant(actual_content, actual_tool_calls, **metadata)
-        return self._add_message(msg, session_id)
+        return self._add_message(msg, mid)
 
     def add_tool_result(
             self,
@@ -383,7 +446,9 @@ class MemoryManager:
             tool_call_id: Optional[str] = None,
             name: Optional[str] = None,
             content: Optional[Union[str, Dict, Any]] = None,
-            session_id: str = DEFAULT_SESSION,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
             **metadata
     ) -> Union[Message, List[Message]]:
         """
@@ -398,7 +463,8 @@ class MemoryManager:
             tool_call_id: 工具调用ID (传统方式)
             name: 工具名称 (传统方式)
             content: 执行结果内容 (传统方式)
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
             **metadata: 额外元数据
 
         Returns:
@@ -416,6 +482,9 @@ class MemoryManager:
                 content={"city": "北京", "weather": "晴"}
             )
         """
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="add_tool_result",
+        )
         # 方式 1: 传入列表
         if isinstance(result, list):
             messages = []
@@ -424,7 +493,7 @@ class MemoryManager:
                     tool_call_id=r.tool_call_id,
                     name=r.tool_name,
                     content=r.content,
-                    session_id=session_id,
+                    memory_id=mid,
                     **metadata
                 )
                 messages.append(msg)
@@ -436,7 +505,7 @@ class MemoryManager:
                 tool_call_id=result.tool_call_id,
                 name=result.tool_name,
                 content=result.content,
-                session_id=session_id,
+                memory_id=mid,
                 **metadata
             )
 
@@ -446,7 +515,7 @@ class MemoryManager:
                 tool_call_id=tool_call_id,
                 name=name,
                 content=content,
-                session_id=session_id,
+                memory_id=mid,
                 **metadata
             )
 
@@ -460,13 +529,13 @@ class MemoryManager:
             tool_call_id: str,
             name: str,
             content: Union[str, Dict, Any],
-            session_id: str = DEFAULT_SESSION,
+            memory_id: str = DEFAULT_SESSION,
             **metadata
     ) -> Message:
         """添加单个工具结果 """
-        if not self._validate_tool_call_id(session_id, tool_call_id):
+        if not self._validate_tool_call_id(memory_id, tool_call_id):
             logger.warning(
-                f"tool_call_id '{tool_call_id}' not found in session '{session_id}'. "
+                f"tool_call_id '{tool_call_id}' not found in memory '{memory_id}'. "
                 "This may cause tool chain validation to fail."
             )
 
@@ -474,7 +543,7 @@ class MemoryManager:
             content = json.dumps(content, ensure_ascii=False)
 
         msg = Message.tool(tool_call_id, content, name, **metadata)
-        return self._add_message(msg, session_id)
+        return self._add_message(msg, memory_id)
 
     def _validate_tool_call_id(self, session_id: str, tool_call_id: str) -> bool:
         """验证 tool_call_id 是否存在于历史中"""
@@ -489,7 +558,9 @@ class MemoryManager:
     def add_system(
             self,
             content: str,
-            session_id: str = DEFAULT_SESSION,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
             **metadata
     ) -> Message:
         """
@@ -497,19 +568,25 @@ class MemoryManager:
 
         Args:
             content: 系统指令内容
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
             **metadata: 额外元数据
 
         Returns:
             创建的 Message 对象
         """
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="add_system",
+        )
         msg = Message.system(content, **metadata)
-        return self._add_message(msg, session_id)
+        return self._add_message(msg, mid)
 
     def add_message(
             self,
             message: Union[Message, Dict],
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> Message:
         """
         添加原始消息
@@ -518,33 +595,43 @@ class MemoryManager:
 
         Args:
             message: 消息对象或字典
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             添加的 Message 对象
         """
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="add_message",
+        )
         if isinstance(message, dict):
             message = Message.from_openai_format(message)
-        return self._add_message(message, session_id)
+        return self._add_message(message, mid)
 
     def add_messages(
             self,
             messages: List[Union[Message, Dict]],
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> List[Message]:
         """
         批量添加消息
 
         Args:
             messages: 消息列表
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             添加的 Message 对象列表
         """
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="add_messages",
+        )
         result = []
         for msg in messages:
-            result.append(self.add_message(msg, session_id))
+            result.append(self.add_message(msg, mid))
         return result
 
     def _add_message(self, message: Message, session_id: str) -> Message:
@@ -581,21 +668,24 @@ class MemoryManager:
     # 获取消息 API
     def get_messages(
             self,
-            session_id: str = DEFAULT_SESSION,
+            memory_id: str = DEFAULT_SESSION,
             limit: Optional[int] = None,
             offset: int = 0,
             role: Optional[str] = None,
-            filter: Optional[Callable[[Message], bool]] = None
+            filter: Optional[Callable[[Message], bool]] = None,
+            *,
+            session_id: Any = _UNSET,
     ) -> List[Message]:
         """
         获取消息列表
 
         Args:
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
             limit: 返回数量限制
             offset: 偏移量 (从末尾算起)
             role: 筛选角色 (user/assistant/tool/system)
             filter: 自定义过滤函数
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             Message 列表
@@ -613,7 +703,10 @@ class MemoryManager:
             # 获取被固定的消息
             messages = memory.get_messages(filter=lambda m: m.is_pinned)
         """
-        messages = self._cache.get(session_id, [])
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="get_messages",
+        )
+        messages = self._cache.get(mid, [])
 
         # 角色过滤
         if role:
@@ -634,66 +727,92 @@ class MemoryManager:
 
     def get_last_message(
             self,
-            session_id: str = DEFAULT_SESSION,
-            role: Optional[str] = None
+            memory_id: str = DEFAULT_SESSION,
+            role: Optional[str] = None,
+            *,
+            session_id: Any = _UNSET,
     ) -> Optional[Message]:
         """
         获取最后一条消息
 
         Args:
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
             role: 筛选角色
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             最后一条 Message，不存在返回 None
         """
-        messages = self.get_messages(session_id, role=role)
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="get_last_message",
+        )
+        messages = self.get_messages(mid, role=role)
         return messages[-1] if messages else None
 
     def get_message_by_id(
             self,
             message_id: str,
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> Optional[Message]:
         """根据消息ID获取消息"""
-        for msg in self._cache.get(session_id, []):
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="get_message_by_id",
+        )
+        for msg in self._cache.get(mid, []):
             if msg.id == message_id:
                 return msg
         return None
 
-    def get_pinned(self, session_id: str = DEFAULT_SESSION) -> List[Message]:
+    def get_pinned(
+            self,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
+    ) -> List[Message]:
         """
         获取所有被固定的消息
 
         Args:
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             被固定的 Message 列表
         """
-        return self.get_messages(session_id, filter=lambda m: m.is_pinned)
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="get_pinned",
+        )
+        return self.get_messages(mid, filter=lambda m: m.is_pinned)
 
     def get_tagged(
             self,
             tag: str,
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> List[Message]:
         """
         获取带有指定标签的消息
 
         Args:
             tag: 标签名
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             带有标签的 Message 列表
         """
-        return self.get_messages(session_id, filter=lambda m: m.has_tag(tag))
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="get_tagged",
+        )
+        return self.get_messages(mid, filter=lambda m: m.has_tag(tag))
 
     # 构建历史 API
     def build_history(
             self,
-            session_id: str = DEFAULT_SESSION,
+            memory_id: str = DEFAULT_SESSION,
             max_rounds: Optional[int] = None,
             max_messages: Optional[int] = None,
             include_system: bool = False,
@@ -702,6 +821,8 @@ class MemoryManager:
             exclude_roles: Optional[List[str]] = None,
             keep_pinned: bool = False,
             keep_tagged: Optional[List[str]] = None,
+            *,
+            session_id: Any = _UNSET,
     ) -> HistoryPayload:
         """
         构建历史记录载荷 (用于传入 BasePrompt)
@@ -710,7 +831,7 @@ class MemoryManager:
         包含验证信息，可以安全地传入 BasePrompt.call/acall。
 
         Args:
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
             max_rounds: 最大对话轮数 (一问一答算一轮)
             max_messages: 最大消息数
             include_system: 是否包含历史中的 system 消息
@@ -721,6 +842,7 @@ class MemoryManager:
             exclude_roles: 排除的角色列表 (便捷参数)
             keep_pinned: 是否保留被固定的消息 (便捷参数)
             keep_tagged: 保留带有这些标签的消息 (便捷参数)
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             HistoryPayload 对象
@@ -754,12 +876,15 @@ class MemoryManager:
                 )
             )
         """
-        messages = self._cache.get(session_id, [])
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="build_history",
+        )
+        messages = self._cache.get(mid, [])
         before_ctx = HookContext(
             event=HookEvent.MEMORY_BEFORE_BUILD_HISTORY,
             component="memory",
             data={
-                "session_id": session_id,
+                "session_id": mid,
                 "messages": messages,
                 "max_rounds": max_rounds,
                 "max_messages": max_messages,
@@ -834,7 +959,7 @@ class MemoryManager:
         # 创建 HistoryPayload
         history_payload = HistoryPayload.create(
             messages=openai_messages,
-            session_id=session_id,
+            session_id=mid,
             round_count=round_count,
             validate_tool_chain=validate_tool_chain
         )
@@ -842,7 +967,7 @@ class MemoryManager:
             event=HookEvent.MEMORY_AFTER_BUILD_HISTORY,
             component="memory",
             data={
-                "session_id": session_id,
+                "session_id": mid,
                 "history": history_payload,
             },
         )
@@ -851,34 +976,41 @@ class MemoryManager:
 
     def count_length(
             self,
-            session_id: str = DEFAULT_SESSION,
+            memory_id: str = DEFAULT_SESSION,
             mode: Literal["chars", "tokens"] = "chars",
             tokenizer: Optional[Callable[[str], int]] = None,
+            *,
+            session_id: Any = _UNSET,
             **build_history_kwargs
     ) -> int:
         """
         统计当前上下文的字数，用于判断是否需要记忆压缩。
         Args:
-            session_id: 会话 ID
+            memory_id: 记忆分区 ID
             mode: 统计模式
                 - "chars": 字符数（快速，无需额外依赖）
                 - "tokens": token 数（精确，用于 LLM 上下文限制，需传入 tokenizer）
             tokenizer: token 计数函数，mode="tokens" 时必传。
                 例如: ``lambda s: len(tiktoken.encoding_for_model("gpt-4").encode(s))``
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             字数（字符数或 token 数）
         """
-
-        return self.build_history(session_id=session_id, **build_history_kwargs).count_context_length(mode=mode, tokenizer=tokenizer)
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="count_length",
+        )
+        return self.build_history(memory_id=mid, **build_history_kwargs).count_context_length(mode=mode, tokenizer=tokenizer)
 
     def build_history_unsafe(
             self,
-            session_id: str = DEFAULT_SESSION,
+            memory_id: str = DEFAULT_SESSION,
             max_rounds: Optional[int] = None,
             max_messages: Optional[int] = None,
             include_system: bool = False,
             processor: Optional[Union[Processor, List[Processor]]] = None,
+            *,
+            session_id: Any = _UNSET,
     ) -> HistoryPayload:
         """
         构建历史记录载荷 (不验证工具链)
@@ -886,17 +1018,21 @@ class MemoryManager:
         警告: 仅在确定工具链是不完整的情况下使用（例如工具调用进行中）
 
         Args:
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
             max_rounds: 最大对话轮数
             max_messages: 最大消息数
             include_system: 是否包含历史中的 system 消息
             processor: 处理器
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             HistoryPayload 对象 (tool_chain_valid 可能为 False)
         """
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="build_history_unsafe",
+        )
         return self.build_history(
-            session_id=session_id,
+            memory_id=mid,
             max_rounds=max_rounds,
             max_messages=max_messages,
             include_system=include_system,
@@ -933,7 +1069,9 @@ class MemoryManager:
             self,
             fn: Callable[[Message], Message],
             predicate: Optional[Callable[[Message], bool]] = None,
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> int:
         """
         对消息应用变换 (永久修改)
@@ -941,7 +1079,8 @@ class MemoryManager:
         Args:
             fn: 变换函数，接收 Message 返回新的 Message
             predicate: 过滤条件，只对满足条件的消息应用变换
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             变换的消息数量
@@ -958,11 +1097,14 @@ class MemoryManager:
                 fn=lambda m: m.with_metadata(processed=True)
             )
         """
-        messages = self._cache.get(session_id, [])
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="apply",
+        )
+        messages = self._cache.get(mid, [])
         if not messages:
             return 0
 
-        self._save_undo_state(session_id)
+        self._save_undo_state(mid)
 
         count = 0
         new_messages = []
@@ -974,24 +1116,27 @@ class MemoryManager:
             else:
                 new_messages.append(msg)
 
-        self._cache[session_id] = new_messages
+        self._cache[mid] = new_messages
 
         if count > 0:
-            self._save_session(session_id)
+            self._save_session(mid)
 
         return count
 
     def remove(
             self,
             predicate: Callable[[Message], bool],
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> int:
         """
         删除满足条件的消息 (永久修改)
 
         Args:
             predicate: 过滤条件，返回 True 的消息将被删除
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             删除的消息数量
@@ -1003,19 +1148,22 @@ class MemoryManager:
             # 删除包含错误的消息
             count = memory.remove(lambda m: "error" in (m.content or "").lower())
         """
-        messages = self._cache.get(session_id, [])
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="remove",
+        )
+        messages = self._cache.get(mid, [])
         if not messages:
             return 0
 
-        self._save_undo_state(session_id)
+        self._save_undo_state(mid)
 
         original_len = len(messages)
-        self._cache[session_id] = [m for m in messages if not predicate(m)]
+        self._cache[mid] = [m for m in messages if not predicate(m)]
 
-        removed = original_len - len(self._cache[session_id])
+        removed = original_len - len(self._cache[mid])
 
         if removed > 0:
-            self._save_session(session_id)
+            self._save_session(mid)
 
         return removed
 
@@ -1023,7 +1171,9 @@ class MemoryManager:
             self,
             message: Union[Message, List[Message]],
             position: Union[str, int] = Position.END,
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> None:
         """
         在指定位置注入消息 (永久修改)
@@ -1036,7 +1186,8 @@ class MemoryManager:
                 - "before_last_user": 最后一个 user 消息之前
                 - "after_last_user": 最后一个 user 消息之后
                 - int: 指定索引位置
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
 
         Example:
             # 注入 RAG 上下文
@@ -1051,10 +1202,13 @@ class MemoryManager:
                 position="start"
             )
         """
-        self._ensure_session(session_id)
-        self._save_undo_state(session_id)
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="inject",
+        )
+        self._ensure_session(mid)
+        self._save_undo_state(mid)
 
-        messages = self._cache[session_id]
+        messages = self._cache[mid]
 
         # 标准化为列表
         if isinstance(message, Message):
@@ -1089,12 +1243,14 @@ class MemoryManager:
         for i, msg in enumerate(to_inject):
             messages.insert(insert_index + i, msg)
 
-        self._save_session(session_id)
+        self._save_session(mid)
 
     def pin(
             self,
             target: Target,
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> int:
         """
         固定消息 (压缩时保留)
@@ -1104,7 +1260,8 @@ class MemoryManager:
                 - str: 消息 ID
                 - List[str]: 消息 ID 列表
                 - Callable: 谓词函数
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             固定的消息数量
@@ -1116,40 +1273,51 @@ class MemoryManager:
             # 按条件固定
             memory.pin(lambda m: "重要" in (m.content or ""))
         """
-        predicate = self._resolve_target(target, session_id)
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="pin",
+        )
+        predicate = self._resolve_target(target, mid)
         return self.apply(
             fn=lambda m: m.pinned(),
             predicate=lambda m: predicate(m) and not m.is_pinned,
-            session_id=session_id
+            memory_id=mid,
         )
 
     def unpin(
             self,
             target: Target,
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> int:
         """
         取消固定消息
 
         Args:
             target: 目标
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             取消固定的消息数量
         """
-        predicate = self._resolve_target(target, session_id)
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="unpin",
+        )
+        predicate = self._resolve_target(target, mid)
         return self.apply(
             fn=lambda m: m.unpinned(),
             predicate=lambda m: predicate(m) and m.is_pinned,
-            session_id=session_id
+            memory_id=mid,
         )
 
     def tag(
             self,
             tag_name: str,
             target: Target,
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> int:
         """
         给消息添加标签
@@ -1157,7 +1325,8 @@ class MemoryManager:
         Args:
             tag_name: 标签名
             target: 目标
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             添加标签的消息数量
@@ -1169,18 +1338,23 @@ class MemoryManager:
             # 给指定 ID 的消息打标签
             memory.tag("important", "msg_id_xxx")
         """
-        predicate = self._resolve_target(target, session_id)
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="tag",
+        )
+        predicate = self._resolve_target(target, mid)
         return self.apply(
             fn=lambda m: m.with_tags(tag_name),
             predicate=lambda m: predicate(m) and not m.has_tag(tag_name),
-            session_id=session_id
+            memory_id=mid,
         )
 
     def untag(
             self,
             tag_name: str,
             target: Target,
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> int:
         """
         移除消息标签
@@ -1188,21 +1362,27 @@ class MemoryManager:
         Args:
             tag_name: 标签名
             target: 目标
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             移除标签的消息数量
         """
-        predicate = self._resolve_target(target, session_id)
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="untag",
+        )
+        predicate = self._resolve_target(target, mid)
         return self.apply(
             fn=lambda m: m.without_tags(tag_name),
             predicate=lambda m: predicate(m) and m.has_tag(tag_name),
-            session_id=session_id
+            memory_id=mid,
         )
 
     def check_tool_chain(
             self,
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> Tuple[bool, Optional[str], List[Dict]]:
         """
         检查工具调用链完整性
@@ -1210,74 +1390,100 @@ class MemoryManager:
         Returns:
             (is_valid, error_message, incomplete_calls)
         """
-        messages = [m.to_openai_format() for m in self._cache.get(session_id, [])]
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="check_tool_chain",
+        )
+        messages = [m.to_openai_format() for m in self._cache.get(mid, [])]
         is_valid, error_msg = ToolChainValidator.validate(messages)
         incomplete = ToolChainValidator.find_incomplete_tool_calls(messages)
         return is_valid, error_msg, incomplete
 
     def get_pending_tool_calls(
             self,
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> List[Dict[str, Any]]:
         """
         获取所有待处理的工具调用
         """
-        messages = [m.to_openai_format() for m in self._cache.get(session_id, [])]
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="get_pending_tool_calls",
+        )
+        messages = [m.to_openai_format() for m in self._cache.get(mid, [])]
         return ToolChainValidator.find_incomplete_tool_calls(messages)
 
     def delete_message(
             self,
             message_id: str,
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> bool:
         """删除指定消息"""
-        if session_id not in self._cache:
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="delete_message",
+        )
+        if mid not in self._cache:
             return False
 
-        self._save_undo_state(session_id)
+        self._save_undo_state(mid)
 
-        original_len = len(self._cache[session_id])
-        self._cache[session_id] = [
-            m for m in self._cache[session_id] if m.id != message_id
+        original_len = len(self._cache[mid])
+        self._cache[mid] = [
+            m for m in self._cache[mid] if m.id != message_id
         ]
 
-        if len(self._cache[session_id]) < original_len:
-            self._save_session(session_id)
+        if len(self._cache[mid]) < original_len:
+            self._save_session(mid)
             return True
         return False
 
     def delete_last(
             self,
             count: int = 1,
-            session_id: str = DEFAULT_SESSION
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
     ) -> int:
         """删除最后 N 条消息"""
-        if session_id not in self._cache:
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="delete_last",
+        )
+        if mid not in self._cache:
             return 0
 
-        self._save_undo_state(session_id)
+        self._save_undo_state(mid)
 
-        original_len = len(self._cache[session_id])
-        self._cache[session_id] = (
-            self._cache[session_id][:-count] if count < original_len else []
+        original_len = len(self._cache[mid])
+        self._cache[mid] = (
+            self._cache[mid][:-count] if count < original_len else []
         )
 
-        deleted = original_len - len(self._cache[session_id])
+        deleted = original_len - len(self._cache[mid])
         if deleted > 0:
-            self._save_session(session_id)
+            self._save_session(mid)
         return deleted
 
-    def delete_last_round(self, session_id: str = DEFAULT_SESSION) -> int:
+    def delete_last_round(
+            self,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
+    ) -> int:
         """
         删除最后一轮对话
 
         一轮 = 最后一个 user 消息及其后的所有消息
         """
-        messages = self._cache.get(session_id, [])
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="delete_last_round",
+        )
+        messages = self._cache.get(mid, [])
         if not messages:
             return 0
 
-        self._save_undo_state(session_id)
+        self._save_undo_state(mid)
 
         cut_index = len(messages)
         for i in range(len(messages) - 1, -1, -1):
@@ -1286,23 +1492,31 @@ class MemoryManager:
                 break
 
         deleted = len(messages) - cut_index
-        self._cache[session_id] = messages[:cut_index]
+        self._cache[mid] = messages[:cut_index]
 
         if deleted > 0:
-            self._save_session(session_id)
+            self._save_session(mid)
         return deleted
 
-    def delete_last_tool_round(self, session_id: str = DEFAULT_SESSION) -> int:
+    def delete_last_tool_round(
+            self,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
+    ) -> int:
         """
         删除最后一轮工具调用
 
         包括: assistant(tool_calls) + 所有 tool 结果 + 最终 assistant 回复
         """
-        messages = self._cache.get(session_id, [])
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="delete_last_tool_round",
+        )
+        messages = self._cache.get(mid, [])
         if not messages:
             return 0
 
-        self._save_undo_state(session_id)
+        self._save_undo_state(mid)
 
         cut_index = len(messages)
         for i in range(len(messages) - 1, -1, -1):
@@ -1311,54 +1525,68 @@ class MemoryManager:
                 break
 
         deleted = len(messages) - cut_index
-        self._cache[session_id] = messages[:cut_index]
+        self._cache[mid] = messages[:cut_index]
 
         if deleted > 0:
-            self._save_session(session_id)
+            self._save_session(mid)
         return deleted
 
-    def clear(self, session_id: str = DEFAULT_SESSION) -> int:
+    def clear(
+            self,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
+    ) -> int:
         """清空指定会话"""
-        if session_id not in self._cache:
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="clear",
+        )
+        if mid not in self._cache:
             return 0
 
-        self._save_undo_state(session_id)
+        self._save_undo_state(mid)
 
-        count = len(self._cache[session_id])
-        self._cache[session_id] = []
+        count = len(self._cache[mid])
+        self._cache[mid] = []
 
         if count > 0:
-            self._save_session(session_id)
+            self._save_session(mid)
         return count
 
     def compress(
             self,
-            session_id: str = DEFAULT_SESSION,
+            memory_id: str = DEFAULT_SESSION,
             keep_last: Optional[int] = None,
             keep_rounds: Optional[int] = None,
             keep_pinned: bool = False,
             keep_tagged: Optional[List[str]] = None,
-            summarizer: Optional[Callable[[List[Message]], str]] = None
+            summarizer: Optional[Callable[[List[Message]], str]] = None,
+            *,
+            session_id: Any = _UNSET,
     ) -> int:
         """
         压缩历史记录
 
         Args:
-            session_id: 会话ID
+            memory_id: 记忆分区 ID
             keep_last: 保留最后 N 条消息
             keep_rounds: 保留最后 N 轮对话
             keep_pinned: 保留被固定的消息 (v2 新增)
             keep_tagged: 保留带有这些标签的消息 (v2 新增)
             summarizer: 自定义摘要函数
+            session_id: [已弃用] 请使用 memory_id
 
         Returns:
             压缩掉的消息数量
         """
-        messages = self._cache.get(session_id, [])
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="compress",
+        )
+        messages = self._cache.get(mid, [])
         if not messages:
             return 0
 
-        self._save_undo_state(session_id)
+        self._save_undo_state(mid)
 
         original_len = len(messages)
 
@@ -1378,71 +1606,131 @@ class MemoryManager:
 
         # 生成摘要
         if summarizer and len(messages) < original_len:
-            removed = self._cache[session_id][:-len(messages)] if messages else self._cache[session_id]
+            removed = self._cache[mid][:-len(messages)] if messages else self._cache[mid]
             summary = summarizer(removed)
             summary_msg = Message.system(f"[历史摘要] {summary}")
             messages = [summary_msg] + messages
 
-        self._cache[session_id] = messages
-        self._save_session(session_id)
+        self._cache[mid] = messages
+        self._save_session(mid)
 
         return original_len - len(messages)
 
-    def undo(self, session_id: str = DEFAULT_SESSION) -> bool:
+    def undo(
+            self,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
+    ) -> bool:
         """撤销上一次操作"""
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="undo",
+        )
         if not self._enable_undo:
             return False
 
-        if not self._undo_stacks.get(session_id):
+        if not self._undo_stacks.get(mid):
             return False
 
-        current = [copy.deepcopy(m) for m in self._cache.get(session_id, [])]
-        self._redo_stacks.setdefault(session_id, []).append(current)
+        current = [copy.deepcopy(m) for m in self._cache.get(mid, [])]
+        self._redo_stacks.setdefault(mid, []).append(current)
 
-        self._cache[session_id] = self._undo_stacks[session_id].pop()
-        self._save_session(session_id)
+        self._cache[mid] = self._undo_stacks[mid].pop()
+        self._save_session(mid)
 
         return True
 
-    def redo(self, session_id: str = DEFAULT_SESSION) -> bool:
+    def redo(
+            self,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
+    ) -> bool:
         """重做上一次撤销的操作"""
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="redo",
+        )
         if not self._enable_undo:
             return False
 
-        if not self._redo_stacks.get(session_id):
+        if not self._redo_stacks.get(mid):
             return False
 
-        current = [copy.deepcopy(m) for m in self._cache.get(session_id, [])]
-        self._undo_stacks.setdefault(session_id, []).append(current)
+        current = [copy.deepcopy(m) for m in self._cache.get(mid, [])]
+        self._undo_stacks.setdefault(mid, []).append(current)
 
-        self._cache[session_id] = self._redo_stacks[session_id].pop()
-        self._save_session(session_id)
+        self._cache[mid] = self._redo_stacks[mid].pop()
+        self._save_session(mid)
 
         return True
 
-    def can_undo(self, session_id: str = DEFAULT_SESSION) -> bool:
+    def can_undo(
+            self,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
+    ) -> bool:
         """是否可以撤销"""
-        return bool(self._undo_stacks.get(session_id))
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="can_undo",
+        )
+        return bool(self._undo_stacks.get(mid))
 
-    def can_redo(self, session_id: str = DEFAULT_SESSION) -> bool:
+    def can_redo(
+            self,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
+    ) -> bool:
         """是否可以重做"""
-        return bool(self._redo_stacks.get(session_id))
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="can_redo",
+        )
+        return bool(self._redo_stacks.get(mid))
 
     def list_sessions(self) -> List[str]:
         """列出所有会话ID"""
         return list(self._cache.keys())
 
-    def has_session(self, session_id: str) -> bool:
-        """检查会话是否存在"""
-        return session_id in self._cache and len(self._cache[session_id]) > 0
+    def is_empty(
+            self,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
+    ) -> bool:
+        """检查指定记忆分区是否为空。不存在的分区也视为空。"""
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="is_empty",
+        )
+        return len(self._cache.get(mid, [])) == 0
 
-    def get_session_stats(self, session_id: str = DEFAULT_SESSION) -> Dict[str, Any]:
+    def has_session(
+            self,
+            memory_id: Optional[str] = None,
+            *,
+            session_id: Any = _UNSET,
+    ) -> bool:
+        """检查会话是否存在"""
+        mid = _resolve_memory_id_required(
+            memory_id=memory_id, session_id=session_id, method="has_session",
+        )
+        return mid in self._cache and len(self._cache[mid]) > 0
+
+    def get_session_stats(
+            self,
+            memory_id: str = DEFAULT_SESSION,
+            *,
+            session_id: Any = _UNSET,
+    ) -> Dict[str, Any]:
         """获取会话统计信息"""
-        messages = self._cache.get(session_id, [])
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="get_session_stats",
+        )
+        messages = self._cache.get(mid, [])
 
         if not messages:
             return {
-                "session_id": session_id,
+                "session_id": mid,
                 "exists": False,
                 "total_messages": 0,
             }
@@ -1455,10 +1743,10 @@ class MemoryManager:
         pinned_count = sum(1 for m in messages if m.is_pinned)
         tagged_count = sum(1 for m in messages if m.tags)
 
-        is_valid, _, incomplete = self.check_tool_chain(session_id)
+        is_valid, _, incomplete = self.check_tool_chain(memory_id=mid)
 
         return {
-            "session_id": session_id,
+            "session_id": mid,
             "exists": True,
             "total_messages": len(messages),
             "role_counts": role_counts,
@@ -1476,16 +1764,24 @@ class MemoryManager:
         """计算对话轮数"""
         return sum(1 for m in messages if m.role == "user")
 
-    def delete_session(self, session_id: str) -> bool:
+    def delete_session(
+            self,
+            memory_id: Optional[str] = None,
+            *,
+            session_id: Any = _UNSET,
+    ) -> bool:
         """删除整个会话"""
-        if session_id not in self._cache:
+        mid = _resolve_memory_id_required(
+            memory_id=memory_id, session_id=session_id, method="delete_session",
+        )
+        if mid not in self._cache:
             return False
 
-        del self._cache[session_id]
-        self._storage.delete(self._get_storage_key(session_id))
+        del self._cache[mid]
+        self._storage.delete(self._get_storage_key(mid))
 
-        self._undo_stacks.pop(session_id, None)
-        self._redo_stacks.pop(session_id, None)
+        self._undo_stacks.pop(mid, None)
+        self._redo_stacks.pop(mid, None)
 
         if self._auto_save:
             self._storage.save()
@@ -1512,6 +1808,39 @@ class MemoryManager:
 
         return True
 
+    def merge_memory(
+            self,
+            other_memory: "MemoryManager",
+            source_memory_id: str,
+            other_memory_id: str,
+    ) -> int:
+        """
+        将另一个 MemoryManager 的指定 memory 追加到当前对象的指定 memory 中。
+
+        Args:
+            other_memory: 另一个 MemoryManager 对象
+            source_memory_id: other_memory 中的源 memory ID
+            other_memory_id: 当前对象中的目标 memory ID
+
+        Returns:
+            实际追加的消息数量
+        """
+        if not isinstance(other_memory, MemoryManager):
+            raise TypeError("other_memory must be a MemoryManager instance")
+
+        source_messages = other_memory._cache.get(source_memory_id, [])
+        if not source_messages:
+            return 0
+
+        copied_messages = [copy.deepcopy(msg) for msg in source_messages]
+
+        self._ensure_session(other_memory_id)
+        self._save_undo_state(other_memory_id)
+        self._cache[other_memory_id].extend(copied_messages)
+        self._save_session(other_memory_id)
+
+        return len(copied_messages)
+
     def save(self):
         """手动保存到存储"""
         for session_id in self._cache:
@@ -1525,23 +1854,28 @@ class MemoryManager:
 
     def build_messages(
             self,
-            session_id: str = DEFAULT_SESSION,
+            memory_id: str = DEFAULT_SESSION,
             system_prompt: Optional[Union[str, List[str]]] = None,
             user_query: Optional[str] = None,
             max_rounds: Optional[int] = None,
             max_messages: Optional[int] = None,
             include_system: bool = True,
+            *,
+            session_id: Any = _UNSET,
     ) -> List[Dict[str, Any]]:
         """
         [已废弃] 构建发送给 LLM 的消息列表
 
         使用 build_history() 代替。
         """
-        import warnings
         warnings.warn(
             "build_messages() is deprecated. Use build_history() instead.",
             DeprecationWarning,
             stacklevel=2
+        )
+
+        mid = _resolve_memory_id(
+            memory_id=memory_id, session_id=session_id, method="build_messages",
         )
 
         result = []
@@ -1554,7 +1888,7 @@ class MemoryManager:
                     result.append({"role": "system", "content": sp})
 
         history = self._get_history_for_build(
-            session_id=session_id,
+            session_id=mid,
             max_rounds=max_rounds,
             max_messages=max_messages,
             include_system=include_system,
@@ -1592,9 +1926,9 @@ class MemoryManager:
         """返回总消息数"""
         return sum(len(msgs) for msgs in self._cache.values())
 
-    def __contains__(self, session_id: str) -> bool:
+    def __contains__(self, memory_id: str) -> bool:
         """检查会话是否存在"""
-        return self.has_session(session_id)
+        return self.has_session(memory_id)
 
     def __repr__(self) -> str:
         return (

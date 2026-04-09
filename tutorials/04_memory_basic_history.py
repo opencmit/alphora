@@ -12,8 +12,8 @@ from alphora.memory.history_payload import ToolChainError
 from alphora.tools.executor import ToolExecutionResult
 
 
-def build_valid_tool_chain(memory: MemoryManager, session_id: str) -> None:
-    memory.add_user("Search the docs for 'sandbox'.", session_id=session_id)
+def build_valid_tool_chain(memory: MemoryManager, memory_id: str) -> None:
+    memory.add_user("Search the docs for 'sandbox'.", memory_id=memory_id)
 
     tool_calls = [
         {
@@ -25,20 +25,20 @@ def build_valid_tool_chain(memory: MemoryManager, session_id: str) -> None:
             },
         }
     ]
-    memory.add_assistant(tool_calls=tool_calls, session_id=session_id)
+    memory.add_assistant(tool_calls=tool_calls, memory_id=memory_id)
 
     result = ToolExecutionResult(
         tool_call_id="call_1",
         tool_name="search_docs",
         content=json.dumps({"hits": 3}),
     )
-    memory.add_tool_result(result, session_id=session_id)
+    memory.add_tool_result(result, memory_id=memory_id)
 
-    memory.add_assistant("Found 3 docs about sandbox.", session_id=session_id)
+    memory.add_assistant("Found 3 docs about sandbox.", memory_id=memory_id)
 
 
-def build_invalid_tool_chain(memory: MemoryManager, session_id: str) -> None:
-    memory.add_user("Search the docs for 'memory'.", session_id=session_id)
+def build_invalid_tool_chain(memory: MemoryManager, memory_id: str) -> None:
+    memory.add_user("Search the docs for 'memory'.", memory_id=memory_id)
     tool_calls = [
         {
             "id": "call_99",
@@ -49,15 +49,15 @@ def build_invalid_tool_chain(memory: MemoryManager, session_id: str) -> None:
             },
         }
     ]
-    memory.add_assistant(tool_calls=tool_calls, session_id=session_id)
+    memory.add_assistant(tool_calls=tool_calls, memory_id=memory_id)
     # Missing tool result on purpose
 
 
 def main() -> None:
     memory = MemoryManager()
 
-    build_valid_tool_chain(memory, session_id="ok")
-    history = memory.build_history(session_id="ok", max_rounds=3)
+    build_valid_tool_chain(memory, memory_id="ok")
+    history = memory.build_history(memory_id="ok", max_rounds=3)
 
     print("=== Valid Tool Chain ===")
     print("message_count:", history.message_count)
@@ -65,10 +65,10 @@ def main() -> None:
     for msg in history.messages:
         print(msg)
 
-    build_invalid_tool_chain(memory, session_id="bad")
+    build_invalid_tool_chain(memory, memory_id="bad")
     print("\n=== Invalid Tool Chain (expect error) ===")
     try:
-        memory.build_history(session_id="bad")
+        memory.build_history(memory_id="bad")
     except ToolChainError as exc:
         print("ToolChainError:", exc)
 
