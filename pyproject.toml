@@ -27,6 +27,7 @@ dependencies = [
     "typing_extensions==4.15.0",
     "uvicorn==0.39.0",
     "docker==7.1.0",
+    "exa-py>=2.0.0",
 ]
 
 [project.optional-dependencies]

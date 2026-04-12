@@ -1,8 +1,8 @@
 """
 互联网搜索工具
 
-支持多搜索引擎后端（BoChaAI / DuckDuckGo），支持网页搜索、图片搜索和新闻搜索。
-自动回退策略：优先 BoChaAI，失败回退 DuckDuckGo
+支持多搜索引擎后端（BoChaAI / DuckDuckGo / Exa AI），支持网页搜索、图片搜索和新闻搜索。
+自动回退策略：优先 BoChaAI，失败回退 Exa，再回退 DuckDuckGo
 """
 
 import json
@@ -35,6 +35,7 @@ class SearchEngine(str, Enum):
     """搜索引擎后端"""
     BOCHA = "bocha"             # 博查AI
     DUCKDUCKGO = "duckduckgo"   # DuckDuckGo
+    EXA = "exa"                 # Exa AI
     AUTO = "auto"
 
 
@@ -522,6 +523,148 @@ class DuckDuckGoSearchBackend:
         )
 
 
+class ExaSearchBackend:
+    """
+    Exa AI 搜索后端
+    文档: https://exa.ai/docs
+    使用 exa-py SDK。支持多种搜索类型和内容提取模式。
+    """
+
+    def __init__(self, api_key: str, timeout: float = 30.0):
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def _get_client(self):
+        """延迟导入 exa_py 以避免未安装时报错"""
+        try:
+            from exa_py import Exa
+            client = Exa(api_key=self.api_key)
+            client.headers["x-exa-integration"] = "alphora"
+            return client
+        except ImportError:
+            raise ImportError(
+                "请安装 exa-py: pip install exa-py>=2.0.0"
+            )
+
+    @staticmethod
+    def _freshness_to_date(freshness: str) -> Optional[str]:
+        """将 freshness 枚举映射为 ISO 8601 日期字符串"""
+        import datetime
+        now = datetime.datetime.now(datetime.timezone.utc)
+        delta_map = {
+            "oneDay": datetime.timedelta(days=1),
+            "oneWeek": datetime.timedelta(weeks=1),
+            "oneMonth": datetime.timedelta(days=30),
+            "oneYear": datetime.timedelta(days=365),
+        }
+        delta = delta_map.get(freshness)
+        if delta:
+            return (now - delta).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return None
+
+    def search_web(
+            self,
+            query: str,
+            count: int = 10,
+            freshness: str = "noLimit",
+            content_mode: str = "highlights",
+            search_type: str = "auto",
+            category: Optional[str] = None,
+            include_domains: Optional[list] = None,
+            exclude_domains: Optional[list] = None,
+            include_text: Optional[str] = None,
+            exclude_text: Optional[str] = None,
+    ) -> SearchResponse:
+        """网页/文本搜索"""
+        client = self._get_client()
+
+        kwargs: dict = {
+            "query": query,
+            "num_results": min(count, 100),
+            "type": search_type,
+        }
+
+        # 时间范围过滤
+        start_date = self._freshness_to_date(freshness)
+        if start_date:
+            kwargs["start_published_date"] = start_date
+
+        # 可选过滤参数
+        if category:
+            kwargs["category"] = category
+        if include_domains:
+            kwargs["include_domains"] = include_domains
+        if exclude_domains:
+            kwargs["exclude_domains"] = exclude_domains
+        if include_text:
+            kwargs["include_text"] = include_text
+        if exclude_text:
+            kwargs["exclude_text"] = exclude_text
+
+        # 内容提取模式
+        if content_mode == "text":
+            kwargs["text"] = {"max_characters": 10000}
+        elif content_mode == "summary":
+            kwargs["summary"] = True
+        else:
+            # 默认使用 highlights
+            kwargs["highlights"] = {"max_characters": 4000}
+
+        t0 = time.monotonic()
+        try:
+            response = client.search_and_contents(**kwargs)
+        except Exception as e:
+            return SearchResponse(
+                query=query, search_type="text", engine="exa",
+                success=False, error_message=str(e),
+                elapsed_seconds=time.monotonic() - t0,
+            )
+
+        elapsed = time.monotonic() - t0
+        items = []
+        for r in response.results:
+            # 根据内容模式提取摘要
+            snippet = ""
+            if content_mode == "highlights" and getattr(r, "highlights", None):
+                snippet = "\n".join(r.highlights)
+            elif content_mode == "text" and getattr(r, "text", None):
+                snippet = r.text[:500]
+            elif content_mode == "summary" and getattr(r, "summary", None):
+                snippet = r.summary
+
+            items.append(SearchResultItem(
+                title=getattr(r, "title", "") or "",
+                url=getattr(r, "url", "") or "",
+                snippet=snippet,
+                published_date=getattr(r, "published_date", "") or "",
+                source=getattr(r, "author", "") or "",
+            ))
+
+        return SearchResponse(
+            query=query,
+            search_type="text",
+            engine="exa",
+            results=items,
+            total_results=len(items),
+            elapsed_seconds=elapsed,
+        )
+
+    def search_news(
+            self,
+            query: str,
+            count: int = 10,
+            freshness: str = "noLimit",
+    ) -> SearchResponse:
+        """新闻搜索（通过 category='news' 实现）"""
+        return self.search_web(
+            query=query,
+            count=count,
+            freshness=freshness,
+            category="news",
+            content_mode="highlights",
+        )
+
+
 # ============================================================================
 # 主搜索类
 # ============================================================================
@@ -532,8 +675,9 @@ class AISearch:
 
     参数:
         bocha_api_key:  BoCha API Key（可选，若不传则从环境变量 BOCHA_API_KEY 读取）
-        engine:         搜索引擎 ("bocha" | "duckduckgo" | "auto")
-                        默认 "auto" —— 优先 BoCha，失败回退 DuckDuckGo
+        exa_api_key:    Exa API Key（可选，若不传则从环境变量 EXA_API_KEY 读取）
+        engine:         搜索引擎 ("bocha" | "duckduckgo" | "exa" | "auto")
+                        默认 "auto" —— 优先 BoCha，失败回退 Exa，再回退 DuckDuckGo
         timeout:        单次请求超时秒数
         proxy:          代理地址（仅 DuckDuckGo 后端使用）
 
@@ -549,6 +693,9 @@ class AISearch:
         # 新闻搜索（仅 DuckDuckGo 支持独立新闻端点）
         result = searcher.search("AI最新进展", search_type="news", engine="duckduckgo")
 
+        # Exa AI 搜索（支持 category / domain / text 过滤）
+        result = searcher.search("latest AI research", engine="exa")
+
         # 获取纯文本（喂给 LLM）
         print(result.to_text())
 
@@ -562,11 +709,13 @@ class AISearch:
     def __init__(
             self,
             bocha_api_key: Optional[str] = None,
+            exa_api_key: Optional[str] = None,
             engine: str = "auto",
             timeout: float = 30.0,
             proxy: Optional[str] = None,
     ):
         self.bocha_api_key = bocha_api_key or os.environ.get("BOCHA_API_KEY", "")
+        self.exa_api_key = exa_api_key or os.environ.get("EXA_API_KEY", "")
         self.default_engine = engine
         self.timeout = timeout
         self.proxy = proxy
@@ -574,9 +723,12 @@ class AISearch:
         # 初始化后端
         self._bocha: Optional[BochaSearchBackend] = None
         self._ddg: Optional[DuckDuckGoSearchBackend] = None
+        self._exa: Optional[ExaSearchBackend] = None
 
         if self.bocha_api_key:
             self._bocha = BochaSearchBackend(self.bocha_api_key, timeout=timeout)
+        if self.exa_api_key:
+            self._exa = ExaSearchBackend(self.exa_api_key, timeout=timeout)
         self._ddg = DuckDuckGoSearchBackend(timeout=timeout, proxy=proxy)
 
     def search(
@@ -596,7 +748,7 @@ class AISearch:
             search_type: "text"  - 网页搜索（默认）
                          "image" - 图片搜索（返回图片 URL）
                          "news"  - 新闻搜索
-            count:       返回结果数量（1-50，默认 10）
+            count:       返回结果数量（1-50，默认 10；Exa 支持最多 100）
             freshness:   时间范围过滤
                          "noLimit"  - 不限（默认）
                          "oneDay"   - 最近一天
@@ -606,7 +758,8 @@ class AISearch:
             engine:      指定搜索引擎（覆盖实例默认设置）
                          "bocha"      - 仅用博查
                          "duckduckgo" - 仅用 DuckDuckGo
-                         "auto"       - 自动（优先 BoCha，失败回退 DDG）
+                         "exa"        - 仅用 Exa AI
+                         "auto"       - 自动（优先 BoCha，失败回退 Exa，再回退 DDG）
             summary:     是否请求 AI 摘要（仅 BoCha 支持）
 
         返回:
@@ -614,12 +767,14 @@ class AISearch:
             可调用 .to_text() / .to_json() / .to_dict() 转换格式。
         """
         engine = engine or self.default_engine
-        count = max(1, min(count, 50))
+        count = max(1, min(count, 100 if engine == "exa" else 50))
 
         if engine == "bocha":
             return self._search_bocha(query, search_type, count, freshness, summary)
         elif engine == "duckduckgo":
             return self._search_ddg(query, search_type, count, freshness)
+        elif engine == "exa":
+            return self._search_exa(query, search_type, count, freshness)
         else:  # auto
             return self._search_auto(query, search_type, count, freshness, summary)
 
@@ -650,12 +805,24 @@ class AISearch:
         else:
             return self._ddg.search_web(query, count, freshness)
 
+    def _search_exa(self, query, search_type, count, freshness) -> SearchResponse:
+        if not self._exa:
+            return SearchResponse(
+                query=query, search_type=search_type, engine="exa",
+                success=False,
+                error_message="Exa API Key 未配置。请设置 exa_api_key 参数或 EXA_API_KEY 环境变量。",
+            )
+        if search_type == "news":
+            return self._exa.search_news(query, count, freshness)
+        else:
+            return self._exa.search_web(query, count, freshness)
+
     _AUTH_ERROR_KEYWORDS = ("API 错误", "401", "403", "unauthorized", "forbidden", "quota", "余额", "额度", "Key")
 
     def _search_auto(
             self, query, search_type, count, freshness, summary
     ) -> SearchResponse:
-        """自动策略：优先 BoCha，失败回退 DuckDuckGo。API Key 认证/额度错误不回退，直接暴露。"""
+        """自动策略：优先 BoCha，失败回退 Exa，再回退 DuckDuckGo。API Key 认证/额度错误不回退，直接暴露。"""
         if self._bocha:
             result = self._search_bocha(query, search_type, count, freshness, summary)
             if result.success and result.results:
@@ -668,7 +835,22 @@ class AISearch:
                 return result
 
             logger.warning(
-                "BoCha 搜索失败或无结果，回退到 DuckDuckGo: %s", result.error_message
+                "BoCha 搜索失败或无结果，回退到 Exa: %s", result.error_message
+            )
+
+        if self._exa:
+            result = self._search_exa(query, search_type, count, freshness)
+            if result.success and result.results:
+                return result
+
+            if not result.success and result.error_message and any(
+                kw in result.error_message for kw in self._AUTH_ERROR_KEYWORDS
+            ):
+                logger.error("Exa API 认证或额度错误，不回退: %s", result.error_message)
+                return result
+
+            logger.warning(
+                "Exa 搜索失败或无结果，回退到 DuckDuckGo: %s", result.error_message
             )
 
         return self._search_ddg(query, search_type, count, freshness)
@@ -677,7 +859,8 @@ class AISearch:
 class WebSearcher:
     """
     bocha_api_key:  BoCha API Key（也可通过环境变量 BOCHA_API_KEY 设置）
-    engine:         搜索引擎 ("bocha" | "duckduckgo" | "auto"，默认 auto)
+    exa_api_key:    Exa API Key（也可通过环境变量 EXA_API_KEY 设置）
+    engine:         搜索引擎 ("bocha" | "duckduckgo" | "exa" | "auto"，默认 auto)
     timeout:        请求超时秒数
     proxy:          代理地址（仅 DuckDuckGo 使用）
     """
@@ -685,12 +868,14 @@ class WebSearcher:
     def __init__(
             self,
             bocha_api_key: Optional[str] = None,
+            exa_api_key: Optional[str] = None,
             engine: str = "bocha",
             timeout: float = 30.0,
             proxy: Optional[str] = None,
     ):
         self._engine = AISearch(
             bocha_api_key=bocha_api_key,
+            exa_api_key=exa_api_key,
             engine=engine,
             timeout=timeout,
             proxy=proxy,
