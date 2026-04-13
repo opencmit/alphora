@@ -129,17 +129,8 @@ class DataStreamer:
             delta_kwargs: Dict[str, Any] = {"content_type": content_type}
 
             if content_type:
-                if "tool_call" in content_type:
-                    tc_data = json.loads(content)
-                    delta_kwargs["tool_calls"] = [ToolCallDelta(
-                        index=tc_data.get("index", 0),
-                        id=tc_data.get("id") or None,
-                        function={"name": tc_data.get("name", "")},
-                    )]
-                    # delta_kwargs["content"] = None
-                    delta_kwargs['content'] = tc_data.get("name", "")  # 260319修改 tool_call 为函数工具名称
 
-                elif "tool_call_args" in content_type:
+                if "tool_call_args" in content_type:
                     tc_data = json.loads(content)
                     delta_kwargs["tool_calls"] = [ToolCallDelta(
                         index=tc_data.get("index", 0),
@@ -148,6 +139,16 @@ class DataStreamer:
                     )]
                     # delta_kwargs["content"] = None
                     delta_kwargs['content'] = tc_data.get("arguments", "")  # 260319 修改为工具的参数
+
+                elif "tool_call" in content_type:
+                    tc_data = json.loads(content)
+                    delta_kwargs["tool_calls"] = [ToolCallDelta(
+                        index=tc_data.get("index", 0),
+                        id=tc_data.get("id") or None,
+                        function={"name": tc_data.get("name", "")},
+                    )]
+                    # delta_kwargs["content"] = None
+                    delta_kwargs['content'] = tc_data.get("name", "")  # 260319修改 tool_call 为函数工具名称
 
                 else:
                     delta_kwargs["content"] = content

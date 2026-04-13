@@ -182,6 +182,15 @@ class DockerBackend(ExecutionBackend):
         return f"sandbox-{self.sandbox_id}"
 
     # ------------------------------------------------------------------ #
+    # Async helpers
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    async def _run_sync(fn, /, *args, **kwargs):
+        """Run a synchronous function in a thread to avoid blocking the event loop."""
+        return await asyncio.to_thread(fn, *args, **kwargs)
+
+    # ------------------------------------------------------------------ #
     # Lifecycle
     # ------------------------------------------------------------------ #
 
@@ -239,11 +248,11 @@ class DockerBackend(ExecutionBackend):
                 kwargs = {"base_url": self._docker_host.url}
                 if tls_config:
                     kwargs["tls"] = tls_config
-                self._client = docker.DockerClient(**kwargs)
+                self._client = await self._run_sync(docker.DockerClient, **kwargs)
                 proto = "TLS" if tls_config else "plain"
                 logger.info(f"Connected to Docker daemon at {self._docker_host.url} ({proto})")
             else:
-                self._client = docker.from_env()
+                self._client = await self._run_sync(docker.from_env)
         except ImportError:
             raise DockerError("docker package not installed. Install with: pip install docker")
 
@@ -261,10 +270,10 @@ class DockerBackend(ExecutionBackend):
             )
 
         try:
-            self._client.images.get(self._docker_image)
+            await self._run_sync(self._client.images.get, self._docker_image)
             logger.info(f"Using existing remote image: {self._docker_image}")
         except Exception:
-            available = self._list_remote_images()
+            available = await self._run_sync(self._list_remote_images)
             img_list = "\n".join(f"  - {t}" for t in available) if available else "  (none)"
             raise DockerError(
                 f"Image '{self._docker_image}' not found on remote Docker daemon "
@@ -285,14 +294,14 @@ class DockerBackend(ExecutionBackend):
     async def _initialize_local(self) -> None:
         """Local/DooD initialization: check image, create directories."""
         try:
-            self._client.images.get(self._docker_image)
+            await self._run_sync(self._client.images.get, self._docker_image)
             logger.info(f"Using existing sandbox image: {self._docker_image}")
         except Exception:
             if self._docker_image.startswith("alphora"):
                 await self._build_custom_image()
             else:
                 logger.info(f"Pulling image {self._docker_image}...")
-                self._client.images.pull(self._docker_image)
+                await self._run_sync(self._client.images.pull, self._docker_image)
 
         self._workspace_path.mkdir(parents=True, exist_ok=True)
         self._uploads_path.mkdir(parents=True, exist_ok=True)
@@ -308,7 +317,7 @@ class DockerBackend(ExecutionBackend):
         if not self._docker_dir.exists():
             raise DockerError(f"Docker build directory not found at {self._docker_dir}")
 
-        try:
+        def _build():
             image, logs = self._client.images.build(
                 path=str(self._docker_dir),
                 tag=self._docker_image,
@@ -318,6 +327,10 @@ class DockerBackend(ExecutionBackend):
             for line in logs:
                 if "stream" in line:
                     logger.debug(line["stream"].strip())
+            return image
+
+        try:
+            await asyncio.to_thread(_build)
             logger.info(f"Successfully built {self._docker_image}")
         except Exception as e:
             build_log = ""
@@ -336,7 +349,7 @@ class DockerBackend(ExecutionBackend):
         """Start the Docker container"""
         if self._container:
             try:
-                self._container.start()
+                await self._run_sync(self._container.start)
                 self._running = True
                 return
             except Exception:
@@ -345,14 +358,16 @@ class DockerBackend(ExecutionBackend):
         container_config = self._build_container_config()
         
         try:
-            self._container = self._client.containers.run(**container_config)
+            self._container = await self._run_sync(
+                self._client.containers.run, **container_config
+            )
             self._running = True
             await self._wait_for_ready()
-            self._init_workspace_dirs()
+            await self._run_sync(self._init_workspace_dirs)
             if self._skill_host_path:
                 if self._is_remote:
-                    self._sync_skills_to_container()
-                self._create_skills_symlink()
+                    await self._run_sync(self._sync_skills_to_container)
+                await self._run_sync(self._create_skills_symlink)
             logger.info(f"Container {self.container_name} started: {self.container_id[:12]}")
         except Exception as e:
             self._running = False
@@ -364,7 +379,7 @@ class DockerBackend(ExecutionBackend):
             self._running = False
             return
         try:
-            self._container.stop(timeout=10)
+            await self._run_sync(self._container.stop, timeout=10)
             logger.info(f"Container {self.container_name} stopped")
         except Exception as e:
             logger.warning(f"Error stopping container: {e}")
@@ -375,7 +390,7 @@ class DockerBackend(ExecutionBackend):
         await self.stop()
         if self._container:
             try:
-                self._container.remove(force=True)
+                await self._run_sync(self._container.remove, force=True)
                 logger.info(f"Container {self.container_name} removed")
             except Exception as e:
                 logger.warning(f"Error removing container: {e}")
@@ -394,7 +409,7 @@ class DockerBackend(ExecutionBackend):
         if not self._container:
             return False
         try:
-            self._container.reload()
+            await self._run_sync(self._container.reload)
             return self._container.status == "running"
         except Exception:
             return False
@@ -486,9 +501,11 @@ class DockerBackend(ExecutionBackend):
         start = time.time()
         while time.time() - start < timeout:
             try:
-                self._container.reload()
+                await self._run_sync(self._container.reload)
                 if self._container.status == "running":
-                    result = self._container.exec_run("python --version")
+                    result = await self._run_sync(
+                        self._container.exec_run, "python --version"
+                    )
                     if result.exit_code == 0:
                         return
             except Exception:
@@ -756,7 +773,10 @@ class DockerBackend(ExecutionBackend):
         self._ensure_writable(path)
         if self._is_remote:
             container_path = self._to_container_path(path)
-            result = self._container.exec_run(["sh", "-c", f"rm -rf '{container_path}'"])
+            result = await self._run_sync(
+                self._container.exec_run,
+                ["sh", "-c", f"rm -rf '{container_path}'"],
+            )
             return result.exit_code == 0
         full_path = self._resolve_path(path)
         if not full_path.exists():
@@ -779,7 +799,10 @@ class DockerBackend(ExecutionBackend):
         """Check if file exists in workspace"""
         if self._is_remote:
             container_path = self._to_container_path(path)
-            result = self._container.exec_run(["sh", "-c", f"test -e '{container_path}'"])
+            result = await self._run_sync(
+                self._container.exec_run,
+                ["sh", "-c", f"test -e '{container_path}'"],
+            )
             return result.exit_code == 0
         try:
             full_path = self._resolve_path(path)
@@ -826,17 +849,21 @@ class DockerBackend(ExecutionBackend):
     async def _remote_read_file(self, path: str) -> bytes:
         """Read a file from the container using get_archive."""
         container_path = self._to_container_path(path)
-        try:
-            stream, stat = self._container.get_archive(container_path)
-        except Exception:
-            raise SandboxFileNotFoundError(path)
-        tar_bytes = b"".join(chunk for chunk in stream)
-        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as tar:
-            member = tar.getmembers()[0]
-            f = tar.extractfile(member)
-            if f is None:
+
+        def _read():
+            try:
+                stream, stat = self._container.get_archive(container_path)
+            except Exception:
                 raise SandboxFileNotFoundError(path)
-            return f.read()
+            tar_bytes = b"".join(chunk for chunk in stream)
+            with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as tar:
+                member = tar.getmembers()[0]
+                f = tar.extractfile(member)
+                if f is None:
+                    raise SandboxFileNotFoundError(path)
+                return f.read()
+
+        return await asyncio.to_thread(_read)
 
     async def _remote_write_file(self, path: str, content: bytes) -> None:
         """Write a file into the container using put_archive."""
@@ -845,15 +872,17 @@ class DockerBackend(ExecutionBackend):
         parent_dir = str(posix.parent)
         file_name = posix.name
 
-        self._container.exec_run(["sh", "-c", f"mkdir -p '{parent_dir}'"])
+        def _write():
+            self._container.exec_run(["sh", "-c", f"mkdir -p '{parent_dir}'"])
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w") as tar:
+                info = tarfile.TarInfo(name=file_name)
+                info.size = len(content)
+                tar.addfile(info, io.BytesIO(content))
+            buf.seek(0)
+            self._container.put_archive(parent_dir, buf)
 
-        buf = io.BytesIO()
-        with tarfile.open(fileobj=buf, mode="w") as tar:
-            info = tarfile.TarInfo(name=file_name)
-            info.size = len(content)
-            tar.addfile(info, io.BytesIO(content))
-        buf.seek(0)
-        self._container.put_archive(parent_dir, buf)
+        await asyncio.to_thread(_write)
 
     async def _remote_list_directory(
         self, path: str = "", recursive: bool = False
@@ -887,7 +916,8 @@ class DockerBackend(ExecutionBackend):
             "results.sort(key=lambda x: (not x['is_directory'], x['name']))\n"
             "json.dump(results, sys.stdout)\n"
         )
-        result = self._container.exec_run(
+        result = await self._run_sync(
+            self._container.exec_run,
             ["python", "-c", script],
             workdir=self._container_workspace,
             demux=True,
@@ -958,8 +988,11 @@ class DockerBackend(ExecutionBackend):
         if not self._container:
             return {"error": "Container not running"}
         try:
-            self._container.reload()
-            stats = self._container.stats(stream=False)
+            def _fetch_stats():
+                self._container.reload()
+                return self._container.stats(stream=False)
+
+            stats = await asyncio.to_thread(_fetch_stats)
             cpu_delta = stats["cpu_stats"]["cpu_usage"]["total_usage"] - \
                         stats["precpu_stats"]["cpu_usage"]["total_usage"]
             system_delta = stats["cpu_stats"]["system_cpu_usage"] - \
@@ -983,7 +1016,7 @@ class DockerBackend(ExecutionBackend):
         if not self._container:
             return ""
         try:
-            logs = self._container.logs(tail=tail)
+            logs = await self._run_sync(self._container.logs, tail=tail)
             return logs.decode("utf-8", errors="replace")
         except Exception as e:
             return f"Error getting logs: {e}"
