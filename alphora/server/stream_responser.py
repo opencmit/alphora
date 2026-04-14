@@ -84,6 +84,8 @@ class DataStreamer:
         self.model_name = model_name
         self.completion_id = f'cmpl-{str(uuid.uuid4())}'
 
+        self._start_time: Optional[float] = None
+
         # 用于存储非流式响应的完整内容
         self.full_content = []
         self.finish_reason = None
@@ -110,6 +112,10 @@ class DataStreamer:
                  "total_tokens": total_tokens}
 
         await self.send_data(content_type=None, content=None, usage=usage)
+
+    def _timeout_reason(self) -> str:
+        elapsed = time.time() - self._start_time if self._start_time else 0
+        return f"timeout: elapsed {elapsed:.1f}s, limit {self.timeout}s"
 
     def _generate_sse_chunk(self,
                             content: str = None,
@@ -191,6 +197,7 @@ class DataStreamer:
 
     async def data_generator(self):
         """异步生成器：供 StreamingResponse 使用"""
+        self._start_time = time.time()
         no_timeout = self.timeout < 0
         end_time = None if no_timeout else asyncio.get_event_loop().time() + self.timeout
         remaining = 0.0
@@ -199,7 +206,7 @@ class DataStreamer:
                 if not no_timeout:
                     remaining = end_time - asyncio.get_event_loop().time()
                     if remaining <= 0:
-                        yield self._generate_sse_chunk(content="", content_type='stop', finish_reason='timeout')
+                        yield self._generate_sse_chunk(content="", content_type='stop', finish_reason=self._timeout_reason())
                         break
 
                 try:
@@ -209,7 +216,7 @@ class DataStreamer:
                         data = await asyncio.wait_for(self.data_queue.get(), timeout=remaining)
 
                 except asyncio.TimeoutError:
-                    yield self._generate_sse_chunk(content="", content_type='stop', finish_reason='timeout')
+                    yield self._generate_sse_chunk(content="", content_type='stop', finish_reason=self._timeout_reason())
                     break
 
                 if data["type"] == "stop":
@@ -256,6 +263,7 @@ class DataStreamer:
 
     async def _collect_full_response(self) -> ChatCompletionResponse:
         """收集所有流式数据，按type聚合后生成XML包裹的完整响应"""
+        self._start_time = time.time()
         no_timeout = self.timeout < 0
         end_time = None if no_timeout else asyncio.get_event_loop().time() + self.timeout
         remaining = 0.0
@@ -267,7 +275,7 @@ class DataStreamer:
                 if not no_timeout:
                     remaining = end_time - asyncio.get_event_loop().time()
                     if remaining <= 0:
-                        self.finish_reason = 'timeout'
+                        self.finish_reason = self._timeout_reason()
                         break
 
                 try:
@@ -276,7 +284,7 @@ class DataStreamer:
                     else:
                         data = await asyncio.wait_for(self.data_queue.get(), timeout=remaining)
                 except asyncio.TimeoutError:
-                    self.finish_reason = 'timeout'
+                    self.finish_reason = self._timeout_reason()
                     break
 
                 # 处理数据：聚合相同类型的内容
