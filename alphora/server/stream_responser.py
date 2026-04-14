@@ -77,8 +77,8 @@ class ChatCompletionResponse(BaseModel):
 
 
 class DataStreamer:
-    def __init__(self, timeout: int = 300, model_name: str = 'AlphaData'):
-        self.timeout = timeout
+    def __init__(self, timeout: int = -1, model_name: str = 'JT-AlphaData-v2'):
+        self.timeout = timeout   # 超时时长（秒），如果是-1则没有超时
         self.data_queue = asyncio.Queue()
         self._closed = False
         self.model_name = model_name
@@ -191,18 +191,22 @@ class DataStreamer:
 
     async def data_generator(self):
         """异步生成器：供 StreamingResponse 使用"""
-        end_time = asyncio.get_event_loop().time() + self.timeout
+        no_timeout = self.timeout < 0
+        end_time = None if no_timeout else asyncio.get_event_loop().time() + self.timeout
+        remaining = 0.0
         try:
             while True:
-                # 计算剩余超时时间
-                remaining = end_time - asyncio.get_event_loop().time()
-                if remaining <= 0:
-                    yield self._generate_sse_chunk(content="", content_type='stop', finish_reason='timeout')
-                    break
+                if not no_timeout:
+                    remaining = end_time - asyncio.get_event_loop().time()
+                    if remaining <= 0:
+                        yield self._generate_sse_chunk(content="", content_type='stop', finish_reason='timeout')
+                        break
 
                 try:
-                    # 带超时等待数据
-                    data = await asyncio.wait_for(self.data_queue.get(), timeout=remaining)
+                    if no_timeout:
+                        data = await self.data_queue.get()
+                    else:
+                        data = await asyncio.wait_for(self.data_queue.get(), timeout=remaining)
 
                 except asyncio.TimeoutError:
                     yield self._generate_sse_chunk(content="", content_type='stop', finish_reason='timeout')
@@ -252,21 +256,25 @@ class DataStreamer:
 
     async def _collect_full_response(self) -> ChatCompletionResponse:
         """收集所有流式数据，按type聚合后生成XML包裹的完整响应"""
-        end_time = asyncio.get_event_loop().time() + self.timeout
+        no_timeout = self.timeout < 0
+        end_time = None if no_timeout else asyncio.get_event_loop().time() + self.timeout
+        remaining = 0.0
         self.content_by_type = {}  # 重置：按类型聚合内容
         self.finish_reason = None
 
         try:
             while True:
-                # 计算剩余超时时间
-                remaining = end_time - asyncio.get_event_loop().time()
-                if remaining <= 0:
-                    self.finish_reason = 'timeout'
-                    break
+                if not no_timeout:
+                    remaining = end_time - asyncio.get_event_loop().time()
+                    if remaining <= 0:
+                        self.finish_reason = 'timeout'
+                        break
 
                 try:
-                    # 带超时等待数据
-                    data = await asyncio.wait_for(self.data_queue.get(), timeout=remaining)
+                    if no_timeout:
+                        data = await self.data_queue.get()
+                    else:
+                        data = await asyncio.wait_for(self.data_queue.get(), timeout=remaining)
                 except asyncio.TimeoutError:
                     self.finish_reason = 'timeout'
                     break
