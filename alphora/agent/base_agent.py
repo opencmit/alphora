@@ -64,6 +64,7 @@ class MemoryPoolItem(BaseModel):
 
 class BaseAgent(object):
     agent_type: str = "BaseAgent"
+    _SHARED_KEYS: tuple = ("llm", "memory", "config", "verbose")
 
     def __init__(self,
                  llm: Optional[OpenAILike] = None,
@@ -137,9 +138,8 @@ class BaseAgent(object):
                 return None
         return self.config.get(key)
 
-    def _reinitialize(self, **new_kwargs) -> None:
-        merged_params = {**self.init_params, **new_kwargs}
-        self.__init__(**merged_params)
+    def _get_shared_params(self) -> Dict[str, Any]:
+        return {k: getattr(self, k) for k in self._SHARED_KEYS}
 
     def derive(self, agent_cls_or_instance: Union[Type[T], T], **kwargs) -> T:
         """
@@ -166,41 +166,23 @@ class BaseAgent(object):
         """
 
         if isinstance(agent_cls_or_instance, type) and issubclass(agent_cls_or_instance, BaseAgent):
-            # 传入的是类，创建新实例
-            override_params = {**self.init_params, 'config': self.config, **kwargs}
-            derived_agent = agent_cls_or_instance(**override_params, callback=self.callback)
+            params = {**self._get_shared_params(), **kwargs}
+            derived_agent = agent_cls_or_instance(**params, callback=self.callback)
 
             tracer.track_agent_derived(self, derived_agent)
 
             return derived_agent
 
         elif isinstance(agent_cls_or_instance, BaseAgent):
-            # 传入的是实例，直接替换共享属性，不重新初始化
             instance = agent_cls_or_instance
 
-            # 只替换需要从父 agent 继承的共享属性
-            instance.llm = self.llm
-            instance.memory = self.memory
-            instance.config = self.config
+            for k, v in self._get_shared_params().items():
+                setattr(instance, k, v)
             instance.callback = self.callback
-            instance.verbose = self.verbose
-
-            # 重建依赖 callback 的 stream
             instance.stream = Stream(callback=instance.callback)
 
-            # 同步 init_params 中的共享部分（用于后续可能的再派生）
-            instance.init_params.update({
-                'llm': self.llm,
-                'memory': self.memory,
-                'config': self.config,
-                'verbose': self.verbose,
-            })
-
-            # 应用额外的覆盖参数
             for key, value in kwargs.items():
-                if hasattr(instance, key):
-                    setattr(instance, key, value)
-                instance.init_params[key] = value
+                setattr(instance, key, value)
 
             tracer.track_agent_derived(self, instance)
 

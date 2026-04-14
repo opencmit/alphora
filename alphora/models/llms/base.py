@@ -8,10 +8,16 @@ from typing import Union, Optional, List, Dict, Any, Mapping
 from alphora.models.message import Message
 from alphora.models.llms.stream_helper import BaseGenerator
 from alphora.server.stream_responser import DataStreamer
-from alphora.hooks import HookEvent, HookContext, build_manager
+from alphora.hooks import HookEvent, HookContext, HookManager, build_manager
 
 
 class BaseLLM(ABC):
+
+    _SHORT_MAP: Dict[str, HookEvent] = {
+        "before_call": HookEvent.LLM_BEFORE_CALL,
+        "after_call": HookEvent.LLM_AFTER_CALL,
+    }
+
     def __init__(
             self,
             model_name: Optional[str] = None,
@@ -40,11 +46,27 @@ class BaseLLM(ABC):
 
         self._hooks = build_manager(
             hooks,
-            short_map={
-                "before_call": HookEvent.LLM_BEFORE_CALL,
-                "after_call": HookEvent.LLM_AFTER_CALL,
-            },
+            short_map=self._SHORT_MAP,
         )
+
+    @property
+    def hooks(self) -> HookManager:
+        return self._hooks
+
+    def _resolve_event(self, event):
+        return self._SHORT_MAP.get(event, event) if isinstance(event, str) else event
+
+    def add_hook(self, event, func, *, priority=0, when=None, timeout=None, error_policy=None):
+        self._hooks.register(
+            self._resolve_event(event), func,
+            priority=priority, when=when,
+            timeout=timeout, error_policy=error_policy,
+        )
+        return self
+
+    def remove_hook(self, event, func):
+        self._hooks.unregister(self._resolve_event(event), func)
+        return self
 
     @abstractmethod
     def get_non_stream_response(self,
