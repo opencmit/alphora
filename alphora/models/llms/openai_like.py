@@ -692,15 +692,24 @@ class OpenAILike(BaseLLM):
             async def agenerate(self) -> AsyncIterator[GeneratorOutput]:
                 try:
                     async for chunk in self._stream:
-                        if not chunk.choices:
-                            if chunk.usage:
-                                self.token_usage = {
-                                    'prompt_tokens': chunk.usage.prompt_tokens or 0,
-                                    'completion_tokens': chunk.usage.completion_tokens or 0,
-                                    'total_tokens': chunk.usage.total_tokens or 0
-                                }
 
-                            continue
+                        # 20260415修改：有些大模型提供商不会在输出usage的时候把 choices置空
+                        # if not chunk.choices:
+                        #     if chunk.usage:
+                        #         self.token_usage = {
+                        #             'prompt_tokens': chunk.usage.prompt_tokens or 0,
+                        #             'completion_tokens': chunk.usage.completion_tokens or 0,
+                        #             'total_tokens': chunk.usage.total_tokens or 0
+                        #         }
+                        #
+                        #     continue
+
+                        if chunk.usage:
+                            self.token_usage = {
+                                'prompt_tokens': chunk.usage.prompt_tokens or 0,
+                                'completion_tokens': chunk.usage.completion_tokens or 0,
+                                'total_tokens': chunk.usage.total_tokens or 0
+                            }
 
                         delta = chunk.choices[0].delta
                         finish_reason = chunk.choices[0].finish_reason
