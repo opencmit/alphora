@@ -107,7 +107,9 @@ class ToolCallArgStreamPP(BasePostProcessor):
                     state["active_tools"][idx] = name
                     state["arg_buffers"][idx] = ""
                     state["last_emitted"][idx] = ""
-                    return None
+                    # 即便命中映射，也把 tool_call（工具名）透传给下游，
+                    # 否则客户端会完全看不到被拦截工具的名字。
+                    return GeneratorOutput(content=content, content_type="tool_call")
 
                 if pp.pass_through_unmatched:
                     return GeneratorOutput(content=content, content_type="tool_call")

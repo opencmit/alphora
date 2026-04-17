@@ -30,6 +30,7 @@ from alphora.models.llms.balancer import _LLMLoadBalancer
 from alphora.hooks import HookEvent, HookContext
 
 import logging
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -710,6 +711,10 @@ class OpenAILike(BaseLLM):
                                 'completion_tokens': chunk.usage.completion_tokens or 0,
                                 'total_tokens': chunk.usage.total_tokens or 0
                             }
+
+                        if not chunk.choices:
+
+                            continue
 
                         delta = chunk.choices[0].delta
                         finish_reason = chunk.choices[0].finish_reason
