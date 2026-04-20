@@ -820,6 +820,8 @@ class DockerBackend(ExecutionBackend):
             return await self._remote_list_directory(path, recursive)
 
         is_skills = self._path_resolver.is_skills_path(path) if path else False
+        is_uploads = self._path_resolver.is_uploads_path(path) if path else False
+        is_outputs = self._path_resolver.is_outputs_path(path) if path else False
         full_path = self._resolve_path(path) if path else self._workspace_path
         if not full_path.exists():
             return []
@@ -831,6 +833,10 @@ class DockerBackend(ExecutionBackend):
                 stat = item.stat()
                 if is_skills:
                     display_path = self._path_resolver.skills_to_sandbox(item)
+                elif is_uploads:
+                    display_path = self._path_resolver.uploads_to_sandbox(item)
+                elif is_outputs:
+                    display_path = self._path_resolver.outputs_to_sandbox(item)
                 else:
                     display_path = str(item.relative_to(self._workspace_path))
                 results.append({
@@ -840,7 +846,8 @@ class DockerBackend(ExecutionBackend):
                     "is_directory": item.is_dir(),
                     "file_type": FileType.from_extension(item.name).value,
                 })
-            except Exception:
+            except Exception as exc:
+                logger.debug("list_directory skip %s: %s", item, exc)
                 continue
         return sorted(results, key=lambda x: (not x["is_directory"], x["name"]))
 
@@ -890,29 +897,46 @@ class DockerBackend(ExecutionBackend):
         """List directory inside the container via exec."""
         container_path = self._to_container_path(path) if path else self._container_workspace
 
+        if path and self._path_resolver.is_uploads_path(path):
+            base_root = SANDBOX_UPLOADS_MOUNT
+            prepend_base = True
+        elif path and self._path_resolver.is_outputs_path(path):
+            base_root = SANDBOX_OUTPUTS_MOUNT
+            prepend_base = True
+        elif path and self._path_resolver.is_skills_path(path):
+            base_root = SANDBOX_SKILLS_MOUNT
+            prepend_base = True
+        else:
+            base_root = self._container_workspace
+            prepend_base = False
+
         script = (
             "import os, json, sys\n"
-            f"root = '{container_path}'\n"
-            f"workspace = '{self._container_workspace}'\n"
+            f"root = {container_path!r}\n"
+            f"base = {base_root!r}\n"
+            f"prepend_base = {prepend_base}\n"
             f"recursive = {recursive}\n"
             "results = []\n"
             "if not os.path.isdir(root):\n"
             "    json.dump([], sys.stdout); sys.exit(0)\n"
+            "def make_path(full):\n"
+            "    rel = os.path.relpath(full, base)\n"
+            "    if prepend_base:\n"
+            "        return base.rstrip('/') + '/' + rel if rel != '.' else base\n"
+            "    return rel\n"
             "if recursive:\n"
             "    for dirpath, dirnames, filenames in os.walk(root):\n"
             "        for name in dirnames + filenames:\n"
             "            full = os.path.join(dirpath, name)\n"
-            "            rel = os.path.relpath(full, workspace)\n"
             "            is_dir = os.path.isdir(full)\n"
             "            size = 0 if is_dir else os.path.getsize(full)\n"
-            "            results.append({'name': name, 'path': rel, 'size': size, 'is_directory': is_dir})\n"
+            "            results.append({'name': name, 'path': make_path(full), 'size': size, 'is_directory': is_dir})\n"
             "else:\n"
             "    for name in os.listdir(root):\n"
             "        full = os.path.join(root, name)\n"
-            "        rel = os.path.relpath(full, workspace)\n"
             "        is_dir = os.path.isdir(full)\n"
             "        size = 0 if is_dir else os.path.getsize(full)\n"
-            "        results.append({'name': name, 'path': rel, 'size': size, 'is_directory': is_dir})\n"
+            "        results.append({'name': name, 'path': make_path(full), 'size': size, 'is_directory': is_dir})\n"
             "results.sort(key=lambda x: (not x['is_directory'], x['name']))\n"
             "json.dump(results, sys.stdout)\n"
         )
@@ -928,7 +952,8 @@ class DockerBackend(ExecutionBackend):
             for item in items:
                 item.setdefault("file_type", FileType.from_extension(item.get("name", "")).value)
             return items
-        except Exception:
+        except Exception as exc:
+            logger.debug("_remote_list_directory parse failed for %s: %s", path, exc)
             return []
 
     # ------------------------------------------------------------------ #
