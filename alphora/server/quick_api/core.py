@@ -86,7 +86,13 @@ def publish_agent_api(
     # 文件服务
     if config.sandbox_workspace:
         from alphora.server.quick_api.file_server import publish_file_server
-        publish_file_server(app, config.sandbox_workspace, config.path)
+        publish_file_server(
+            app,
+            config.sandbox_workspace,
+            config.path,
+            upload_enabled=config.file_server_upload_enabled,
+            allow_empty_session=config.file_server_allow_empty_session,
+        )
 
     # 注册生命周期钩子
     @app.on_event("startup")
@@ -146,7 +152,13 @@ def _print_startup_info(
         },
         "文件服务": {
             "沙箱工作目录": config.sandbox_workspace or "未配置",
-            "文件接口": f"POST .../files/{{list|read|download}}, GET .../files/serve/*" if config.sandbox_workspace else "未启用",
+            "文件接口": (
+                "POST .../files/{list|read|download"
+                + ("|upload" if config.file_server_upload_enabled else "")
+                + "}, GET .../files/serve/*"
+            ) if config.sandbox_workspace else "未启用",
+            "upload 启用": config.file_server_upload_enabled if config.sandbox_workspace else False,
+            "允许空 session": config.file_server_allow_empty_session if config.sandbox_workspace else False,
         },
         "运行信息": {
             "启动时间": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
@@ -166,6 +178,8 @@ def _print_startup_info(
         logger.info(f"  文件列表: POST http://<host>:<port>{file_base}/list")
         logger.info(f"  文件读取: POST http://<host>:<port>{file_base}/read")
         logger.info(f"  文件下载: POST http://<host>:<port>{file_base}/download")
+        if config.file_server_upload_enabled:
+            logger.info(f"  文件上传: POST http://<host>:<port>{file_base}/upload")
         logger.info(f"  静态服务: GET  http://<host>:<port>{file_base}/serve/{{path}}?sid={{session_id}}")
         logger.info(f"  沙箱目录: {config.sandbox_workspace}")
     logger.info("=" * 90)
