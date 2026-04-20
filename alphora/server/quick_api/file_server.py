@@ -1,3 +1,144 @@
+"""
+Sandbox 文件服务（File Server）
+================================
+
+给前端 / 客户端提供对"沙箱会话持久化目录"的只读访问接口：列目录、读文本、下载、
+以及可直接被浏览器 ``<img src>`` / ``<a href>`` 使用的内联 URL。
+
+挂载方式
+--------
+默认由 :func:`alphora.server.quick_api.publish_agent_api` 自动挂载——只要在
+``APIPublisherConfig`` 里把 ``sandbox_workspace`` 填上就会启用。也可以手动挂载::
+
+    from alphora.server.quick_api.file_server import publish_file_server
+    publish_file_server(
+        app,
+        sandbox_workspace="/data/sandbox_root",
+        path="/v1",
+        upload_enabled=False,          # 默认只读
+        allow_empty_session=False,     # 默认强制要求 session_id
+    )
+
+所有路径都相对传入的 ``path``，下文以 ``{base}`` 代表 ``path.rstrip('/')``。
+
+目录结构与 session_id
+---------------------
+``sandbox_workspace`` 是多个 session 共享的根目录，支持两种子目录布局：
+
+* 扁平：``{sandbox_workspace}/{session_id}/...``
+* 多用户：``{sandbox_workspace}/{user_id}/{session_id}/...``
+
+``session_id`` 允许字符：字母/数字/下划线/短横线/点号，可选一个正斜杠（用于
+``user/session`` 写法）；长度 <= 128。``.`` / ``..`` 段、空段、超长或含非法字符
+直接 ``400``。相对路径（``dir`` / ``path`` / ``file_path``）一律以 session
+根目录为根，``..`` 越界一律 ``403``。
+
+接口清单
+--------
+
+1) ``POST {base}/files/list`` —— 列目录 / 检索
+   请求体 :class:`FileListRequest`::
+
+       {
+         "session_id": "sess_abc",         # 必填（除非 allow_empty_session=True）
+         "dir": "/outputs",                 # 相对 session 根，默认 "/"
+         "recursive": false,                # 是否递归
+         "max_depth": 1,                    # 递归深度上限，1..5
+         "page": 1,
+         "page_size": 200,                  # 1..1000
+         "sort_by": "name",                 # name | size | mtime
+         "order": "asc"                     # asc | desc
+       }
+
+   返回::
+
+       {
+         "files": [
+           {
+             "name": "chart.png",
+             "path": "/outputs/chart.png",   # 相对 session 根，始终以 "/" 开头
+             "type": "file",                 # file | directory
+             "size": 12345,
+             "size_display": "12.1 KB",
+             "mtime": "2025-01-02 03:04:05",
+             "mtime_ts": 1735776245.0,
+             "extension": "png",
+             "is_symlink": false
+           }
+         ],
+         "cwd": "/outputs",
+         "exists": true,
+         "total": 42,                        # 符合条件的总条目数（未分页前）
+         "page": 1,
+         "page_size": 200
+       }
+
+   目录不存在（session 根不存在时）返回空 ``files`` 且 ``exists=false``；
+   ``dir`` 不存在返回 ``404``。排序时目录会在主键之上再置顶，目录内/文件内保持主键顺序。
+   隐藏项（``.git`` / ``__pycache__`` / ``.DS_Store`` / ``node_modules`` / ``.alphora_mnt_``）
+   默认过滤。
+
+2) ``POST {base}/files/read`` —— 读取文件内容（文本/小文件）
+   请求体 :class:`FileReadRequest`::
+
+       { "session_id": "sess_abc", "path": "/outputs/a.json" }
+
+   返回::
+
+       {
+         "content": "...",         # 文本：原文；二进制/无法解码：base64
+         "mime": "application/json",
+         "size": 123,
+         "encoding": "utf-8",       # utf-8 | gbk | base64
+         "name": "a.json"
+       }
+
+   文件 > 50MB 直接 ``413``，请改用下载接口；不存在 ``404``。
+   文本优先尝试 ``utf-8``，失败回退 ``gbk``，仍然失败则走 ``base64``。
+
+3) ``POST {base}/files/download`` —— 下载（``attachment``）
+   请求体同 ``FileReadRequest``。返回 ``FileResponse``，携带
+   ``Content-Disposition: attachment; filename="..."; filename*=UTF-8''...``，
+   中文文件名走 RFC 5987 编码，天然支持 ``Range`` 断点续传。
+
+4) ``GET  {base}/files/serve/{file_path}?sid={session_id}`` —— 浏览器内联访问
+   设计目的：直接塞进 ``<img src>`` / ``<a href>`` / Markdown 链接。
+   返回 ``FileResponse``，``Content-Disposition: inline``，MIME 自动猜测；
+   ``sid`` 参数承载 session_id（校验规则同上）。
+
+5) ``POST {base}/files/upload`` —— 仅在 ``upload_enabled=True`` 时挂载
+   ``multipart/form-data``：``files`` 必填（可多个），``session_id`` / ``dir`` 走 Form。
+   单文件 > 100MB 直接 ``413``；空文件名、隐藏文件名（``.`` 开头）会出现在返回的
+   ``skipped`` 里而不会中断整体请求。返回::
+
+       {
+         "uploaded": [{"name": "a.csv", "path": "/a.csv", "size": 123}],
+         "skipped":  [{"name": ".env", "reason": "hidden_name"}],
+         "session_id": "sess_abc"
+       }
+
+错误码速查
+----------
+* ``400`` session_id 缺失 / 非法
+* ``403`` 路径越界（``..`` / 符号链接指向外部）
+* ``404`` 目标目录 / 文件不存在
+* ``413`` 读取或上传超过大小上限
+
+配置开关
+--------
+* ``upload_enabled=False`` （默认）：``/files/upload`` 不注册，命中返回 ``404``
+* ``allow_empty_session=False`` （默认）：``session_id`` 必填；置 True 时空
+  ``session_id`` 会回退到 ``sandbox_workspace`` 根——谨慎开启，等于把所有 session
+  的文件都暴露到同一棵树下
+
+示例（前端 / Markdown）
+-----------------------
+假设 ``base_url="https://api.example.com"``、``path="/v1/"``、``session_id="sess_abc"``：
+
+* 图片预览： ``![chart](https://api.example.com/v1/files/serve/outputs/chart.png?sid=sess_abc)``
+* 文件下载： ``[报告.pdf](https://api.example.com/v1/files/serve/outputs/report.pdf?sid=sess_abc)``
+"""
+
 import logging
 import mimetypes
 import base64
