@@ -283,6 +283,9 @@ class MessageInspector:
                 resp_data = str(resp)
         return {
             "call_index": record.call_index,
+            "timestamp": record.timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "agent_id": record.agent_id,
+            "meta": record.meta,
             "messages": record.messages,
             "tools": record.tools,
             "response": resp_data,
@@ -384,6 +387,12 @@ class MessageInspector:
                 f'Available Tools ({tools_count})</button>'
             )
 
+        export_btn = (
+            f'<button class="export-call-btn" '
+            f'onclick="exportCallMarkdown({record.call_index})" '
+            f'title="Export this call as Markdown">Export .md</button>'
+        )
+
         response_html = self._render_response_item(record)
         ci = record.call_index
 
@@ -395,6 +404,7 @@ class MessageInspector:
       <span class="dh-time">{ts}</span>
       <span class="dh-count">{msg_count} messages</span>
       {tools_btn}
+      {export_btn}
     </div>
     {meta_html}
     <div class="flow-bar">{role_flow}</div>
@@ -969,6 +979,28 @@ body {{
   box-shadow: var(--shadow);
 }}
 
+.export-call-btn {{
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-light);
+  border: 1px solid var(--accent);
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+  margin-left: auto;
+  white-space: nowrap;
+}}
+.tools-btn + .export-call-btn {{
+  margin-left: 8px;
+}}
+.export-call-btn:hover {{
+  background: var(--accent);
+  color: #fff;
+  box-shadow: var(--shadow);
+}}
+
 .detail-meta {{
   font-size: 12px;
   color: var(--text2);
@@ -1533,6 +1565,172 @@ function doExport() {{
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   closeModal('export-modal');
+}}
+
+/* ---- Per-call Markdown export ---- */
+function _mdFence(text, lang) {{
+  text = String(text == null ? '' : text);
+  var maxRun = 0, cur = 0;
+  for (var i = 0; i < text.length; i++) {{
+    if (text.charAt(i) === '`') {{
+      cur++;
+      if (cur > maxRun) maxRun = cur;
+    }} else {{
+      cur = 0;
+    }}
+  }}
+  var fenceLen = Math.max(3, maxRun + 1);
+  var fence = new Array(fenceLen + 1).join('`');
+  var trail = text.length && text.charAt(text.length - 1) === '\\n' ? '' : '\\n';
+  return fence + (lang || '') + '\\n' + text + trail + fence;
+}}
+
+function _mdStringifyArgs(raw) {{
+  if (raw == null) return '';
+  if (typeof raw === 'string') {{
+    try {{ return JSON.stringify(JSON.parse(raw), null, 2); }}
+    catch (e) {{ return raw; }}
+  }}
+  try {{ return JSON.stringify(raw, null, 2); }}
+  catch (e) {{ return String(raw); }}
+}}
+
+function _mdPrettyJson(obj) {{
+  try {{ return JSON.stringify(obj, null, 2); }}
+  catch (e) {{ return String(obj); }}
+}}
+
+function _mdRenderToolCalls(list, out) {{
+  list.forEach(function(tc) {{
+    var fn = tc.function || {{}};
+    var idPart = tc.id ? '  (id: `' + tc.id + '`)' : '';
+    out.push('#### `' + (fn.name || 'unknown') + '`' + idPart);
+    out.push('');
+    out.push(_mdFence(_mdStringifyArgs(fn.arguments), 'json'));
+    out.push('');
+  }});
+}}
+
+function _mdTsForFilename(ts) {{
+  if (!ts) return '';
+  var m = String(ts).match(/^(\\d{{4}})-(\\d{{2}})-(\\d{{2}})[ T](\\d{{2}}):(\\d{{2}}):(\\d{{2}})/);
+  if (m) return m[1] + m[2] + m[3] + '-' + m[4] + m[5] + m[6];
+  return String(ts).replace(/[^0-9]/g, '').slice(0, 14);
+}}
+
+function exportCallMarkdown(idx) {{
+  var call = null;
+  for (var i = 0; i < _rawCalls.length; i++) {{
+    if (_rawCalls[i].call_index === idx) {{ call = _rawCalls[i]; break; }}
+  }}
+  if (!call) return;
+
+  var lines = [];
+  lines.push('# Call #' + call.call_index);
+  lines.push('');
+  if (call.timestamp) lines.push('- Timestamp: ' + call.timestamp);
+  if (call.agent_id) lines.push('- Agent: ' + call.agent_id);
+  if (call.meta) {{
+    var metaParts = [];
+    for (var k in call.meta) {{
+      if (Object.prototype.hasOwnProperty.call(call.meta, k) && call.meta[k] != null) {{
+        metaParts.push(k + '=' + call.meta[k]);
+      }}
+    }}
+    if (metaParts.length) lines.push('- Meta: ' + metaParts.join(', '));
+  }}
+  lines.push('');
+
+  if (call.tools && call.tools.length) {{
+    lines.push('## Available Tools (' + call.tools.length + ')');
+    lines.push('');
+    call.tools.forEach(function(t) {{
+      var fn = t.function || {{}};
+      lines.push('### `' + (fn.name || 'unknown') + '`');
+      if (fn.description) {{
+        lines.push('');
+        lines.push(fn.description);
+      }}
+      if (fn.parameters) {{
+        lines.push('');
+        lines.push(_mdFence(_mdPrettyJson(fn.parameters), 'json'));
+      }}
+      lines.push('');
+    }});
+  }}
+
+  if (call.messages && call.messages.length) {{
+    lines.push('## Messages');
+    lines.push('');
+    call.messages.forEach(function(m, i) {{
+      var role = m.role || 'unknown';
+      var heading = '### [' + i + '] ' + role;
+      var badges = [];
+      if (m.tool_call_id) badges.push('call_id=`' + m.tool_call_id + '`');
+      if (m.name) badges.push('name=`' + m.name + '`');
+      if (badges.length) heading += '  (' + badges.join(', ') + ')';
+      lines.push(heading);
+      lines.push('');
+      var content = m.content;
+      if (content != null && content !== '') {{
+        if (role === 'tool') {{
+          var parsed = null;
+          try {{ parsed = JSON.parse(content); }} catch (e) {{}}
+          if (parsed != null && typeof parsed === 'object') {{
+            lines.push(_mdFence(_mdPrettyJson(parsed), 'json'));
+          }} else {{
+            lines.push(_mdFence(String(content), ''));
+          }}
+        }} else {{
+          lines.push(_mdFence(String(content), ''));
+        }}
+        lines.push('');
+      }}
+      if (m.tool_calls && m.tool_calls.length) {{
+        lines.push('tool_calls:');
+        lines.push('');
+        _mdRenderToolCalls(m.tool_calls, lines);
+      }}
+    }});
+  }}
+
+  lines.push('## Response');
+  lines.push('');
+  var resp = call.response;
+  if (resp == null) {{
+    lines.push('_No response recorded._');
+  }} else if (typeof resp === 'string') {{
+    lines.push(_mdFence(resp, ''));
+  }} else if (resp.role) {{
+    if (resp.content) {{
+      lines.push(_mdFence(String(resp.content), ''));
+      lines.push('');
+    }}
+    if (resp.tool_calls && resp.tool_calls.length) {{
+      lines.push('tool_calls:');
+      lines.push('');
+      _mdRenderToolCalls(resp.tool_calls, lines);
+    }}
+    if (!resp.content && !(resp.tool_calls && resp.tool_calls.length)) {{
+      lines.push('_Empty response._');
+    }}
+  }} else {{
+    lines.push(_mdFence(_mdPrettyJson(resp), 'json'));
+  }}
+  lines.push('');
+
+  var md = lines.join('\\n');
+  var stamp = _mdTsForFilename(call.timestamp);
+  var fname = 'call_' + call.call_index + (stamp ? '_' + stamp : '') + '.md';
+  var blob = new Blob([md], {{type: 'text/markdown;charset=utf-8'}});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = fname;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }}
 
 (function() {{
