@@ -117,7 +117,13 @@ def keep_last(n: int) -> Processor:
     def processor(messages: List["Message"]) -> List["Message"]:
         if n <= 0:
             return []
-        return messages[-n:] if len(messages) > n else messages
+        if len(messages) <= n:
+            return list(messages)
+        last_n_start = len(messages) - n
+        keep_indices = _expand_to_full_groups(
+            messages, set(range(last_n_start, len(messages)))
+        )
+        return [messages[i] for i in sorted(keep_indices)]
     return processor
 
 
@@ -323,6 +329,69 @@ def exclude_by(predicate: Callable[["Message"], bool]) -> Processor:
     return processor
 
 
+def _build_tool_call_group_map(
+    messages: List["Message"],
+) -> Dict[int, Set[int]]:
+    """为每条消息建立「所在 tool-call 组的全部索引」映射。
+
+    一个 tool-call 组 = 一个 `assistant(tool_calls=[id1, id2, ...])` + 后续紧随的、
+    `tool_call_id` 匹配这些 id 的全部 `tool` 消息。未处于任何组里的消息（普通
+    user / assistant 文本 / 孤儿 tool）映射为单元素集合 `{i}`，保证调用方用
+    `group_of.get(i, {i})` 时行为一致。
+
+    边界处理：
+      - tool_call_id 重复：按"最近未消费的 assistant"配对（正向扫描 + 队列消费）。
+      - 找不到父 assistant 的孤儿 tool：不并入任何组，映射为 `{i}`，避免把无关
+        的更早 assistant 误拉进来。
+      - assistant 自身声明的某个 tool_call_id 在后续没有匹配 tool：仍把已匹配
+        的 tool 算作同组，未匹配的 id 由上层（ensure_tool_call_integrity）决定
+        是否剔除 assistant 或补占位。
+    """
+    group_of: Dict[int, Set[int]] = {}
+    # pending_id -> assistant 索引
+    pending: Dict[str, int] = {}
+    # assistant 索引 -> 同组索引集合（含 assistant 自身）
+    group_members: Dict[int, Set[int]] = {}
+
+    for i, m in enumerate(messages):
+        if m.role == "assistant" and m.tool_calls:
+            ids = [tc.id for tc in m.tool_calls if tc and tc.id]
+            group_members[i] = {i}
+            for tid in ids:
+                # 若相同 id 已有未配对 assistant，后来的会覆盖——同 id 语义上不应并存，
+                # 这里选择"后来者覆盖"以保持与正向扫描配对一致。
+                pending[tid] = i
+        elif m.role == "tool" and m.tool_call_id:
+            parent = pending.get(m.tool_call_id)
+            if parent is not None:
+                group_members[parent].add(i)
+                # 已消费该 id
+                pending.pop(m.tool_call_id, None)
+
+    # 把组成员互相连起来
+    for members in group_members.values():
+        for i in members:
+            group_of[i] = members
+
+    return group_of
+
+
+def _expand_to_full_groups(
+    messages: List["Message"],
+    indices,
+) -> Set[int]:
+    """把给定索引集合扩展成「包含所有触达 tool-call 组的全部成员」的超集。
+
+    仅依据 `_build_tool_call_group_map` 已识别的组扩展；孤儿 tool 不会被误并入
+    无关 assistant。
+    """
+    group_of = _build_tool_call_group_map(messages)
+    out: Set[int] = set(indices)
+    for i in list(indices):
+        out |= group_of.get(i, {i})
+    return out
+
+
 def keep_important_and_last(
     n: int,
     include_pinned: bool = True,
@@ -364,10 +433,13 @@ def keep_important_and_last(
         last_n_start = max(0, len(messages) - n)
         last_n_indices = set(range(last_n_start, len(messages)))
 
-        # 合并索引并排序
-        keep_indices = sorted(important_indices | last_n_indices)
+        # 合并索引
+        keep_indices = important_indices | last_n_indices
 
-        return [messages[i] for i in keep_indices]
+        # 扩展到完整 tool-call 组，避免把 assistant(tool_calls) 和其 tool 响应拆开
+        keep_indices = _expand_to_full_groups(messages, keep_indices)
+
+        return [messages[i] for i in sorted(keep_indices)]
     return processor
 
 
@@ -587,6 +659,87 @@ def keep_final_tool_result() -> Processor:
     return processor
 
 
+def ensure_tool_call_integrity() -> Processor:
+    """确保输出的消息序列中 tool-call 配对完整。
+
+    规则：
+      - 每条 `role=tool` 的消息，其 `tool_call_id` 必须能在更前方某个 `role=assistant`
+        的 `tool_calls` 里找到；否则该 tool 是孤儿，会被**丢弃**。
+      - 每条 `role=assistant` 的 `tool_calls` 中的每个 id，都必须有对应的 `role=tool`
+        消息紧随在后；若缺少，则从 assistant.tool_calls 中**剔除**缺失的 id；
+        若 tool_calls 最终全部被剔除且 assistant.content 为空，则丢弃这条 assistant。
+
+    这条 processor 不做内容修改，只做结构修复，是给 `build_history` 的最后一道
+    防护，避免上游 processor 无意间拆散了 tool-call 组。
+    """
+    from alphora.memory.message import Message, ToolCall
+
+    def processor(messages: List["Message"]) -> List["Message"]:
+        if not messages:
+            return []
+
+        # 一次正向扫描：按"最近未消费 assistant"配对，识别合法 tool 消息
+        # 并记录每个 assistant 实际被回答的 tool_call_id 集合。
+        assistant_answered: Dict[int, Set[str]] = {}
+        valid_indices: Set[int] = set()
+        pending_parent: Dict[str, int] = {}
+
+        for i, m in enumerate(messages):
+            if m.role == "assistant" and m.tool_calls:
+                valid_indices.add(i)
+                for tc in m.tool_calls:
+                    if tc and tc.id:
+                        pending_parent[tc.id] = i
+            elif m.role == "tool" and m.tool_call_id:
+                parent = pending_parent.get(m.tool_call_id)
+                if parent is not None:
+                    valid_indices.add(i)
+                    assistant_answered.setdefault(parent, set()).add(m.tool_call_id)
+                    pending_parent.pop(m.tool_call_id, None)
+                # 孤儿 tool：不加入 valid_indices，会被丢弃
+            else:
+                valid_indices.add(i)
+
+        # 第三轮：输出；对 assistant 修剪未被回答的 tool_calls
+        out: List["Message"] = []
+        for i, m in enumerate(messages):
+            if i not in valid_indices:
+                continue
+
+            if m.role == "assistant" and m.tool_calls:
+                answered = assistant_answered.get(i, set())
+                kept_tcs = [tc for tc in m.tool_calls if tc and tc.id in answered]
+                if len(kept_tcs) == len(m.tool_calls):
+                    out.append(m)
+                else:
+                    # 有部分 tool_call 缺应答，修剪 tool_calls
+                    has_content = bool((m.content or "").strip())
+                    if not kept_tcs and not has_content:
+                        # 既没 content 也没有效 tool_call → 整条丢弃
+                        continue
+                    new_tool_calls = [
+                        ToolCall(id=tc.id, type=tc.type, function=dict(tc.function))
+                        for tc in kept_tcs
+                    ] or None
+                    fixed = Message(
+                        role=m.role,
+                        content=m.content,
+                        tool_calls=new_tool_calls,
+                        tool_call_id=m.tool_call_id,
+                        name=m.name,
+                        id=m.id,
+                        timestamp=m.timestamp,
+                        metadata=dict(m.metadata),
+                    )
+                    out.append(fixed)
+            else:
+                out.append(m)
+
+        return out
+
+    return processor
+
+
 def token_budget(
     max_tokens: int,
     tokenizer: Callable[[str], int],
@@ -693,6 +846,7 @@ __all__ = [
     "summarize_tool_calls",
     "remove_tool_details",
     "keep_final_tool_result",
+    "ensure_tool_call_integrity",
 
     "token_budget",
 ]

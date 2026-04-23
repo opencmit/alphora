@@ -1,0 +1,496 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Alphora Sandbox File Server API",
+    "description": "Sandbox 文件服务：对沙箱会话持久化目录的只读（可选上传）访问。\n\n- 基础路径：默认 `/alphadata`（由挂载时的 `path` 决定），下文以 `{base}` 表示。\n- `session_id` 允许字符：字母/数字/下划线/短横线/点号，可选一个正斜杠（`user/session` 写法），长度 ≤ 128。\n- 所有相对路径以 session 根为起点，`..` 越界 403。\n- 大小上限：读 50MB，上传 100MB（每个文件）。",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000",
+      "description": "本地开发"
+    },
+    {
+      "url": "{scheme}://{host}",
+      "description": "自定义",
+      "variables": {
+        "scheme": { "default": "http", "enum": ["http", "https"] },
+        "host": { "default": "localhost:8000" }
+      }
+    }
+  ],
+  "tags": [
+    { "name": "files", "description": "文件列表 / 读取 / 下载 / 上传 / 内联访问" }
+  ],
+  "paths": {
+    "/alphadata/files/list": {
+      "post": {
+        "tags": ["files"],
+        "summary": "列出目录",
+        "description": "列出 session 根目录下指定子路径的文件与目录；支持递归、分页、排序。",
+        "operationId": "filesList",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/FileListRequest" },
+              "example": {
+                "session_id": "sess_abc",
+                "dir": "/",
+                "recursive": false,
+                "max_depth": 1,
+                "page": 1,
+                "page_size": 200,
+                "sort_by": "name",
+                "order": "asc"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/FileListResponse" },
+                "example": {
+                  "files": [
+                    {
+                      "name": "outputs",
+                      "path": "/outputs",
+                      "type": "directory",
+                      "size": 0,
+                      "size_display": "",
+                      "mtime": "2025-01-02 03:04:05",
+                      "mtime_ts": 1735776245.0,
+                      "extension": "",
+                      "is_symlink": false
+                    },
+                    {
+                      "name": "chart.png",
+                      "path": "/chart.png",
+                      "type": "file",
+                      "size": 12345,
+                      "size_display": "12.1 KB",
+                      "mtime": "2025-01-02 03:04:05",
+                      "mtime_ts": 1735776245.0,
+                      "extension": "png",
+                      "is_symlink": false
+                    }
+                  ],
+                  "cwd": "/",
+                  "exists": true,
+                  "total": 2,
+                  "page": 1,
+                  "page_size": 200
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/alphadata/files/read": {
+      "post": {
+        "tags": ["files"],
+        "summary": "读取文件内容",
+        "description": "读取文本或小文件内容；>50MB 返回 413，请改用下载接口。文本优先 utf-8，再回退 gbk，再回退 base64。",
+        "operationId": "filesRead",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/FileReadRequest" },
+              "example": {
+                "session_id": "sess_abc",
+                "path": "/outputs/a.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/FileReadResponse" },
+                "example": {
+                  "content": "{\"hello\": \"world\"}",
+                  "mime": "application/json",
+                  "size": 18,
+                  "encoding": "utf-8",
+                  "name": "a.json"
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "413": { "$ref": "#/components/responses/PayloadTooLarge" }
+        }
+      }
+    },
+    "/alphadata/files/download": {
+      "post": {
+        "tags": ["files"],
+        "summary": "下载文件（attachment）",
+        "description": "返回 `FileResponse`，`Content-Disposition: attachment`，中文文件名走 RFC 5987 编码；天然支持 Range 断点续传。",
+        "operationId": "filesDownload",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/FileDownloadRequest" },
+              "example": {
+                "session_id": "sess_abc",
+                "path": "/outputs/report.pdf"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "文件二进制流",
+            "headers": {
+              "Content-Disposition": {
+                "schema": { "type": "string" },
+                "description": "attachment; filename=\"...\"; filename*=UTF-8''..."
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/alphadata/files/upload": {
+      "post": {
+        "tags": ["files"],
+        "summary": "上传文件（可选接口）",
+        "description": "仅在挂载时 `upload_enabled=True` 才注册；`multipart/form-data`。单文件 >100MB 返回 413；空文件名、`.` 开头的隐藏文件名会进 `skipped` 而不中断整体请求。",
+        "operationId": "filesUpload",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/FileUploadForm" },
+              "encoding": {
+                "files": { "style": "form" }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功（可能含 skipped）",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/FileUploadResponse" },
+                "example": {
+                  "uploaded": [
+                    { "name": "a.csv", "path": "/a.csv", "size": 123 }
+                  ],
+                  "skipped": [
+                    { "name": ".env", "reason": "hidden_name" }
+                  ],
+                  "session_id": "sess_abc"
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "413": { "$ref": "#/components/responses/PayloadTooLarge" }
+        }
+      }
+    },
+    "/alphadata/files/serve/{file_path}": {
+      "get": {
+        "tags": ["files"],
+        "summary": "浏览器内联访问",
+        "description": "直接可塞进 `<img src>` / `<a href>` / Markdown 链接；`Content-Disposition: inline`，MIME 自动猜测。",
+        "operationId": "filesServe",
+        "parameters": [
+          {
+            "name": "file_path",
+            "in": "path",
+            "required": true,
+            "description": "相对 session 根的文件路径（可多级，如 `outputs/chart.png`）。",
+            "schema": { "type": "string" },
+            "example": "outputs/chart.png"
+          },
+          {
+            "name": "sid",
+            "in": "query",
+            "required": false,
+            "description": "session_id（校验规则同请求体中的 `session_id`）。",
+            "schema": { "type": "string" },
+            "example": "sess_abc"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "文件二进制流",
+            "headers": {
+              "Content-Disposition": {
+                "schema": { "type": "string" },
+                "description": "inline; filename=\"...\"; filename*=UTF-8''..."
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": { "type": "string", "format": "binary" }
+              },
+              "image/*": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "FileListRequest": {
+        "type": "object",
+        "required": ["session_id"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "会话 ID；`allow_empty_session=False`（默认）时必填。",
+            "example": "sess_abc"
+          },
+          "dir": {
+            "type": "string",
+            "description": "相对 session 根的目录，默认 `/`。",
+            "default": "/",
+            "example": "/"
+          },
+          "recursive": {
+            "type": "boolean",
+            "default": false,
+            "example": false
+          },
+          "max_depth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 1,
+            "example": 1,
+            "description": "递归深度上限（仅 `recursive=true` 时生效）。"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "example": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 200,
+            "example": 200
+          },
+          "sort_by": {
+            "type": "string",
+            "enum": ["name", "size", "mtime"],
+            "default": "name",
+            "example": "name"
+          },
+          "order": {
+            "type": "string",
+            "enum": ["asc", "desc"],
+            "default": "asc",
+            "example": "asc"
+          }
+        },
+        "example": {
+          "session_id": "sess_abc",
+          "dir": "/",
+          "recursive": false,
+          "max_depth": 1,
+          "page": 1,
+          "page_size": 200,
+          "sort_by": "name",
+          "order": "asc"
+        }
+      },
+      "FileInfo": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "example": "chart.png" },
+          "path": { "type": "string", "description": "相对 session 根，始终以 `/` 开头。", "example": "/outputs/chart.png" },
+          "type": { "type": "string", "enum": ["file", "directory"], "example": "file" },
+          "size": { "type": "integer", "example": 12345 },
+          "size_display": { "type": "string", "example": "12.1 KB" },
+          "mtime": { "type": "string", "example": "2025-01-02 03:04:05" },
+          "mtime_ts": { "type": "number", "format": "double", "example": 1735776245.0 },
+          "extension": { "type": "string", "example": "png" },
+          "is_symlink": { "type": "boolean", "example": false }
+        }
+      },
+      "FileListResponse": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FileInfo" }
+          },
+          "cwd": { "type": "string", "example": "/outputs" },
+          "exists": { "type": "boolean", "description": "session 根是否存在；`false` 时 `files` 为空。", "example": true },
+          "total": { "type": "integer", "description": "分页前的符合条件总数。", "example": 42 },
+          "page": { "type": "integer", "example": 1 },
+          "page_size": { "type": "integer", "example": 200 }
+        }
+      },
+      "FileReadRequest": {
+        "type": "object",
+        "required": ["session_id", "path"],
+        "properties": {
+          "session_id": { "type": "string", "example": "sess_abc" },
+          "path": { "type": "string", "description": "相对 session 根的文件路径。", "example": "/outputs/a.json" }
+        },
+        "example": {
+          "session_id": "sess_abc",
+          "path": "/outputs/a.json"
+        }
+      },
+      "FileReadResponse": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "文本：原文；二进制 / 无法 utf-8 或 gbk 解码：base64。",
+            "example": "{\"hello\": \"world\"}"
+          },
+          "mime": { "type": "string", "example": "application/json" },
+          "size": { "type": "integer", "example": 18 },
+          "encoding": {
+            "type": "string",
+            "enum": ["utf-8", "gbk", "base64"],
+            "example": "utf-8"
+          },
+          "name": { "type": "string", "example": "a.json" }
+        }
+      },
+      "FileDownloadRequest": {
+        "type": "object",
+        "required": ["session_id", "path"],
+        "properties": {
+          "session_id": { "type": "string", "example": "sess_abc" },
+          "path": { "type": "string", "description": "相对 session 根的文件路径。", "example": "/outputs/report.pdf" }
+        },
+        "example": {
+          "session_id": "sess_abc",
+          "path": "/outputs/report.pdf"
+        }
+      },
+      "FileUploadForm": {
+        "type": "object",
+        "required": ["files", "session_id"],
+        "properties": {
+          "files": {
+            "type": "array",
+            "description": "要上传的文件，可多个。",
+            "items": { "type": "string", "format": "binary" }
+          },
+          "session_id": { "type": "string", "default": "", "example": "sess_abc" },
+          "dir": { "type": "string", "default": "/", "example": "/" }
+        }
+      },
+      "FileUploadedItem": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "example": "a.csv" },
+          "path": { "type": "string", "example": "/a.csv" },
+          "size": { "type": "integer", "example": 123 }
+        }
+      },
+      "FileSkippedItem": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "example": ".env" },
+          "reason": {
+            "type": "string",
+            "enum": ["empty_filename", "invalid_name", "hidden_name"],
+            "example": "hidden_name"
+          }
+        }
+      },
+      "FileUploadResponse": {
+        "type": "object",
+        "properties": {
+          "uploaded": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FileUploadedItem" }
+          },
+          "skipped": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/FileSkippedItem" }
+          },
+          "session_id": { "type": "string", "example": "sess_abc" }
+        }
+      },
+      "HTTPError": {
+        "type": "object",
+        "properties": {
+          "detail": { "type": "string", "example": "session_id 不能为空" }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "session_id 缺失 / 非法，或参数校验失败",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/HTTPError" },
+            "example": { "detail": "session_id 不能为空" }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "路径越界（`..` 或符号链接指向外部）",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/HTTPError" },
+            "example": { "detail": "路径越界" }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "目标目录 / 文件不存在",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/HTTPError" },
+            "example": { "detail": "文件不存在" }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "读取 >50MB 或上传单文件 >100MB",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/HTTPError" },
+            "example": { "detail": "文件过大，请使用下载接口" }
+          }
+        }
+      }
+    }
+  }
+}
