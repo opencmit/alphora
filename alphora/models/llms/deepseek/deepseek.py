@@ -175,8 +175,3 @@ class DeepSeekV4Pro(DeepSeek):
         kwargs["extra_body"] = eb
 
 
-if __name__ == "__main__":
-    dpsk = DeepSeekV4Pro(api_key='sk-7d5fc969d83f43818621b34fb9a9d39e')
-
-    resp = dpsk.invoke(message='nihao')
-    print(resp)
