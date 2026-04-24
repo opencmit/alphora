@@ -23,7 +23,7 @@ JSON mode 与 tool calls 均可直接复用父类默认实现：
 - **Tool calls**：使用 ``deepseek-chat`` 模型，按 OpenAI 兼容格式传 ``tools`` 即可。
 """
 
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from alphora.models.llms.openai_like import OpenAILike
 
@@ -44,36 +44,38 @@ class DeepSeek(OpenAILike):
 
     def __init__(
             self,
-            model_name: str = "deepseek-chat",
+            model_name: Optional[str] = None,
             api_key: Optional[str] = None,
+            base_url: Optional[str] = None,
             header: Optional[Mapping[str, str]] = None,
             temperature: float = 0.0,
             max_tokens: int = 1024,
             top_p: float = 1.0,
+            is_multimodal: bool = False,
             hooks=None,
-            **kwargs
     ):
         """初始化 DeepSeek 客户端。
 
-        Args:
-            model_name: 默认使用的 DeepSeek 模型；详见类文档。
-            api_key: DeepSeek API Key；若未传，则尝试从 ``LLM_API_KEY`` 环境变量读取。
-            header: 自定义请求头。
-            temperature: 采样温度（0.0 ~ 2.0）。
-            max_tokens: 最大生成 token 数。
-            top_p: 核采样参数（0.0 ~ 1.0）。
-            hooks: Hook 回调，用法同 :class:`~alphora.models.llms.openai_like.OpenAILike`。
+        各参数与 :class:`OpenAILike` 相同；仅作两处约定化默认值：
+
+        - ``model_name`` 为 ``None`` 时使用 :attr:`DEFAULT_CHAT_MODEL`。
+        - ``base_url`` 为 ``None`` 时使用 :attr:`BASE_URL`；其它行为与父类一致
+          （例如 ``api_key``、空 ``base_url`` 时与环境变量 `LLM_*` 的组合）。
         """
+        if model_name is None:
+            model_name = type(self).DEFAULT_CHAT_MODEL
+        if base_url is None:
+            base_url = type(self).BASE_URL
         super().__init__(
             model_name=model_name,
             api_key=api_key,
-            base_url=self.BASE_URL,
+            base_url=base_url,
             header=header,
             temperature=temperature,
             max_tokens=max_tokens,
             top_p=top_p,
+            is_multimodal=is_multimodal,
             hooks=hooks,
-            **kwargs
         )
 
     # ------------------------------------------------------------------
@@ -121,8 +123,29 @@ class DeepSeekV3(DeepSeek):
     控制推理行为。
     """
 
-    def __init__(self, model_name: str = "deepseek-chat", **kwargs: Any):
-        super().__init__(model_name=model_name, **kwargs)
+    def __init__(
+            self,
+            model_name: Optional[str] = None,
+            api_key: Optional[str] = None,
+            base_url: Optional[str] = None,
+            header: Optional[Mapping[str, str]] = None,
+            temperature: float = 0.0,
+            max_tokens: int = 1024,
+            top_p: float = 1.0,
+            is_multimodal: bool = False,
+            hooks=None,
+    ) -> None:
+        super().__init__(
+            model_name=model_name,
+            api_key=api_key,
+            base_url=base_url,
+            header=header,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            top_p=top_p,
+            is_multimodal=is_multimodal,
+            hooks=hooks,
+        )
 
     def _apply_thinking(
             self,
@@ -154,11 +177,28 @@ class DeepSeekV4Pro(DeepSeek):
 
     def __init__(
             self,
-            model_name: str = "deepseek-v4-pro",
+            model_name: Optional[str] = None,
+            api_key: Optional[str] = None,
+            base_url: Optional[str] = None,
+            header: Optional[Mapping[str, str]] = None,
+            temperature: float = 0.0,
+            max_tokens: int = 1024,
+            top_p: float = 1.0,
+            is_multimodal: bool = False,
             reasoning_effort: str = "high",
-            **kwargs: Any,
-    ):
-        super().__init__(model_name=model_name, **kwargs)
+            hooks=None,
+    ) -> None:
+        super().__init__(
+            model_name=model_name,
+            api_key=api_key,
+            base_url=base_url,
+            header=header,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            top_p=top_p,
+            is_multimodal=is_multimodal,
+            hooks=hooks,
+        )
         self.reasoning_effort = reasoning_effort
 
     def _apply_thinking(

@@ -13,29 +13,27 @@ class Qwen(OpenAILike):
 
     def __init__(
             self,
-            model_name: str = "qwen-max",
+            model_name: Optional[str] = None,
             api_key: Optional[str] = None,
-            base_url: str = DASHSCOPE_BASE_URL,
+            base_url: Optional[str] = None,
             header: Optional[Mapping[str, str]] = None,
             temperature: float = 0.0,
             max_tokens: int = 1024,
             top_p: float = 1.0,
+            is_multimodal: bool = False,
             hooks=None,
-            **kwargs: Any,
     ):
         """
-        初始化 Qwen 模型客户端。
+        各参数与 :class:`OpenAILike` 相同，调用习惯（关键字顺序、可省略项）可保持一致。
 
-        Args:
-            model_name: 模型名称，如 'qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen3-32b' 等。
-            api_key: DashScope API 密钥。若未提供，将尝试从环境变量 LLM_API_KEY 读取。
-            header: 额外请求头。
-            temperature: 采样温度（0.0 ~ 1.0）。
-            max_tokens: 最大生成 token 数。
-            top_p: 核采样参数。
-            hooks: Hook 回调，支持 ``{"after_call": callable}`` 等。
-
+        与父类有别的默认约定：``model_name`` 为 ``None`` 时视为 ``"qwen-max"``；``base_url`` 为
+        ``None`` 时使用 :attr:`DASHSCOPE_BASE_URL`；``api_key`` 仍按父类与环境变量
+        ``LLM_API_KEY`` 解析。
         """
+        if model_name is None:
+            model_name = "qwen-max"
+        if base_url is None:
+            base_url = type(self).DASHSCOPE_BASE_URL
         super().__init__(
             model_name=model_name,
             api_key=api_key,
@@ -44,8 +42,8 @@ class Qwen(OpenAILike):
             temperature=temperature,
             max_tokens=max_tokens,
             top_p=top_p,
+            is_multimodal=is_multimodal,
             hooks=hooks,
-            **kwargs
         )
 
     def _get_extra_body(self, enable_thinking: bool = False) -> Optional[dict]:
