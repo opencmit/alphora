@@ -8,6 +8,9 @@
 - 新增 Hook - MessageInspector 的对话导出功能
 
 
-
+## [1.3.0] - 2026-04-24
+### Update
+- 重写OpenAILike，优化了可拓展性
+- 新增DeepSeek模型
 
 

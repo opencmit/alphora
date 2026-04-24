@@ -9,7 +9,7 @@ import asyncio
 import os
 
 from alphora.models import OpenAILike, Qwen
-from alphora.models.llms.deepseek.dpsk import DeepSeek
+from alphora.models.llms.deepseek.deepseek import DeepSeek
 
 
 async def main() -> None:
