@@ -1,6 +1,6 @@
-from typing import Optional, Mapping, Literal
+from typing import Any, Dict, List, Mapping, Optional
+
 from alphora.models.llms.openai_like import OpenAILike
-from alphora.server.stream_responser import DataStreamer
 
 
 class Qwen(OpenAILike):
@@ -56,6 +56,33 @@ class Qwen(OpenAILike):
                 "chat_template_kwargs": {"enable_thinking": enable_thinking},
             }
         return None
+
+    def _transform_messages(
+            self, messages: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """DashScope 严格要求每条消息的 ``content`` 字段必须存在且为字符串类型。
+
+        OpenAI / DeepSeek 允许 ``content: null``（如 assistant 仅带 ``tool_calls``
+        的情况）或省略该字段（如部分 tool 结果消息），但 DashScope 会直接返回
+        400 ``The content field is a required field``。
+
+        这里做一次非破坏性归一化：仅当某条消息的 ``content`` 缺失 / 为 ``None``
+        / 非字符串时，复制该条消息并把 ``content`` 置为空字符串；其余消息保持
+        原对象引用不变。``tool_calls``、``tool_call_id``、``name`` 等字段保留。
+        """
+        normalized: List[Dict[str, Any]] = []
+        for m in messages:
+            if not isinstance(m, dict):
+                normalized.append(m)
+                continue
+            c = m.get("content", None)
+            if isinstance(c, str):
+                normalized.append(m)
+                continue
+            fixed = dict(m)
+            fixed["content"] = "" if c is None else c
+            normalized.append(fixed)
+        return normalized
 
     def __repr__(self):
         return (
