@@ -10,7 +10,7 @@
 
 ## [1.3.0] - 2026-04-24
 ### Update
-- 重写OpenAILike，优化了可拓展性
-- 新增DeepSeek模型
+- 重写OpenAILike，优化了可拓展性和鲁棒性
+- 新增DeepSeek-V4适配
 
 
