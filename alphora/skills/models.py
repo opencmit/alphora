@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field, PrivateAttr, field_validator
 import re
 
 
-NAME_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
+NAME_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-_]*[a-z0-9])?$")
 NAME_MAX_LENGTH = 64
 DESCRIPTION_MAX_LENGTH = 1024
 COMPATIBILITY_MAX_LENGTH = 500
