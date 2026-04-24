@@ -15,11 +15,13 @@ class Qwen(OpenAILike):
             self,
             model_name: str = "qwen-max",
             api_key: Optional[str] = None,
+            base_url: str = DASHSCOPE_BASE_URL,
             header: Optional[Mapping[str, str]] = None,
             temperature: float = 0.0,
             max_tokens: int = 1024,
             top_p: float = 1.0,
             hooks=None,
+            **kwargs: Any,
     ):
         """
         初始化 Qwen 模型客户端。
@@ -37,12 +39,13 @@ class Qwen(OpenAILike):
         super().__init__(
             model_name=model_name,
             api_key=api_key,
-            base_url=self.DASHSCOPE_BASE_URL,
+            base_url=base_url,
             header=header,
             temperature=temperature,
             max_tokens=max_tokens,
             top_p=top_p,
             hooks=hooks,
+            **kwargs
         )
 
     def _get_extra_body(self, enable_thinking: bool = False) -> Optional[dict]:

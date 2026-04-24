@@ -51,6 +51,7 @@ class DeepSeek(OpenAILike):
             max_tokens: int = 1024,
             top_p: float = 1.0,
             hooks=None,
+            **kwargs
     ):
         """初始化 DeepSeek 客户端。
 
@@ -72,6 +73,7 @@ class DeepSeek(OpenAILike):
             max_tokens=max_tokens,
             top_p=top_p,
             hooks=hooks,
+            **kwargs
         )
 
     # ------------------------------------------------------------------
