@@ -18,7 +18,7 @@ class Qwen(OpenAILike):
             base_url: Optional[str] = None,
             header: Optional[Mapping[str, str]] = None,
             temperature: float = 0.0,
-            max_tokens: int = 1024,
+            max_tokens: int = 8000,
             top_p: float = 1.0,
             is_multimodal: bool = False,
             hooks=None,

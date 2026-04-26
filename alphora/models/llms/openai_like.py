@@ -60,11 +60,7 @@ from alphora.hooks import HookEvent, HookContext
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # 内部辅助类
-# ---------------------------------------------------------------------------
-
-
 class _LLMCallContext:
     """封装一次 LLM 调用的计时与 ``LLM_AFTER_CALL`` hook 触发。
 
@@ -261,25 +257,14 @@ class _AsyncStreamGenerator(_BaseStreamGenerator):
         await self._ctx.end_async(self._llm._hooks, usage=self.token_usage)
 
 
-# ---------------------------------------------------------------------------
-# 主类
-# ---------------------------------------------------------------------------
-
-
 class OpenAILike(BaseLLM):
     """OpenAI-兼容厂商的通用封装基类。
-
     继承并覆盖扩展钩子即可快速适配新厂商；参见模块文档。
     """
-
     #: 子类可声明自身支持的能力，框架层在必要时可据此做前置校验。
     #: 常见值：``"reasoning"``, ``"json_mode"``, ``"tools"``, ``"vision"``,
     #: ``"audio"``, ``"video"``。
     CAPABILITIES: set = set()
-
-    # ------------------------------------------------------------------
-    # 构造
-    # ------------------------------------------------------------------
 
     def __init__(
             self,
@@ -335,10 +320,7 @@ class OpenAILike(BaseLLM):
             is_multimodal=self.is_multimodal,
         )
 
-    # ------------------------------------------------------------------
     # 客户端构造钩子
-    # ------------------------------------------------------------------
-
     def _make_sync_client(
             self,
             *,
@@ -363,10 +345,7 @@ class OpenAILike(BaseLLM):
         """构造异步 ``AsyncOpenAI`` 客户端，详见 :meth:`_make_sync_client`。"""
         return AsyncOpenAI(api_key=api_key, base_url=base_url, default_headers=header)
 
-    # ------------------------------------------------------------------
     # 消息预处理 / 改写
-    # ------------------------------------------------------------------
-
     def _prepare_messages(
             self,
             message: Union[str, Message, List[Dict[str, Any]]],
@@ -412,10 +391,7 @@ class OpenAILike(BaseLLM):
             return message.has_images() or message.has_audios() or message.has_videos()
         return False
 
-    # ------------------------------------------------------------------
     # 请求参数构建钩子
-    # ------------------------------------------------------------------
-
     def _get_extra_body(self, *args, **kwargs) -> Optional[Dict[str, Any]]:
         """返回要透传给 ``extra_body`` 的字典，默认返回 ``None`` 表示不附加。
 
@@ -580,10 +556,7 @@ class OpenAILike(BaseLLM):
             "total_tokens": usage.total_tokens or 0,
         }
 
-    # ------------------------------------------------------------------
     # 参数校验钩子
-    # ------------------------------------------------------------------
-
     def _validate_temperature(self, v: float) -> None:
         if not (0.0 <= v <= 2.0):
             raise RuntimeError("temperature must be between 0.0 and 2.0")
@@ -592,10 +565,7 @@ class OpenAILike(BaseLLM):
         if not (0.0 <= v <= 1.0):
             raise RuntimeError("top_p must be between 0.0 and 1.0")
 
-    # ------------------------------------------------------------------
     # Tool call 统一分支（同 / 异步对称）
-    # ------------------------------------------------------------------
-
     def _tool_call(
             self,
             client: OpenAI,
@@ -643,10 +613,7 @@ class OpenAILike(BaseLLM):
         tool_calls_list = [tc.model_dump() for tc in raw_tool_calls]
         return ToolCall(tool_calls=tool_calls_list, content=None)
 
-    # ------------------------------------------------------------------
     # 主方法：同步非流式
-    # ------------------------------------------------------------------
-
     def get_non_stream_response(
             self,
             message: Union[str, Message, List[Dict[str, Any]]],
@@ -688,10 +655,7 @@ class OpenAILike(BaseLLM):
         ctx.end_sync(self._hooks, usage=parsed["usage"])
         return parsed["content"]
 
-    # ------------------------------------------------------------------
     # 主方法：同步流式
-    # ------------------------------------------------------------------
-
     def get_streaming_response(
             self,
             message: Union[str, Message, List[Dict[str, Any]]],
@@ -726,10 +690,7 @@ class OpenAILike(BaseLLM):
             stream_tool_calls=stream_tool_calls,
         )
 
-    # ------------------------------------------------------------------
     # 主方法：异步非流式
-    # ------------------------------------------------------------------
-
     async def aget_non_stream_response(
             self,
             message: Union[str, Message, List[Dict[str, Any]]],
@@ -770,10 +731,7 @@ class OpenAILike(BaseLLM):
         await ctx.end_async(self._hooks, usage=parsed["usage"])
         return parsed["content"]
 
-    # ------------------------------------------------------------------
     # 主方法：异步流式
-    # ------------------------------------------------------------------
-
     async def aget_streaming_response(
             self,
             message: Union[str, Message, List[Dict[str, Any]]],
@@ -808,10 +766,7 @@ class OpenAILike(BaseLLM):
             stream_tool_calls=stream_tool_calls,
         )
 
-    # ------------------------------------------------------------------
     # 参数 setter / 其他
-    # ------------------------------------------------------------------
-
     def set_temperature(self, temp: float) -> None:
         self._validate_temperature(temp)
         self.temperature = temp

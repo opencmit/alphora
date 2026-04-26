@@ -105,10 +105,7 @@ class DeepSeek(OpenAILike):
     ) -> None:
         kwargs["model"] = self._resolve_model(kwargs.get("model"), enable_thinking)
 
-    # ------------------------------------------------------------------
     # Misc
-    # ------------------------------------------------------------------
-
     def __repr__(self) -> str:
         return (
             f"DeepSeek(model='{self.model_name}', "
