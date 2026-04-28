@@ -5,9 +5,8 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from copy import copy
-
 from alphora.agent.base_agent import BaseAgent
+from alphora.agent._request_scope import enter_request_scope
 from alphora.server.openai_request_body import OpenAIRequest
 from alphora.server.stream_responser import DataStreamer
 from alphora.agent.stream import Stream
@@ -43,7 +42,9 @@ def create_api_router(
     @router.post(full_api_path, response_description="OpenAI兼容格式的响应")
     async def agent_api_endpoint(body_data: OpenAIRequest,
                                  raw_request: Request):
-        """每次请求创建全新Agent实例 + 关联会话记忆"""
+        """复用单例 agent，每个请求在自己的 asyncio Task 上下文里
+        激活独立的请求作用域（contextvars），从而把 ``config / memory /
+        callback / stream / llm`` 等写入隔离到本次请求。"""
         try:
             body_data.set_headers(dict(raw_request.headers))
 
@@ -59,24 +60,27 @@ def create_api_router(
                 memory_cls=memory_cls
             )
 
-            logger.debug(f"处理请求 - session_id: {session_id}，准备创建全新 {agent.__class__.__name__} 实例")
-
-            # 创建全新Agent实例
-            new_agent = copy(agent)
-
-            # 配置Agent实例
-            new_agent.memory = session_memory
+            logger.debug(
+                f"处理请求 - session_id: {session_id}，在 {agent.__class__.__name__} 单例上激活请求作用域"
+            )
 
             new_callback = DataStreamer(timeout=1800)
-            new_agent.callback = new_callback
-            new_agent.stream = Stream(callback=new_callback)
 
-            # 执行Agent方法，用 wrapper 保证流生命周期正确关闭
-            agent_method = getattr(new_agent, method_name)
-
-            async def _guarded_run(_method, _body, _cb):
+            async def _guarded_run(_agent, _method_name, _body, _cb, _session_memory):
+                # 注意：必须在新建的 Task 上下文里激活作用域，
+                # 这样后续对 _agent 这五个属性的写入只影响本任务，不会污染单例或其它并发请求。
                 try:
-                    await _method(_body)
+                    enter_request_scope()
+                    # 给单例 agent 在本次请求里覆盖请求级属性。
+                    # config 必须显式克隆一份新字典，否则当任务结束、覆盖随 ContextVar 释放后，
+                    # 它们仍是同一个 dict 引用，在并发下会和后续请求相互写脏。
+                    _agent.config = dict(_agent.config or {})
+                    _agent.memory = _session_memory
+                    _agent.callback = _cb
+                    _agent.stream = Stream(callback=_cb)
+
+                    method = getattr(_agent, _method_name)
+                    await method(_body)
                 except Exception as exc:
                     logger.error(f"Agent 执行异常: {exc}", exc_info=exc)
                     if not _cb._closed:
@@ -85,7 +89,9 @@ def create_api_router(
                     if not _cb._closed:
                         await _cb.stop()
 
-            asyncio.create_task(_guarded_run(agent_method, body_data, new_callback))
+            asyncio.create_task(
+                _guarded_run(agent, method_name, body_data, new_callback, session_memory)
+            )
 
             # 返回响应（流式/非流式）
             if body_data.stream:
@@ -102,7 +108,7 @@ def create_api_router(
                     "error": str(e),
                     "session_id": session_id,
                     "timestamp": datetime.datetime.now().isoformat(),
-                    "agent_instance": "全新实例创建失败"
+                    "agent_instance": "请求作用域激活失败"
                 }
             )
 

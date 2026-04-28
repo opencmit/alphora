@@ -22,6 +22,8 @@ from alphora.hooks import HookManager, build_manager
 
 from alphora.debugger import tracer
 
+from alphora.agent._request_scope import RequestScoped
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -65,6 +67,16 @@ class MemoryPoolItem(BaseModel):
 class BaseAgent(object):
     agent_type: str = "BaseAgent"
     _SHARED_KEYS: tuple = ("llm", "memory", "config", "verbose")
+
+    # 请求级属性：通过描述符在并发请求间隔离。
+    # 详见 alphora.agent._request_scope.RequestScoped。
+    # 写入：激活请求作用域时只写入 per-task 覆盖字典；否则写到 instance.__dict__["_singleton_<name>"]
+    # 读取：激活请求作用域且有覆盖时读覆盖；否则回落到单例默认值。
+    config = RequestScoped("config")
+    memory = RequestScoped("memory")
+    callback = RequestScoped("callback")
+    stream = RequestScoped("stream")
+    llm = RequestScoped("llm")
 
     def __init__(self,
                  llm: Optional[OpenAILike] = None,
