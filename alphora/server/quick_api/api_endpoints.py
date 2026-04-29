@@ -64,7 +64,7 @@ def create_api_router(
                 f"处理请求 - session_id: {session_id}，在 {agent.__class__.__name__} 单例上激活请求作用域"
             )
 
-            new_callback = DataStreamer(timeout=1800)
+            new_callback = DataStreamer(timeout=180000)
 
             async def _guarded_run(_agent, _method_name, _body, _cb, _session_memory):
                 # 注意：必须在新建的 Task 上下文里激活作用域，
