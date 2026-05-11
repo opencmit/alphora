@@ -27,7 +27,7 @@ from typing import (
     Callable, Tuple, Set, overload
 )
 from pathlib import Path
-import time
+import re
 import json
 import logging
 import copy
@@ -436,7 +436,8 @@ class MemoryManager:
         elif content is not None and not isinstance(content, str):
             actual_content = str(content)
         if isinstance(actual_content, str):
-            actual_content = actual_content.replace("</think>", "").replace("<think>", "")
+            pattern = r'<think>.*?</think>'
+            actual_content = re.sub(pattern, '', actual_content, flags=re.DOTALL | re.IGNORECASE)
         msg = Message.assistant(actual_content, actual_tool_calls, **metadata)
         return self._add_message(msg, mid)
 
