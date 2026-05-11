@@ -40,6 +40,7 @@
 - 新增 `tests/test_request_scope.py`：6 个用例覆盖描述符基础语义、单例-任务
   隔离、五个请求级属性的并发隔离、`update_config` 不串号、以及通过
   FastAPI `TestClient` 做的真实并发端到端验证。
+- 新增 `MemoryManager`的 clone 方法
 
 ### Compatibility
 - 应用层（`BaseAgent` 子类）**无需任何改动**：`self.update_config(...)` /
