@@ -133,6 +133,7 @@ def test_sync_generator_aborts_with_fallback_on_loop():
 
     assert [out.content for out in outputs] == [phrase, phrase, DEFAULT_LOOP_FALLBACK_MESSAGE]
     assert generator.get_finish_reason() == "loop_detected"
+    assert generator._full_content == phrase + phrase + DEFAULT_LOOP_FALLBACK_MESSAGE
 
 
 def test_async_generator_aborts_with_fallback_on_loop():
@@ -156,6 +157,7 @@ def test_async_generator_aborts_with_fallback_on_loop():
 
     assert outputs == [phrase, phrase, DEFAULT_LOOP_FALLBACK_MESSAGE]
     assert generator.get_finish_reason() == "loop_detected"
+    assert generator._full_content == phrase + phrase + DEFAULT_LOOP_FALLBACK_MESSAGE
     assert stream.closed is True
 
 
