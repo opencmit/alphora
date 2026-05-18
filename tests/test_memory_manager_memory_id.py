@@ -120,3 +120,68 @@ def test_merge_memory_returns_zero_for_missing_source() -> None:
 
     assert merged == 0
     assert [m.content for m in a.get_messages("target")] == ["a1"]
+
+
+def test_clone_messages_are_independent() -> None:
+    base = MemoryManager()
+    base.add_user("hi", memory_id="chat_a")
+    base.add_assistant("hello", memory_id="chat_a")
+
+    fork = base.clone()
+
+    assert fork is not base
+    assert [m.content for m in fork.get_messages("chat_a")] == ["hi", "hello"]
+
+    fork.add_user("from_fork", memory_id="chat_a")
+    assert [m.content for m in base.get_messages("chat_a")] == ["hi", "hello"]
+    assert [m.content for m in fork.get_messages("chat_a")] == [
+        "hi",
+        "hello",
+        "from_fork",
+    ]
+
+    base.add_user("from_base", memory_id="chat_a")
+    assert [m.content for m in fork.get_messages("chat_a")] == [
+        "hi",
+        "hello",
+        "from_fork",
+    ]
+
+
+def test_clone_preserves_config_and_sessions() -> None:
+    base = MemoryManager(max_messages=42, enable_undo=False, undo_limit=7)
+    base.add_user("a", memory_id="slot_a")
+    base.add_user("b", memory_id="slot_b")
+
+    fork = base.clone()
+
+    assert fork._storage_type == base._storage_type
+    assert fork._storage_path == base._storage_path
+    assert fork._max_messages == 42
+    assert fork._enable_undo is False
+    assert fork._undo_limit == 7
+    assert fork._auto_save == base._auto_save
+    assert fork._hooks is base._hooks
+
+    assert set(fork.list_sessions()) == {"slot_a", "slot_b"}
+    assert [m.content for m in fork.get_messages("slot_a")] == ["a"]
+    assert [m.content for m in fork.get_messages("slot_b")] == ["b"]
+
+    fork_msg = fork.get_messages("slot_a")[0]
+    base_msg = base.get_messages("slot_a")[0]
+    assert fork_msg is not base_msg
+
+
+def test_clone_undo_is_independent() -> None:
+    base = MemoryManager()
+    base.add_user("u1", memory_id="chat")
+    base.add_user("u2", memory_id="chat")
+
+    fork = base.clone()
+
+    assert fork.can_undo(memory_id="chat") is True
+    assert fork.undo(memory_id="chat") is True
+    assert [m.content for m in fork.get_messages("chat")] == ["u1"]
+
+    assert [m.content for m in base.get_messages("chat")] == ["u1", "u2"]
+    assert base.can_undo(memory_id="chat") is True

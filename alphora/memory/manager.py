@@ -1809,6 +1809,66 @@ class MemoryManager:
 
         return True
 
+    def clone(self) -> "MemoryManager":
+        """
+        快速克隆当前 MemoryManager（分身）
+
+        返回的新对象与原对象互不影响：消息缓存与撤销/重做栈均为深拷贝，
+        配置项（storage_type / storage_path / max_messages / enable_undo 等）
+        全部沿用，hooks 直接共享引用。
+
+        注意：
+            若使用 json/sqlite 等持久化存储，克隆体与原对象将指向同一
+            storage_path，双方的保存会互相覆盖。如需完全隔离，请在克隆
+            后通过 `_storage_path` 切换到独立路径，或先将原对象改为内存
+            存储再克隆。
+
+        Returns:
+            一个新的 MemoryManager 实例，包含原对象所有 memory_id 的消息
+            副本
+
+        Example:
+            base = MemoryManager()
+            base.add_user("hi", memory_id="chat_a")
+
+            fork = base.clone()
+            fork.add_user("hello", memory_id="chat_a")
+
+            # 原对象不受影响
+            assert len(base.get_messages(memory_id="chat_a")) == 1
+            assert len(fork.get_messages(memory_id="chat_a")) == 2
+        """
+        new_mgr = MemoryManager.__new__(MemoryManager)
+        new_mgr._storage_type = self._storage_type
+        new_mgr._storage_path = self._storage_path
+        new_mgr._auto_save = self._auto_save
+        new_mgr._max_messages = self._max_messages
+        new_mgr._enable_undo = self._enable_undo
+        new_mgr._undo_limit = self._undo_limit
+        new_mgr._hooks = self._hooks
+
+        new_mgr._storage = new_mgr._create_storage(
+            self._storage_type, self._storage_path
+        )
+
+        new_mgr._cache = {
+            sid: [copy.deepcopy(m) for m in msgs]
+            for sid, msgs in self._cache.items()
+        }
+        new_mgr._undo_stacks = {
+            sid: [[copy.deepcopy(m) for m in snap] for snap in stack]
+            for sid, stack in self._undo_stacks.items()
+        }
+        new_mgr._redo_stacks = {
+            sid: [[copy.deepcopy(m) for m in snap] for snap in stack]
+            for sid, stack in self._redo_stacks.items()
+        }
+
+        return new_mgr
+
+    def __deepcopy__(self, memo):
+        return self.clone()
+
     def merge_memory(
             self,
             other_memory: "MemoryManager",

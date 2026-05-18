@@ -42,45 +42,11 @@ agent = SkillAgent(
 result = await agent.run("Analyze sales.xlsx and find the top-performing regions.")
 ```
 
-<p align="center">
-  <em>See it in action — a full data analysis workflow from upload to insight:</em>
-</p>
-
-<p align="center">
-  <a href="https://github.com/user-attachments/assets/a3c0d366-cb94-49a1-a06f-f7b7a3db35f6E">
-    <img src="https://github.com/user-attachments/assets/a3c0d366-cb94-49a1-a06f-f7b7a3db35f6" width="600" alt="Alphora Demo: Data Analysis Agent">
-  </a>
-</p>
-
-<!-- Replace the links above with your actual GitHub video/thumbnail URLs after uploading. -->
-
 ## Installation
 
 ```bash
 pip install alphora
 ```
-
----
-
-## Why Alphora?
-
-A quick comparison with popular agent frameworks:
-
-| Capability | Alphora | LangChain / LangGraph | Agno | CrewAI |
-|:-----------|:--------|:----------------------|:-----|:-------|
-| **Agent Orchestration** | ✅ ReAct, Plan-Execute, hierarchical derive | ✅ Graph-based StateGraph, most flexible | ✅ Team-based, 5 abstraction levels | ✅ Role-based crews |
-| **Tool System** | ✅ `@tool`, auto schema, parallel exec | ✅ `@tool` + 700+ integrations | ✅ `@tool` + Toolkit | ✅ `@tool` + delegation |
-| **Memory** | ✅ Processor pipeline, pin/tag, undo/redo | ✅ Multiple classes, Redis/Postgres | ✅ Auto session + unified DB | ⚠️ Basic short/long-term |
-| **Code Sandbox** | ✅ Built-in Local / Docker / Remote | ⚠️ Requires 3rd-party (E2B, etc.) | ❌ Not built-in | ❌ Not built-in |
-| **Typed Streaming** | ✅ SSE with `think`, `result`, `sql`, `chart` | ⚠️ SSE (plain text) | ⚠️ SSE (plain text) | ⚠️ SSE (plain text) |
-| **Hooks & Observability** | ✅ Unified hooks across all components | ⚠️ Callbacks + LangSmith (SaaS) | ⚠️ Basic metrics via AgentOS | ❌ Limited |
-| **Prompt Engine** | ✅ Jinja2, ParallelPrompt, auto continuation | ✅ Own templates, RunnableParallel | ⚠️ String / Jinja2 | ⚠️ String templates |
-| **One-Line Deploy** | ✅ `publish_agent_api()`, OpenAI-compatible | ✅ LangServe / LangGraph Platform | ✅ Built-in FastAPI routes | ✅ Built-in serve |
-| **Skills Ecosystem** | ✅ [agentskills.io](https://agentskills.io), 3-phase loading | ⚠️ Hub (community chains) | ❌ Not built-in | ❌ Not built-in |
-| **LLM Load Balancing** | ✅ Built-in round-robin / random | ⚠️ Via LangSmith routing | ❌ Not built-in | ❌ Not built-in |
-| **Multi-Model Support** | ✅ Any OpenAI-compatible API | ✅ 700+ model integrations | ✅ Multi-provider, ~3μs init | ✅ Multi-provider |
-
-**In short:** Alphora provides a self-contained, production-ready stack — especially strong in **built-in sandbox**, **full-lifecycle hooks**, and **typed streaming** — without requiring external SaaS or plugin sprawl.
 
 ---
 
