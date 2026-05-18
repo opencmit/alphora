@@ -55,6 +55,16 @@ class _AsyncChunks:
         self.closed = True
 
 
+class _AsyncChunksWithClose(_AsyncChunks):
+    async def close(self):
+        self.closed = True
+
+    def __getattribute__(self, name):
+        if name == "aclose":
+            raise AttributeError(name)
+        return super().__getattribute__(name)
+
+
 class _PromptLoopLLM(OpenAILike):
     async def aget_streaming_response(self, *args, **kwargs):
         phrase = "这是一个用于测试循环检测的较长句子，包含足够多不同字符，并且长度超过三十二。"
@@ -146,6 +156,29 @@ def test_async_generator_aborts_with_fallback_on_loop():
 
     assert outputs == [phrase, phrase, DEFAULT_LOOP_FALLBACK_MESSAGE]
     assert generator.get_finish_reason() == "loop_detected"
+    assert stream.closed is True
+
+
+def test_async_generator_awaits_async_close_method():
+    llm = OpenAILike(model_name="test", api_key="test")
+    phrase = "这是一个用于测试异步 close 兼容的较长句子，包含足够多不同字符，并且长度超过三十二。"
+    stream = _AsyncChunksWithClose([_chunk(phrase), _chunk(phrase), _chunk(phrase)])
+    generator = _AsyncStreamGenerator(
+        llm=llm,
+        stream_iter=stream,
+        content_type="char",
+        stream_tool_calls=False,
+    )
+
+    async def collect():
+        outputs = []
+        async for out in generator:
+            outputs.append(out.content)
+        return outputs
+
+    outputs = asyncio.run(collect())
+
+    assert outputs[-1] == DEFAULT_LOOP_FALLBACK_MESSAGE
     assert stream.closed is True
 
 

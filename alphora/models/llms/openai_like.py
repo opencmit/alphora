@@ -44,6 +44,7 @@ import os
 import time
 import json
 import logging
+import inspect
 from typing import (
     List, Dict, Union, Optional, Iterator, Mapping, Any, AsyncIterator, Tuple,
 )
@@ -277,12 +278,16 @@ class _BaseStreamGenerator(BaseGenerator[GeneratorOutput]):
     async def _close_stream_async(self) -> None:
         aclose = getattr(self._stream, "aclose", None)
         if callable(aclose):
-            await aclose()
+            result = aclose()
+            if inspect.isawaitable(result):
+                await result
             return
 
         close = getattr(self._stream, "close", None)
         if callable(close):
-            close()
+            result = close()
+            if inspect.isawaitable(result):
+                await result
 
 
 class _SyncStreamGenerator(_BaseStreamGenerator):
