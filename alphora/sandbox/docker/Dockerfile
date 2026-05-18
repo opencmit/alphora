@@ -1,5 +1,5 @@
 # 基础镜像
-FROM python:3.11-slim AS base
+FROM python:3.13-slim AS base
 
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 ARG PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
