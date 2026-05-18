@@ -241,28 +241,20 @@ class _BaseStreamGenerator(BaseGenerator[GeneratorOutput]):
         content = parsed.get("content") or ""
 
         if reasoning:
+            self._full_reasoning += reasoning
             outputs.append(GeneratorOutput(content=reasoning, content_type="think"))
         elif content:
+            self._full_content += content
             outputs.append(GeneratorOutput(content=content, content_type=self.content_type))
 
         return outputs
 
-    def _record_output(self, output: GeneratorOutput) -> None:
-        if not output.content:
-            return
-        if output.content_type == "think":
-            self._full_reasoning += output.content
-        elif output.content_type == self.content_type:
-            self._full_content += output.content
-
     def _guard_output(self, output: GeneratorOutput) -> GeneratorOutput:
         if self._repetition_guard is None or self._loop_detected:
-            self._record_output(output)
             return output
 
         match = self._repetition_guard.observe(output.content, output.content_type)
         if match is None:
-            self._record_output(output)
             return output
 
         self._loop_detected = True
@@ -273,12 +265,18 @@ class _BaseStreamGenerator(BaseGenerator[GeneratorOutput]):
             match.pattern_chars,
             match.repeats,
         )
-        fallback = GeneratorOutput(
-            content=self._llm.repetition_guard_config.fallback_message,
+        fallback_message = self._llm.repetition_guard_config.fallback_message
+        if output.content_type == "think":
+            self._full_content += fallback_message
+        elif self._full_content.endswith(output.content):
+            self._full_content = self._full_content[:-len(output.content)] + fallback_message
+        else:
+            self._full_content += fallback_message
+
+        return GeneratorOutput(
+            content=fallback_message,
             content_type=self.content_type or "char",
         )
-        self._record_output(fallback)
-        return fallback
 
     def _close_stream_sync(self) -> None:
         close = getattr(self._stream, "close", None)

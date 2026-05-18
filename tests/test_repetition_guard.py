@@ -66,6 +66,16 @@ class _AsyncChunksWithClose(_AsyncChunks):
 
 
 class _PromptLoopLLM(OpenAILike):
+    def get_streaming_response(self, *args, **kwargs):
+        phrase = "这是一个用于测试同步 prompt 循环检测的较长句子，包含足够多不同字符，并且长度超过三十二。"
+        stream = iter([_chunk(phrase), _chunk(phrase), _chunk(phrase), _chunk("不应输出")])
+        return _SyncStreamGenerator(
+            llm=self,
+            stream_iter=stream,
+            content_type=kwargs.get("content_type") or "char",
+            stream_tool_calls=False,
+        )
+
     async def aget_streaming_response(self, *args, **kwargs):
         phrase = "这是一个用于测试循环检测的较长句子，包含足够多不同字符，并且长度超过三十二。"
         stream = _AsyncChunks([_chunk(phrase), _chunk(phrase), _chunk(phrase), _chunk("不应输出")])
@@ -132,8 +142,8 @@ def test_sync_generator_aborts_with_fallback_on_loop():
     outputs = list(generator)
 
     assert [out.content for out in outputs] == [phrase, phrase, DEFAULT_LOOP_FALLBACK_MESSAGE]
-    assert generator.get_finish_reason() == "loop_detected"
     assert generator._full_content == phrase + phrase + DEFAULT_LOOP_FALLBACK_MESSAGE
+    assert generator.get_finish_reason() == "loop_detected"
 
 
 def test_async_generator_aborts_with_fallback_on_loop():
@@ -156,8 +166,8 @@ def test_async_generator_aborts_with_fallback_on_loop():
     outputs = asyncio.run(collect())
 
     assert outputs == [phrase, phrase, DEFAULT_LOOP_FALLBACK_MESSAGE]
-    assert generator.get_finish_reason() == "loop_detected"
     assert generator._full_content == phrase + phrase + DEFAULT_LOOP_FALLBACK_MESSAGE
+    assert generator.get_finish_reason() == "loop_detected"
     assert stream.closed is True
 
 
@@ -192,7 +202,21 @@ def test_prompt_acall_stream_receives_loop_fallback():
     result = asyncio.run(prompt.acall(query="触发循环", is_stream=True))
 
     assert result.endswith(DEFAULT_LOOP_FALLBACK_MESSAGE)
+    assert result.content.endswith(DEFAULT_LOOP_FALLBACK_MESSAGE)
     assert "不应输出" not in result
+    assert "不应输出" not in result.content
+    assert result.finish_reason == "loop_detected"
+
+
+def test_prompt_call_stream_content_includes_loop_fallback():
+    llm = _PromptLoopLLM(model_name="test", api_key="test")
+    prompt = BasePrompt(system_prompt="你是测试助手。", user_prompt="{{query}}")
+    prompt.add_llm(llm)
+
+    result = prompt.call(query="触发循环", is_stream=True)
+
+    assert result.content.endswith(DEFAULT_LOOP_FALLBACK_MESSAGE)
+    assert "不应输出" not in result.content
     assert result.finish_reason == "loop_detected"
 
 
