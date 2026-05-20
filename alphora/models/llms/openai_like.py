@@ -344,7 +344,7 @@ class OpenAILike(BaseLLM):
             top_p: float = 1.0,
             is_multimodal: bool = False,
             hooks=None,
-            repetition_guard_enabled: bool = True,
+            repetition_guard_enabled: bool = False,
             repetition_guard_config: Optional[RepetitionGuardConfig] = None,
     ):
         super().__init__(
