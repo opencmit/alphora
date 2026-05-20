@@ -36,6 +36,8 @@ myexamples/*
 zmy_tutorials/
 zmy_tutorials/*
 
+tests/
+tests/*
 rust/
 rust/*
 .DS_Store

@@ -44,6 +44,7 @@ import os
 import time
 import json
 import logging
+import inspect
 from typing import (
     List, Dict, Union, Optional, Iterator, Mapping, Any, AsyncIterator, Tuple,
 )
@@ -54,6 +55,7 @@ from alphora.models.message import Message
 from alphora.models.llms.base import BaseLLM
 from alphora.models.llms.stream_helper import BaseGenerator, GeneratorOutput
 from alphora.models.llms.balancer import _LLMLoadBalancer
+from alphora.models.llms.repetition_guard import RepetitionGuard, RepetitionGuardConfig
 from alphora.models.llms.types import ToolCall
 from alphora.hooks import HookEvent, HookContext
 
@@ -182,9 +184,16 @@ class _BaseStreamGenerator(BaseGenerator[GeneratorOutput]):
         self._full_content = ""
         self._full_reasoning = ""
         self.token_usage: Optional[Dict[str, int]] = None
+        self._loop_detected = False
 
         self._ctx = _LLMCallContext(model_name=llm.model_name)
         self._buffer = _StreamToolCallBuffer()
+        repetition_guard_config = getattr(llm, "repetition_guard_config", None)
+        self._repetition_guard = (
+            RepetitionGuard(repetition_guard_config)
+            if getattr(llm, "repetition_guard_enabled", True)
+            else None
+        )
 
     @property
     def collected_tool_calls(self) -> List[Dict[str, Any]]:
@@ -240,21 +249,79 @@ class _BaseStreamGenerator(BaseGenerator[GeneratorOutput]):
 
         return outputs
 
+    def _guard_output(self, output: GeneratorOutput) -> GeneratorOutput:
+        if self._repetition_guard is None or self._loop_detected:
+            return output
+
+        match = self._repetition_guard.observe(output.content, output.content_type)
+        if match is None:
+            return output
+
+        self._loop_detected = True
+        self.finish_reason = "loop_detected"
+        logger.warning(
+            "Detected repeated streaming output; aborting stream "
+            "(pattern_chars=%s, repeats=%s).",
+            match.pattern_chars,
+            match.repeats,
+        )
+        fallback_message = self._llm.repetition_guard_config.fallback_message
+        if output.content_type == "think":
+            self._full_content += fallback_message
+        elif self._full_content.endswith(output.content):
+            self._full_content = self._full_content[:-len(output.content)] + fallback_message
+        else:
+            self._full_content += fallback_message
+
+        return GeneratorOutput(
+            content=fallback_message,
+            content_type=self.content_type or "char",
+        )
+
+    def _close_stream_sync(self) -> None:
+        close = getattr(self._stream, "close", None)
+        if callable(close):
+            close()
+
+    async def _close_stream_async(self) -> None:
+        aclose = getattr(self._stream, "aclose", None)
+        if callable(aclose):
+            result = aclose()
+            if inspect.isawaitable(result):
+                await result
+            return
+
+        close = getattr(self._stream, "close", None)
+        if callable(close):
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+
 
 class _SyncStreamGenerator(_BaseStreamGenerator):
     def generate(self) -> Iterator[GeneratorOutput]:
-        for chunk in self._stream:
-            for out in self._handle_chunk(chunk):
-                yield out
-        self._ctx.end_sync(self._llm._hooks, usage=self.token_usage)
+        try:
+            for chunk in self._stream:
+                for out in self._handle_chunk(chunk):
+                    yield self._guard_output(out)
+                    if self._loop_detected:
+                        self._close_stream_sync()
+                        return
+        finally:
+            self._ctx.end_sync(self._llm._hooks, usage=self.token_usage)
 
 
 class _AsyncStreamGenerator(_BaseStreamGenerator):
     async def agenerate(self) -> AsyncIterator[GeneratorOutput]:
-        async for chunk in self._stream:
-            for out in self._handle_chunk(chunk):
-                yield out
-        await self._ctx.end_async(self._llm._hooks, usage=self.token_usage)
+        try:
+            async for chunk in self._stream:
+                for out in self._handle_chunk(chunk):
+                    yield self._guard_output(out)
+                    if self._loop_detected:
+                        await self._close_stream_async()
+                        return
+        finally:
+            await self._ctx.end_async(self._llm._hooks, usage=self.token_usage)
 
 
 class OpenAILike(BaseLLM):
@@ -277,6 +344,8 @@ class OpenAILike(BaseLLM):
             top_p: float = 1.0,
             is_multimodal: bool = False,
             hooks=None,
+            repetition_guard_enabled: bool = False,
+            repetition_guard_config: Optional[RepetitionGuardConfig] = None,
     ):
         super().__init__(
             model_name=model_name,
@@ -294,6 +363,8 @@ class OpenAILike(BaseLLM):
         self.api_key = api_key or os.getenv("LLM_API_KEY") or "empty"
         self.base_url = base_url or os.getenv("LLM_BASE_URL")
         self.header = header
+        self.repetition_guard_enabled = repetition_guard_enabled
+        self.repetition_guard_config = repetition_guard_config or RepetitionGuardConfig()
 
         self.completion_params: Dict[str, Any] = {
             "temperature": self.temperature,
@@ -819,6 +890,10 @@ class OpenAILike(BaseLLM):
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         self.__dict__.update(state)
+        if "repetition_guard_enabled" not in self.__dict__:
+            self.repetition_guard_enabled = True
+        if "repetition_guard_config" not in self.__dict__:
+            self.repetition_guard_config = RepetitionGuardConfig()
         self._sync_client = self._make_sync_client(
             api_key=self.api_key, base_url=self.base_url, header=self.header,
         )
