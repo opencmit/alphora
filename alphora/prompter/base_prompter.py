@@ -64,6 +64,10 @@ class PrompterOutput(str):
         return instance
 
     @property
+    def content(self):
+        return str(self)
+
+    @property
     def reasoning(self):
         return self._reasoning
 
