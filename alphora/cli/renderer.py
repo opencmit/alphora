@@ -202,7 +202,7 @@ class _RichCLIStreamer:
 
     # -- DataStreamer interface -----------------------------------------------
 
-    async def send_data(self, content_type: str, content: str = None):
+    async def send_data(self, content_type: str, content: str = None, meta: dict = None):
         if not content:
             return
 
@@ -305,7 +305,7 @@ class _FallbackCLIStreamer:
         self._flush_all()
         print()
 
-    async def send_data(self, content_type: str, content: str = None):
+    async def send_data(self, content_type: str, content: str = None, meta: dict = None):
         if not content:
             return
 

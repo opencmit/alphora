@@ -50,3 +50,7 @@
   `'_singleton_memory'` / ...。如果有第三方代码绕过公共 API 直接读
   `agent.__dict__["config"]`，需要改为 `agent.config`。
 
+## [1.3.2] - 2026-04-24
+### Update
+- 新增流式SSE输出中携带meta元数据，与content, content_type同级；
+- 新增 astream_status, astream_tool 等功能；

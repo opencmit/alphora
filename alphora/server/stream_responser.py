@@ -21,7 +21,7 @@ class StreamCallback(Protocol):
     ``send_data`` and ``stop``.
     """
 
-    async def send_data(self, content_type: str, content: str = None) -> None: ...
+    async def send_data(self, content_type: str, content: str = None, meta: dict = None) -> None: ...
     async def stop(self, stop_reason: str = "stop") -> None: ...
     async def usage(self, prompt_tokens: int = 0, completion_tokens: int = 0, total_tokens: int = 0) -> None: ...
 
@@ -40,6 +40,8 @@ class ChoiceDelta(BaseModel):
     tool_calls: Optional[List[ToolCallDelta]] = None
     refusal: Optional[str] = None
     role: Optional[str] = None
+    # 开放结构化元数据，原样透传给客户端；约定保留键见 GeneratorOutput.meta
+    meta: Optional[Dict[str, Any]] = None
 
 
 class Choice(BaseModel):
@@ -90,7 +92,7 @@ class DataStreamer:
         self.full_content = []
         self.finish_reason = None
 
-    async def send_data(self, content_type: str = None, content: str = None, usage: dict = None):
+    async def send_data(self, content_type: str = None, content: str = None, usage: dict = None, meta: dict = None):
         """由智能体调用：向流中发送数据"""
         if self._closed:
             return
@@ -99,6 +101,7 @@ class DataStreamer:
             "type": content_type,
             "content": content,
             "usage": usage,
+            "meta": meta,
         })
 
     async def stop(self, stop_reason: str = 'stop'):
@@ -117,16 +120,27 @@ class DataStreamer:
         elapsed = time.time() - self._start_time if self._start_time else 0
         return f"timeout: elapsed {elapsed:.1f}s, limit {self.timeout}s"
 
+    @staticmethod
+    def _merge_block_id(meta: dict, block_id: Optional[str]) -> dict:
+        """把 tool_call_id 合并进 meta.id 作为统一 block 分组键（不覆盖已有 id）。"""
+        if not block_id:
+            return meta
+        merged = dict(meta) if meta else {}
+        merged.setdefault("id", block_id)
+        return merged
+
     def _generate_sse_chunk(self,
                             content: str = None,
                             content_type: str = None,
                             usage: Usage = None,
-                            finish_reason: Optional[str] = None) -> str:
+                            finish_reason: Optional[str] = None,
+                            meta: dict = None) -> str:
         """
         生成 SSE 数据块，符合 OpenAI chat.completion.chunk 结构
 
         :param content: 消息内容
         :param finish_reason: 完成原因，可选
+        :param meta: 开放结构化元数据，原样透传到 delta.meta
         :return: SSE 格式的字符串
         """
         created_time = int(time.time() * 1000)
@@ -145,6 +159,8 @@ class DataStreamer:
                     )]
                     # delta_kwargs["content"] = None
                     delta_kwargs['content'] = tc_data.get("arguments", "")  # 260319 修改为工具的参数
+                    # 用 tool_call_id 作为统一 block 分组键，让前端把 tool_call/args/stdout 收拢为一个块
+                    meta = self._merge_block_id(meta, tc_data.get("id"))
 
                 elif "tool_call" in content_type:
                     tc_data = json.loads(content)
@@ -155,12 +171,16 @@ class DataStreamer:
                     )]
                     # delta_kwargs["content"] = None
                     delta_kwargs['content'] = tc_data.get("name", "")  # 260319修改 tool_call 为函数工具名称
+                    meta = self._merge_block_id(meta, tc_data.get("id"))
 
                 else:
                     delta_kwargs["content"] = content
 
             else:
                 delta_kwargs["content"] = content
+
+            if meta:
+                delta_kwargs["meta"] = meta
 
             if usage:
                 usage = Usage(prompt_tokens=usage.get("prompt_tokens", 0),
@@ -226,7 +246,8 @@ class DataStreamer:
 
                     yield self._generate_sse_chunk(content=data['content'],
                                                    content_type=data['type'],
-                                                   usage=data['usage'])
+                                                   usage=data['usage'],
+                                                   meta=data.get('meta'))
 
         finally:
             self._closed = True

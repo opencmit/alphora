@@ -4,7 +4,7 @@
 # Author: Tian Tian (tiantianit@chinamobile.com)
 
 from dataclasses import dataclass
-from typing import Iterator, AsyncIterator, Generic, TypeVar, Optional, Coroutine, Any
+from typing import Iterator, AsyncIterator, Generic, TypeVar, Optional, Coroutine, Any, Dict
 from abc import ABC, abstractmethod
 
 from alphora.server.stream_responser import DataStreamer
@@ -15,9 +15,18 @@ T = TypeVar('T')
 
 @dataclass
 class GeneratorOutput:
-    """流式输出生成器 数据结构"""
+    """流式输出生成器 数据结构
+
+    Attributes:
+        content: 本次 chunk 的文本内容。
+        content_type: 内容类型标签，供前端差异化渲染。
+        meta: 可选的开放结构化元数据，原样透传到客户端 ``delta.meta``。
+            约定（非强制）的保留键：``id``(block 分组键)、``state``(running/done/error)、
+            ``agent_id``(子智能体分组)、``name``(工具名) 等；开发者可塞任意 key/value。
+    """
     content: str
     content_type: str = 'char'
+    meta: Optional[Dict[str, Any]] = None
 
 
 class BaseGenerator(ABC, Generic[T]):

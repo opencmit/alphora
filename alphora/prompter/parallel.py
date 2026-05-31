@@ -11,11 +11,12 @@ class _PromptPrefixedCallback:
         self._callback = callback
         self._prefix = prefix
 
-    async def send_data(self, content_type: str, content: str = None):
+    async def send_data(self, content_type: str, content: str = None, meta: dict = None):
         if self._callback:
             await self._callback.send_data(
                 content_type=f"{self._prefix}:{content_type}",
                 content=content,
+                meta=meta,
             )
 
     async def stop(self, stop_reason="stop"):

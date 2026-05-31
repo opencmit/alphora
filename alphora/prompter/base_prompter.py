@@ -1015,7 +1015,9 @@ class BasePrompt:
                         _cur_tc_index = tc_info.get("index", 0)
                         _cur_tc_id = tc_info.get("id", "")
                         if self.callback:
-                            await self.callback.send_data(content_type=ctype, content=content)
+                            # 用 tool_call_id 作为统一 block 分组键，便于前端把整个工具生命周期收拢
+                            meta = {"id": _cur_tc_id} if _cur_tc_id else None
+                            await self.callback.send_data(content_type=ctype, content=content, meta=meta)
                         else:
                             _cli_print(f"\n[Tool Call] {tc_info.get('name', 'unknown')}\n", ctype="tool_call")
                         continue
@@ -1027,7 +1029,8 @@ class BasePrompt:
                                 "id": _cur_tc_id,
                                 "arguments": content,
                             }, ensure_ascii=False)
-                            await self.callback.send_data(content_type=ctype, content=enriched)
+                            meta = {"id": _cur_tc_id} if _cur_tc_id else None
+                            await self.callback.send_data(content_type=ctype, content=enriched, meta=meta)
                         else:
                             _cli_print(content, ctype="tool_call_args")
                         continue
