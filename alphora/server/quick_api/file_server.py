@@ -75,8 +75,11 @@ Sandbox 文件服务（File Server）
 
    目录不存在（session 根不存在时）返回空 ``files`` 且 ``exists=false``；
    ``dir`` 不存在返回 ``404``。排序时目录会在主键之上再置顶，目录内/文件内保持主键顺序。
-   隐藏项（``.git`` / ``__pycache__`` / ``.DS_Store`` / ``node_modules`` / ``.alphora_mnt_``）
-   默认过滤。
+   隐藏规则：① **任意以 ``.`` 开头的文件 / 目录**（dotfile / dotdir，如 ``.alphadata`` /
+   ``.betadata`` / ``.env`` / ``.git``）一律隐藏；② 外加 ``__pycache__`` / ``node_modules`` /
+   ``.alphora_mnt_`` 等不以点开头但同样不该暴露的目录。隐藏规则对 **所有** 接口
+   （list/read/download/serve）逐段生效：只要路径里任意一段命中隐藏规则，即按"不存在"
+   （``404``）处理——避免出现"列表里看不到、但知道路径就能直接下载"的绕过。
 
 2) ``POST {base}/files/read`` —— 读取文件内容（文本/小文件）
    请求体 :class:`FileReadRequest`::
@@ -154,7 +157,7 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-HIDDEN_PATTERNS = {'.git', '__pycache__', '.DS_Store', 'node_modules', '.alphora_mnt_'}
+HIDDEN_PATTERNS = {'.git', '__pycache__', '.DS_Store', 'node_modules', '.alphora_mnt_', '.alphadata'}
 
 TEXT_MIMES = {
     'text', 'application/json', 'application/xml', 'application/javascript',
@@ -274,10 +277,29 @@ def _safe_path(root: Path, rel: str) -> Path:
 
 
 def _is_hidden(name: str) -> bool:
+    # 任意以 "." 开头的条目（dotfile / dotdir，如 .alphadata/.betadata/.env/.ssh）
+    # 一律视为隐藏，符合 Unix 惯例——换任何点开头的目录名都无需再维护名单。
+    if name.startswith('.'):
+        return True
+    # HIDDEN_PATTERNS 用来兜住不以点开头、但同样不该暴露的目录（__pycache__/node_modules 等）。
     for pat in HIDDEN_PATTERNS:
         if name == pat or name.startswith(pat):
             return True
     return False
+
+
+def _has_hidden_segment(rel: str) -> bool:
+    """路径中任意一段命中隐藏规则即视为隐藏。
+
+    list 的目录遍历（_walk_entries）只过滤"条目名"，但 read / download / serve
+    是按完整路径直取文件的——叶子名（如 dispatch.py）可能不隐藏，而它的父级目录
+    （如 .alphadata）才是要藏的。所以这里必须逐段检查整条相对路径，否则只要知道
+    路径就能绕过列表过滤、直接下载隐藏目录下的文件（典型的"隐藏 ≠ 防护"）。
+    """
+    cleaned = (rel or "").replace("\\", "/").strip("/")
+    if not cleaned:
+        return False
+    return any(_is_hidden(seg) for seg in cleaned.split("/") if seg)
 
 
 def _is_text_mime(mime: str) -> bool:
@@ -399,6 +421,8 @@ def create_file_router(
                 "page": req.page,
                 "page_size": req.page_size,
             }
+        if _has_hidden_segment(req.dir):
+            raise HTTPException(status_code=404, detail="目录不存在")
         target = _safe_path(root, req.dir)
         if not target.is_dir():
             raise HTTPException(status_code=404, detail="目录不存在")
@@ -439,6 +463,8 @@ def create_file_router(
     @router.post(read_path)
     async def files_read(req: FileReadRequest):
         root = _resolve_root(base, req.session_id, allow_empty=allow_empty_session)
+        if _has_hidden_segment(req.path):
+            raise HTTPException(status_code=404, detail="文件不存在")
         target = _safe_path(root, req.path)
         if not target.is_file():
             raise HTTPException(status_code=404, detail="文件不存在")
@@ -484,6 +510,8 @@ def create_file_router(
     @router.post(download_path)
     async def files_download(req: FileDownloadRequest):
         root = _resolve_root(base, req.session_id, allow_empty=allow_empty_session)
+        if _has_hidden_segment(req.path):
+            raise HTTPException(status_code=404, detail="文件不存在")
         target = _safe_path(root, req.path)
         if not target.is_file():
             raise HTTPException(status_code=404, detail="文件不存在")
@@ -546,6 +574,8 @@ def create_file_router(
     @router.get(serve_path)
     async def files_serve(file_path: str, sid: str = Query("")):
         root = _resolve_root(base, sid, allow_empty=allow_empty_session)
+        if _has_hidden_segment(file_path):
+            raise HTTPException(status_code=404, detail="文件不存在")
         target = _safe_path(root, "/" + file_path)
         if not target.is_file():
             raise HTTPException(status_code=404, detail="文件不存在")

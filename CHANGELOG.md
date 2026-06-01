@@ -53,3 +53,4 @@
 - 新增流式SSE输出中携带meta元数据，与content, content_type同级；
 - 新增 astream_status, astream_tool 等功能；
 - 优化工具调用参数流式后处理器（ToolCallArgStreamPP）：保持向后兼容的同时，新增多个args解析能力；
+- 将文件服务设置为了全部隐藏文件、路径均对外不可见；
