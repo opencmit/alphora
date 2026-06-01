@@ -52,5 +52,6 @@
 
 ## [1.3.2] - 2026-04-24
 ### Update
+- 新增异常循环流输出检测，检测到循环异常可触发 stop 并流式输出异常消息；
 - 新增流式SSE输出中携带meta元数据，与content, content_type同级；
 - 新增 astream_status, astream_tool 等功能；
