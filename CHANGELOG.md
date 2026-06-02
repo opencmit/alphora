@@ -54,3 +54,4 @@
 - 新增 astream_status, astream_tool 等功能；
 - 优化工具调用参数流式后处理器（ToolCallArgStreamPP）：保持向后兼容的同时，新增多个args解析能力；
 - 将文件服务设置为了全部隐藏文件、路径均对外不可见；
+- `ToolExecutor` 支持通过 `before_execute` 钩子拦截工具执行**：在 `TOOLS_BEFORE_EXECUTE` 阶段，钩子可返回 `{"should_continue": False, "block_reason": "..."}` 跳过 `tool.arun`；被拦截时返回 `error_type="BlockedByHook"` 的 `ToolExecutionResult`，结果仍会正常写入 memory 并反馈给 LLM。（alphora/tools/executor.py）

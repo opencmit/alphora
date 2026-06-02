@@ -230,6 +230,8 @@ class ToolExecutor:
         tool_name = function_data.get("name", "unknown")
         arguments_str = function_data.get("arguments", "{}")
 
+        should_continue = True   # 给钩子判断是否继续执行
+
         logger.info(f"Executing tool: {tool_name} [id={call_id}]")
 
         try:
@@ -301,9 +303,27 @@ class ToolExecutor:
                     "tool_name": tool_name,
                     "tool_args": arguments,
                     "tool": tool,
+                    "should_continue": should_continue
                 },
             )
             before_ctx = await self._hooks.emit(HookEvent.TOOLS_BEFORE_EXECUTE, before_ctx)
+
+            # 钩子拦截：should_continue 为 False 时跳过执行
+            if not before_ctx.data.get("should_continue", True):
+                block_reason = before_ctx.data.get(
+                    "block_reason",
+                    f"Tool '{tool_name}' execution was blocked by a before_execute hook.",
+                )
+                blocked_result = ToolExecutionResult(
+                    tool_call_id=call_id,
+                    tool_name=tool_name,
+                    content=block_reason,
+                    status="error",
+                    error_type="BlockedByHook",
+                )
+                logger.info(f"Tool {tool_name} blocked by hook [id={call_id}]")
+                return blocked_result
+
             arguments = before_ctx.data.get("tool_args", arguments)
 
             result_data = await tool.arun(**arguments)
