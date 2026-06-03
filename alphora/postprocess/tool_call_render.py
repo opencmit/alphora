@@ -8,17 +8,19 @@
    一律不输出）。
 
 提示文案可省略：``start_text = label_start or label``、``end_text = label_end or label``。
-若开始文案为空，则 **不发 start/end 标签**，只输出 ``args`` 配置的参数内容
-（适合 think / finish 这种「只要内容、不要工具名」的工具）；若只配开始文案则只发 start。
+若开始文案为空，则 **不发 start/end 标签**，且参数内容作为「普通正文」输出 —— 此时
+**不附带任何 tool_call_id/status/arg 等 meta**（适合 think / finish 这种「只要内容、
+不要工具入口」的工具，内容会直接落在主对话区，而非右侧工作区）；若只配开始文案则只发 start。
 
 输出约定（固定，便于前端对接）::
 
     开始(仅当 start_text 非空):  content=start_text,  content_type=label_content_type(默认 tool_status),
-                  meta={"tool_call_id": id, "status": "start"}
-    参数增量:     content=增量值, content_type=配置的 type,
-                  meta={"tool_call_id": id, "status": "running", "arg": 参数名}
+                  meta={"tool_call_id": id, "name": 工具名, "status": "start"}
+    参数增量(有 label 的工具): content=增量值, content_type=配置的 type,
+                  meta={"tool_call_id": id, "name": 工具名, "status": "running", "arg": 参数名}
+    参数增量(无 label 的工具): content=增量值, content_type=配置的 type, meta=None（当普通正文）
     结束(仅当 end_text 非空):  content=end_text,  content_type=label_content_type,
-                  meta={"tool_call_id": id, "status": "end"}
+                  meta={"tool_call_id": id, "name": 工具名, "status": "end"}
     未配置参数:   不输出
     其它普通内容: 原样透传
 
@@ -70,6 +72,7 @@ from alphora.postprocess.base_pp import BasePostProcessor
 TOOL_CALL_ID_KEY = "tool_call_id"
 STATUS_KEY = "status"
 ARG_KEY = "arg"
+NAME_KEY = "name"
 STATUS_START = "start"
 STATUS_RUNNING = "running"
 STATUS_END = "end"
@@ -289,7 +292,7 @@ class ToolCallStreamRenderPP(BasePostProcessor):
                 outputs.append(GeneratorOutput(
                     content=render.start_text,
                     content_type=render.label_content_type,
-                    meta={TOOL_CALL_ID_KEY: tcid, STATUS_KEY: STATUS_START},
+                    meta={TOOL_CALL_ID_KEY: tcid, NAME_KEY: name, STATUS_KEY: STATUS_START},
                 ))
             return outputs
 
@@ -310,18 +313,28 @@ class ToolCallStreamRenderPP(BasePostProcessor):
         if name in self.tools:
             tcid = state["index_id"].get(idx, f"call_{idx}")
             render = self.tools[name]
+            # 无开始标签的工具（如 think / finish）= 没有「工具入口」概念，参数内容直接作为
+            # 普通正文输出，**不附带 tool_call_id/status/arg 等 meta**，避免前端误判为工具调用
+            # 而把内容塞进右侧工作区。只有带 label 的工具才发结构化 meta 供前端归组到右侧详情。
+            emit_meta = bool(render.start_text)
             outputs: List[GeneratorOutput] = []
             for arg_name, out_ctype in render.args.items():
                 delta = self._extract_incremental(idx, arg_name, state)
                 if delta:
+                    meta = (
+                        {
+                            TOOL_CALL_ID_KEY: tcid,
+                            NAME_KEY: name,
+                            STATUS_KEY: STATUS_RUNNING,
+                            ARG_KEY: arg_name,
+                        }
+                        if emit_meta
+                        else None
+                    )
                     outputs.append(GeneratorOutput(
                         content=delta,
                         content_type=out_ctype,
-                        meta={
-                            TOOL_CALL_ID_KEY: tcid,
-                            STATUS_KEY: STATUS_RUNNING,
-                            ARG_KEY: arg_name,
-                        },
+                        meta=meta,
                     ))
             # 未配置参数：不输出（已被忽略）
             return outputs
@@ -350,7 +363,7 @@ class ToolCallStreamRenderPP(BasePostProcessor):
         return [GeneratorOutput(
             content=render.end_text,
             content_type=render.label_content_type,
-            meta={TOOL_CALL_ID_KEY: tcid, STATUS_KEY: STATUS_END},
+            meta={TOOL_CALL_ID_KEY: tcid, NAME_KEY: name, STATUS_KEY: STATUS_END},
         )]
 
     # ------------------------------------------------------------------ #
