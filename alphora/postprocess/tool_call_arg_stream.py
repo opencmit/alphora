@@ -42,10 +42,9 @@ from __future__ import annotations
 import json
 from typing import Dict, Iterator, AsyncIterator, List, Optional, Tuple, Union
 
-from json_repair import repair_json
-
 from alphora.models.llms.stream_helper import BaseGenerator, GeneratorOutput
 from alphora.postprocess.base_pp import BasePostProcessor
+from alphora.postprocess._tool_call_json import extract_arg_value
 
 # mappings 中单个工具的取值：一个 (arg_name, content_type)，或它们的列表。
 ArgSpec = Tuple[str, str]
@@ -196,99 +195,8 @@ class ToolCallArgStreamPP(BasePostProcessor):
                 return None
 
             def _extract_arg_value(self, buffer: str, arg_name: str) -> Optional[str]:
-                """从（可能不完整的）JSON buffer 中提取指定 key 的值。
-
-                通过直接解析 JSON 字符串结构定位目标 key，
-                避免 repair_json 在值含冒号时将其误判为键值分隔符。
-                """
-                val_pos = self._find_value_start(buffer, arg_name)
-                if val_pos < 0 or val_pos >= len(buffer):
-                    return None
-
-                if buffer[val_pos] == '"':
-                    return self._decode_json_string(buffer, val_pos)
-
-                try:
-                    repaired = repair_json(buffer)
-                    parsed = json.loads(repaired)
-                    v = parsed.get(arg_name)
-                    return str(v) if v is not None else None
-                except Exception:
-                    return None
-
-            @staticmethod
-            def _find_value_start(buffer: str, key: str) -> int:
-                """在 JSON buffer 中定位 *key* 对应 value 的起始偏移。
-
-                正确跳过字符串内部出现的同名文本，仅匹配顶层 key。
-                只有当 ``"key"`` 后面紧跟 ``:`` 时才视为匹配。
-                """
-                target = f'"{key}"'
-                tlen = len(target)
-                i, n = 0, len(buffer)
-                while i < n:
-                    ch = buffer[i]
-                    if ch == '"':
-                        if buffer[i:i + tlen] == target:
-                            j = i + tlen
-                            while j < n and buffer[j] in ' \t\n\r':
-                                j += 1
-                            if j < n and buffer[j] == ':':
-                                j += 1
-                                while j < n and buffer[j] in ' \t\n\r':
-                                    j += 1
-                                return j
-                        i += 1
-                        while i < n:
-                            if buffer[i] == '\\':
-                                i += 2
-                                continue
-                            if buffer[i] == '"':
-                                i += 1
-                                break
-                            i += 1
-                    else:
-                        i += 1
-                return -1
-
-            @staticmethod
-            def _decode_json_string(buffer: str, quote_pos: int) -> Optional[str]:
-                """从 *quote_pos* 处的 ``"`` 开始解码 JSON 字符串。
-
-                若 buffer 不完整（未遇到闭合引号），返回已解码部分。
-                """
-                _ESC = {'"': '"', '\\': '\\', '/': '/', 'n': '\n',
-                        'r': '\r', 't': '\t', 'b': '\b', 'f': '\f'}
-                i = quote_pos + 1
-                n = len(buffer)
-                parts = []
-                while i < n:
-                    ch = buffer[i]
-                    if ch == '\\':
-                        if i + 1 >= n:
-                            break
-                        nc = buffer[i + 1]
-                        if nc in _ESC:
-                            parts.append(_ESC[nc])
-                            i += 2
-                        elif nc == 'u':
-                            if i + 5 < n:
-                                try:
-                                    parts.append(chr(int(buffer[i + 2:i + 6], 16)))
-                                except ValueError:
-                                    parts.append(nc)
-                                i += 6
-                            else:
-                                break
-                        else:
-                            parts.append(nc)
-                            i += 2
-                    elif ch == '"':
-                        return ''.join(parts)
-                    else:
-                        parts.append(ch)
-                        i += 1
-                return ''.join(parts) if parts else None
+                """从（可能不完整的）JSON buffer 中提取指定 key 的值。"""
+                return extract_arg_value(buffer, arg_name)
 
             def generate(self) -> Iterator[GeneratorOutput]:
                 state = self._make_state()

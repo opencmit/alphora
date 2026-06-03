@@ -55,3 +55,5 @@
 - 优化工具调用参数流式后处理器（ToolCallArgStreamPP）：保持向后兼容的同时，新增多个args解析能力；
 - 将文件服务设置为了全部隐藏文件、路径均对外不可见；
 - `ToolExecutor` 支持通过 `before_execute` 钩子拦截工具执行**：在 `TOOLS_BEFORE_EXECUTE` 阶段，钩子可返回 `{"should_continue": False, "block_reason": "..."}` 跳过 `tool.arun`；被拦截时返回 `error_type="BlockedByHook"` 的 `ToolExecutionResult`，结果仍会正常写入 memory 并反馈给 LLM。（alphora/tools/executor.py）
+- 新增了 `tool_call_render` 用来适配工具流式与前端展示；
+- 优化了 BasePrompt 中的若干细节；

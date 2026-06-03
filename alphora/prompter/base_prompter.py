@@ -750,11 +750,17 @@ class BasePrompt:
                     ctype = ck.content_type
 
                     if ctype == 'tool_call':
-                        tc_info = json.loads(content)
-                        _cur_tc_index = tc_info.get("index", 0)
-                        _cur_tc_id = tc_info.get("id", "")
-                        _cli_print(f"\n[Tool Call] {tc_info.get('name', 'unknown')}\n", ctype="tool_call")
-                        continue
+                        # 容错：content 非 JSON（如被后处理器改写）时不崩溃，向下当普通内容处理
+                        try:
+                            parsed = json.loads(content)
+                        except Exception:
+                            parsed = None
+                        if isinstance(parsed, dict):
+                            _cur_tc_index = parsed.get("index", 0)
+                            _cur_tc_id = parsed.get("id", "")
+                            _cli_print(f"\n[Tool Call] {parsed.get('name', 'unknown')}\n", ctype="tool_call")
+                            continue
+                        # 非 JSON：故意不 continue，向下走通用打印分支
 
                     if ctype == 'tool_call_args':
                         _cli_print(content, ctype="tool_call_args")
@@ -1015,16 +1021,26 @@ class BasePrompt:
                     ctype = ck.content_type
 
                     if ctype == 'tool_call':
-                        tc_info = json.loads(content)
-                        _cur_tc_index = tc_info.get("index", 0)
-                        _cur_tc_id = tc_info.get("id", "")
-                        if self.callback:
-                            # 用 tool_call_id 作为统一 block 分组键，便于前端把整个工具生命周期收拢
-                            meta = {"id": _cur_tc_id} if _cur_tc_id else None
-                            await self.callback.send_data(content_type=ctype, content=content, meta=meta)
-                        else:
-                            _cli_print(f"\n[Tool Call] {tc_info.get('name', 'unknown')}\n", ctype="tool_call")
-                        continue
+                        # 'tool_call' 是保留类型，content 约定为 {index,id,name} 的 JSON。
+                        # 但后处理器/异常分片可能给出非 JSON 内容，这里容错：解析失败就
+                        # 不当原生工具调用，落到下方通用分支按普通内容转发，避免整次调用崩溃。
+                        try:
+                            parsed = json.loads(content)
+                        except Exception:
+                            parsed = None
+                        if isinstance(parsed, dict):
+                            _cur_tc_index = parsed.get("index", 0)
+                            _cur_tc_id = parsed.get("id", "")
+                            if self.callback:
+                                # 用 tool_call_id 作为统一 block 分组键，便于前端把整个工具生命周期收拢
+                                meta = dict(ck.meta) if ck.meta else {}
+                                if _cur_tc_id:
+                                    meta["id"] = _cur_tc_id
+                                await self.callback.send_data(content_type=ctype, content=content, meta=meta or None)
+                            else:
+                                _cli_print(f"\n[Tool Call] {parsed.get('name', 'unknown')}\n", ctype="tool_call")
+                            continue
+                        # 非 JSON：故意不 continue，向下走通用分支
 
                     if ctype == 'tool_call_args':
                         if self.callback:
@@ -1033,27 +1049,29 @@ class BasePrompt:
                                 "id": _cur_tc_id,
                                 "arguments": content,
                             }, ensure_ascii=False)
-                            meta = {"id": _cur_tc_id} if _cur_tc_id else None
-                            await self.callback.send_data(content_type=ctype, content=enriched, meta=meta)
+                            meta = dict(ck.meta) if ck.meta else {}
+                            if _cur_tc_id:
+                                meta["id"] = _cur_tc_id
+                            await self.callback.send_data(content_type=ctype, content=enriched, meta=meta or None)
                         else:
                             _cli_print(content, ctype="tool_call_args")
                         continue
 
                     if self.callback:
                         if ctype == 'think' and enable_thinking:
-                            await self.callback.send_data(content_type=ctype, content=content)
+                            await self.callback.send_data(content_type=ctype, content=content, meta=ck.meta)
                             reasoning_content += content
                             continue
                         if ctype == '[STREAM_IGNORE]':
                             output_str += content
                             continue
                         if ctype == '[RESPONSE_IGNORE]':
-                            await self.callback.send_data(content_type=ctype, content=content)
+                            await self.callback.send_data(content_type=ctype, content=content, meta=ck.meta)
                             continue
                         if ctype == '[BOTH_IGNORE]':
                             continue
 
-                        await self.callback.send_data(content_type=ctype, content=content)
+                        await self.callback.send_data(content_type=ctype, content=content, meta=ck.meta)
                         output_str += content
                     else:
                         if ctype == 'think' and enable_thinking:
