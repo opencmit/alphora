@@ -1,19 +1,14 @@
 """
 Tutorial 21: ToolCallStreamRenderPP -- 把流式工具调用渲染成前端友好的内容流。
 
-这个后处理器只需明确三个动作：
+v2 协议（推荐）::
 
-1) 哪些工具需要被解析？      -> ``tools`` 里列出的工具名
-2) 没匹配到的工具怎么办？    -> ``unmatched="pass"`` 透传 / ``"drop"`` 不输出
-3) 匹配到的工具能配什么？    -> 每个工具就 ``label`` + ``args`` 两项
+    入口:   content=工具名, content_type=tool, meta={tool_call_id, name, status:start, label:...}
+    描述:   同槽位补丁 meta.label（来自 :args.desc 或静态 label）
+    参数:   content=增量, content_type=配置, meta={tool_call_id, status:running, arg}
+    结束:   content=工具名, content_type=tool, meta={status:end}
 
-输出约定（固定，便于前端对接）::
-
-    开始:       content=label,  content_type=tool_status(默认), meta={tool_call_id, status:"start"}
-    参数增量:   content=增量值, content_type=配置的type, meta={tool_call_id, status:"running", arg:参数名}
-    结束:       content=label,  content_type=tool_status(默认), meta={tool_call_id, status:"end"}
-    未配置参数: 不输出
-    其它内容:   原样透传
+仍支持 legacy 配置（静态 label 文案 + args 简写），见 Demo 1–6。
 
 Run:
   python tutorials/21_tool_call_render.py
@@ -24,7 +19,7 @@ import json
 from typing import AsyncIterator, Iterator, List
 
 from alphora.models.llms.stream_helper import BaseGenerator, GeneratorOutput
-from alphora.postprocess import ToolCallStreamRenderPP, ToolRender
+from alphora.postprocess import ToolCallStreamRenderPP, ToolRender, Ref
 
 
 # ---------------------------------------------------------------------------
@@ -70,12 +65,65 @@ def _show(out: GeneratorOutput) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Demo 1: 基础 -- write_python 只输出 desc，拦截 code
+# Demo 0: v2 -- 工具名入口 + meta.label(desc) + code→python
+# ---------------------------------------------------------------------------
+
+def demo_v2_write_python():
+    print("=" * 70)
+    print("Demo 0 (v2): write_python — 入口工具名, meta.label=desc, code→python")
+    print("=" * 70)
+
+    pp = ToolCallStreamRenderPP(
+        tools={
+            "write_python": ToolRender(
+                name={"content": Ref.name(), "content_type": "tool", "meta": {"xx": "xx"}},
+                label=Ref.args("desc"),
+                args={"code": {"content": Ref.args("code"), "content_type": "python"}},
+            ),
+        },
+        unmatched="drop",
+    )
+
+    gen = MockToolCallGenerator([
+        {
+            "name": "write_python",
+            "id": "call_123",
+            "arguments": {"desc": "根据xx生成代码", "code": "import xx"},
+        },
+    ], chunk_size=4)
+
+    chunks = list(pp(gen))
+    print("\n输出 chunks:")
+    for out in chunks:
+        _show(out)
+
+    assert any(
+        c.content_type == "tool"
+        and c.content == "write_python"
+        and c.meta.get("status") == "start"
+        and c.meta.get("xx") == "xx"
+        for c in chunks
+    ), "应有 tool 入口 chunk"
+    assert any(
+        c.content_type == "tool" and c.meta.get("label") == "根据xx生成代码"
+        for c in chunks
+    ), "应有 meta.label 补丁"
+    python_chunks = [c for c in chunks if c.content_type == "python"]
+    assert python_chunks, "应有 python 参数增量"
+    assert all(c.meta.get("arg") == "code" for c in python_chunks)
+    assert "import xx" == "".join(c.content for c in python_chunks)
+    assert not any(c.content_type == "python_desc" for c in chunks), "desc 不应单独成段"
+    assert any(c.meta and c.meta.get("status") == "end" for c in chunks), "应有 end"
+    print("\n断言通过: v2 协议符合预期。")
+
+
+# ---------------------------------------------------------------------------
+# Demo 1: legacy -- write_python 只输出 desc，拦截 code
 # ---------------------------------------------------------------------------
 
 def demo_basic():
     print("=" * 70)
-    print("Demo 1: write_python(desc, code) -> 输出 desc, 拦截 code")
+    print("Demo 1 (legacy): write_python(desc, code) -> 输出 desc, 拦截 code")
     print("=" * 70)
 
     pp = ToolCallStreamRenderPP(
@@ -193,12 +241,11 @@ def demo_async():
 
 def demo_label_optional():
     print("\n" + "=" * 70)
-    print("Demo 5: label 可选 (think/finish 只出内容, call_specialist 只发提示)")
+    print("Demo 5: legacy — think/finish 只出内容, call_specialist 只发提示")
     print("=" * 70)
 
     pp = ToolCallStreamRenderPP(
         tools={
-            # 无 label：不发 start/end，只把 thought 当 think 类型输出
             "think": ToolRender(args={"thought": "think"}),
             # 只有 label，没有 args：纯状态提示（无参数内容）
             "call_specialist": ToolRender(label="正在召唤专家智能体"),
@@ -259,7 +306,31 @@ def demo_label_start_end():
     print("      参数增量的 meta 现在带 status='running' 和 arg 参数名。")
 
 
+def demo_v2_think_no_entry():
+    print("\n" + "=" * 70)
+    print("Demo 0b (v2): think — name=False，无主区工具入口")
+    print("=" * 70)
+
+    pp = ToolCallStreamRenderPP(
+        tools={
+            "think": ToolRender(name=False, args={"thought": "think"}),
+        },
+        unmatched="drop",
+    )
+    gen = MockToolCallGenerator([
+        {"name": "think", "id": "t1", "arguments": {"thought": "分析中"}},
+    ], chunk_size=8)
+    chunks = list(pp(gen))
+    for out in chunks:
+        _show(out)
+    assert not any(c.content_type == "tool" for c in chunks)
+    assert any(c.content_type == "think" and c.meta is None for c in chunks)
+    print("\n断言通过: 无 tool 入口，thought 作普通正文。")
+
+
 def main():
+    demo_v2_write_python()
+    demo_v2_think_no_entry()
     demo_basic()
     demo_multi_pass()
     demo_drop()
