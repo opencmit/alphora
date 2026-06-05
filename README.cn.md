@@ -70,6 +70,7 @@ pip install alphora
 |:-----|:--------|:----------------------|:-----|:-------|
 | **Agent 编排** | ✅ ReAct、Plan-Execute、层级派生 | ✅ 图编排 StateGraph，最灵活 | ✅ 团队模式，5 级抽象 | ✅ 角色分工 |
 | **工具系统** | ✅ `@tool`，自动 Schema，并行执行 | ✅ `@tool` + 700+ 集成 | ✅ `@tool` + Toolkit | ✅ `@tool` + 委派 |
+| **MCP 接入** | ✅ `setup_mcp()`（stdio MVP） | ⚠️ 经适配器 | ⚠️ 部分 | ❌ |
 | **记忆管理** | ✅ 处理器管道、置顶/标签、撤销/重做 | ✅ 多种 Memory 类，Redis/Postgres | ✅ 自动会话 + 统一数据库 | ⚠️ 基础短期/长期记忆 |
 | **代码沙箱** | ✅ 内置 Local / Docker / 远程 Docker | ⚠️ 需第三方（E2B 等） | ❌ 无内置 | ❌ 无内置 |
 | **类型化流式输出** | ✅ SSE 含 `think`、`result`、`sql`、`chart` | ⚠️ SSE（纯文本） | ⚠️ SSE（纯文本） | ⚠️ SSE（纯文本） |
@@ -89,6 +90,7 @@ pip install alphora
 - **ReAct 与 Plan-Execute** — 内置推理-行动循环，支持自动工具编排、重试逻辑和迭代控制。先规划，再执行。
 - **Agent 派生** — 子 Agent 通过 `derive()` 继承父级的 LLM、记忆和配置，高效构建共享上下文的层级结构。
 - **零配置工具** — `@tool` 装饰器根据类型提示和文档字符串自动生成 OpenAI 函数调用 Schema。支持 Pydantic V2 校验、并行执行、实例方法绑定。
+- **MCP 工具接入** — `pip install "alphora[mcp]"` 后通过 `setup_mcp(servers=[...])` 将本地 stdio MCP Server 工具接入 Agent（详见 [MCP 文档](docs/components/cn/mcp_readme.md)）。
 - **智能记忆** — 多会话隔离，可组合的处理器管道（`keep_last`、`token_budget`、`summarize` 等），置顶/标签系统，撤销/重做。
 - **代码沙箱** — 在 Local / Docker / 远程 Docker 环境中运行 Agent 生成的代码，支持文件隔离、包管理和安全策略。
 - **Skills 生态** — 兼容 [agentskills.io](https://agentskills.io)，三阶段渐进加载（元数据 → 指令 → 资源）优化 Token 用量。

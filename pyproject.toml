@@ -31,6 +31,7 @@ dependencies = [
 
 [project.optional-dependencies]
 cli = ["rich>=13.0"]
+mcp = ["mcp>=1.6.0"]
 
 [project.scripts]
 alphora-web = "alphora.web.serve:main"
