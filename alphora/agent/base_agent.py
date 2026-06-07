@@ -328,8 +328,10 @@ class BaseAgent(object):
         """
         并行运行多个子 agent，返回有序结果列表。
 
-        自动处理 memory 隔离（防止并发写入冲突）和 callback 前缀隔离
-        （通过 content_type 前缀 ``parallel_{i}:`` 区分各 agent 的流式输出）。
+        自动处理 memory 隔离（防止并发写入冲突），并把整段并发包进一个
+        ``AgentCollabScope(kind="batch")``：发出 ``agent_collab_start/end`` 生命周期事件，
+        各子 agent 输出经 ``TaggedCallback`` 自动带上 ``agent_id`` 与 ``collab_id``，
+        前端据 ``collab_id`` + ``size`` 确定性渲染为多智能体面板（无需推断并发）。
 
         Args:
             tasks: ``(agent, query)`` 元组列表，每个元素是一个子 agent 及其对应的查询
@@ -367,22 +369,23 @@ class BaseAgent(object):
                 agent.memory = MemoryManager()
             seen_memories.add(mem_id)
 
+        from alphora.agent.agent_collab import AgentCollabScope
+        from alphora.agent.tagged_callback import TaggedCallback
+
         cli_streamer = None
         effective_callback = self.callback
 
+        labels = [f"{type(agent).__name__}_{i}" for i, (agent, _) in enumerate(tasks)]
+
         if not effective_callback:
             from alphora.cli import create_cli_streamer
-            labels = [
-                f"{type(agent).__name__}_{i}" for i, (agent, _) in enumerate(tasks)
-            ]
             cli_streamer = create_cli_streamer(agent_labels=labels)
             effective_callback = cli_streamer
 
+        # 每个子 agent 包一层通用打标 callback：输出自动带 agent_id/agent_name，
+        # 并在 AgentCollabScope 内自动带 collab_id（前端据此确定性归组，无需推断并发）。
         for i, (agent, _) in enumerate(tasks):
-            # 用随机编码替代
-            subagent_id = str(uuid4())[-8:]
-            wrapped = _PrefixedCallback(effective_callback, f"parallel_{subagent_id}")
-            # wrapped = _PrefixedCallback(effective_callback, f"parallel_{i}")
+            wrapped = TaggedCallback(effective_callback, agent_id=labels[i], agent_name=labels[i])
             agent.callback = wrapped
             agent.stream = Stream(callback=wrapped)
             if hasattr(agent, '_prompt') and agent._prompt:
@@ -391,18 +394,24 @@ class BaseAgent(object):
         if cli_streamer is not None:
             cli_streamer.start()
 
-        if effective_callback and hasattr(effective_callback, 'send_data'):
-            await effective_callback.send_data("parallel_batch_start", str(len(tasks)))
+        members = [{"agent_id": labels[i], "agent_name": labels[i]} for i in range(len(tasks))]
+        scope_stream = Stream(callback=effective_callback)
 
         try:
-            coros = [agent.run(task=query) for agent, query in tasks]
-            if timeout is not None:
-                raw_results = await asyncio.wait_for(
-                    asyncio.gather(*coros, return_exceptions=return_exceptions),
-                    timeout=timeout,
-                )
-            else:
-                raw_results = await asyncio.gather(*coros, return_exceptions=return_exceptions)
+            async with AgentCollabScope(
+                scope_stream,
+                kind="batch",
+                members=members,
+                title=f"并行执行 {len(tasks)} 个子任务",
+            ):
+                coros = [agent.run(task=query) for agent, query in tasks]
+                if timeout is not None:
+                    raw_results = await asyncio.wait_for(
+                        asyncio.gather(*coros, return_exceptions=return_exceptions),
+                        timeout=timeout,
+                    )
+                else:
+                    raw_results = await asyncio.gather(*coros, return_exceptions=return_exceptions)
         finally:
             if cli_streamer is not None:
                 cli_streamer.stop_display()
@@ -413,9 +422,6 @@ class BaseAgent(object):
                 results.append(f"[Error] {type(r).__name__}: {r}")
             else:
                 results.append(r if r is not None else "")
-
-        if effective_callback and hasattr(effective_callback, 'send_data'):
-            await effective_callback.send_data("parallel_batch_end", str(len(tasks)))
 
         return results
 

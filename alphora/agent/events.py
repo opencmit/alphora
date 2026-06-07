@@ -33,6 +33,13 @@ class ContentType(str, Enum):
     RESULT = "result"        # 最终结果
     STOP = "stop"            # 流结束信号
 
+    # —— 多智能体协作块（collab）生命周期 —— #
+    # 一段「多智能体协作」（一次并行批次 / 一次议会讨论等）的开始/结束标记。
+    # content 为 JSON 字符串，详见 alphora.agent.agent_collab.AgentCollabScope。
+    # collab 仅是通用的「多 agent 协作」容器；具体业务语义（如议会）由上层定义。
+    AGENT_COLLAB_START = "agent_collab_start"
+    AGENT_COLLAB_END = "agent_collab_end"
+
     def __str__(self) -> str:  # 让其可直接当字符串用
         return self.value
 
@@ -58,7 +65,17 @@ class MetaKey(str, Enum):
     ID = "id"               # block 分组键
     STATE = "state"         # 生命周期状态（见 StatusState）
     AGENT_ID = "agent_id"   # 子智能体分组 / 分泳道
+    AGENT_NAME = "agent_name"  # 子智能体人类可读展示名
     NAME = "name"           # 工具名等
+    GROUP = "group"         # 协作分组标识（如 "swarm"）
+    TASK_ID = "task_id"     # 派活实例 id（同一角色多次派活区分）
+
+    # —— 多智能体协作块（collab）相关键 —— #
+    COLLAB_ID = "collab_id"      # 一段协作块的唯一 id（与对话 session 无关）
+    COLLAB_KIND = "collab_kind"  # 协作种类（如 "batch" 并行 / 上层可扩展 "council" 等）
+    ROUND = "round"          # 协作内的轮次（议会类讨论用）
+    TURN = "turn"            # 本轮内的发言序（议会类讨论用）
+    CHAIR = "chair"          # 是否主持人/主控发言（议会类讨论用）
 
     def __str__(self) -> str:
         return self.value
