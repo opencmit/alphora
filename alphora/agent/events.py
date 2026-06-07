@@ -40,6 +40,11 @@ class ContentType(str, Enum):
     AGENT_COLLAB_START = "agent_collab_start"
     AGENT_COLLAB_END = "agent_collab_end"
 
+    # —— 议会类协作（kind=council）专用 —— #
+    # 主席/主控对一轮讨论的结论或最终决议。content 为 JSON 字符串（结构由上层定义），
+    # meta 一般带 collab_id + chair=True (+ round)。仅是通用承载，框架不解释其语义。
+    COUNCIL_DECISION = "council_decision"
+
     def __str__(self) -> str:  # 让其可直接当字符串用
         return self.value
 

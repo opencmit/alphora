@@ -33,12 +33,16 @@ class TaggedCallback:
         agent_name: Optional[str] = None,
         task_id=None,
         group: Optional[str] = "swarm",
+        extra_meta: Optional[dict] = None,
     ):
         self._callback = callback
         self._agent_id = agent_id
         self._agent_name = agent_name or agent_id
         self._task_id = task_id
         self._group = group
+        # 额外静态 meta（每条输出都 setdefault 注入）。用于议会等场景给一段发言统一打
+        # round/turn 等标识——按发言重建一个 TaggedCallback 即可，无需框架感知具体语义。
+        self._extra_meta = dict(extra_meta) if extra_meta else {}
 
     async def send_data(self, content_type: str, content: str = None, meta: dict = None):
         if not self._callback:
@@ -50,6 +54,9 @@ class TaggedCallback:
             merged.setdefault(str(MetaKey.GROUP), self._group)
         if self._task_id is not None:
             merged.setdefault(str(MetaKey.TASK_ID), self._task_id)
+        for _k, _v in self._extra_meta.items():
+            if _v is not None:
+                merged.setdefault(str(_k), _v)
         # 自动注入协作块标识（若处于某段 AgentCollabScope 内）。
         cid = current_collab_id.get()
         if cid is not None:
