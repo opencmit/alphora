@@ -1,5 +1,5 @@
 # 基础镜像
-FROM python:3.13-slim AS base
+FROM python:3.13-slim-bookworm AS base
 
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 ARG PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
@@ -20,15 +20,19 @@ ENV PYTHONUNBUFFERED=1 \
 
 # 安装系统依赖 + Node.js
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl gcc g++ make cmake \
-    libgomp1 libffi-dev \
-    fonts-noto-cjk \
+    curl \
+    libgomp1 libffi8 openssl ca-certificates \
+    poppler-utils ghostscript qpdf \
+    tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim tesseract-ocr-chi-tra \
+    imagemagick pngquant unpaper \
+    libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+    fonts-noto-cjk fonts-noto-color-emoji fonts-wqy-zenhei fonts-wqy-microhei \
     fontconfig \
     libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 shared-mime-info \
     graphviz \
     pandoc binutils \
     tree file bc sqlite3 procps \
-    xz-utils bzip2 ca-certificates \
+    xz-utils bzip2 \
     iputils-ping dnsutils net-tools \
     default-mysql-client postgresql-client \
     sshpass openssh-client rsync wget git jq zip unzip \
@@ -36,8 +40,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y --no-install-recommends nodejs \
     && npm config set registry https://registry.npmmirror.com \
     && npm install -g yarn pnpm typescript \
-    && apt-get purge -y gcc g++ make cmake \
-    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Python venv
