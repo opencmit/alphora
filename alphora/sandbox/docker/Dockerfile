@@ -30,6 +30,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fontconfig \
     libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 shared-mime-info \
     graphviz \
+    libreoffice-impress libreoffice-core \
+    poppler-utils \
     pandoc binutils \
     tree file bc sqlite3 procps \
     xz-utils bzip2 \
@@ -50,6 +52,9 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 WORKDIR /app
 COPY requirements-runtime.txt .
 RUN pip install --no-cache-dir -r requirements-runtime.txt
+
+# 安装金融查询的库
+RUN pip install akshare --upgrade -q
 
 # Mount-point directories
 RUN mkdir -p /mnt/workspace /mnt/uploads /mnt/outputs /mnt/skills
