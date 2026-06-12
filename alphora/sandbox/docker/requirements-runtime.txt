@@ -9,6 +9,7 @@ click
 cryptography
 dashscope
 easyquotation
+edge-tts
 efinance
 fpdf2
 html5lib
@@ -32,6 +33,7 @@ plotly
 psycopg2-binary
 pyHanko
 pydantic
+pydub
 pymongo
 pymupdf
 pymysql
