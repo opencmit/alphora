@@ -486,6 +486,11 @@ class DockerBackend(ExecutionBackend):
                 "bind": SANDBOX_SKILLS_MOUNT,
                 "mode": "ro",
             }
+        # 额外自定义 bind 挂载（DockerConfig.volumes）：用于挂载持久工作空间等。
+        # 仅本地 Docker 生效（远程 daemon 无法 bind 本机宿主路径）；内置挂载优先，避免覆盖。
+        if not self._is_remote and self._docker_config.volumes:
+            for host_path, spec in self._docker_config.volumes.items():
+                volumes.setdefault(host_path, spec)
         return volumes
 
     def _resolve_path(self, path: str) -> Path:
