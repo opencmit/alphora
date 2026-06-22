@@ -132,7 +132,7 @@ from alphora.sandbox.types import (
     SandboxInfo,
 )
 from alphora.sandbox.backends.base import ExecutionBackend, BackendFactory
-from alphora.sandbox.config import DockerHost
+from alphora.sandbox.config import DockerHost, SANDBOX_WORKSPACE_DATA_MOUNT
 from alphora.sandbox.path_resolver import PathResolver
 from alphora.sandbox.workspace import Workspace
 from alphora.sandbox.exceptions import (
@@ -266,6 +266,7 @@ class Sandbox:
             skills_host_root=self._skill_host_path,
             uploads_host_root=self._uploads_path,
             outputs_host_root=self._outputs_path,
+            workspace_data_host_root=self._extract_workspace_data_host_root(),
         )
 
         # State
@@ -537,6 +538,24 @@ class Sandbox:
                 shutil.rmtree(self._sandbox_base)
             except Exception as e:
                 logger.warning(f"Failed to cleanup sandbox base: {e}")
+
+    def _extract_workspace_data_host_root(self) -> Optional[Path]:
+        """从传入的 ``docker_config`` 里解析绑定到 /mnt/workspace_data 的宿主目录。
+
+        绑定个人工作空间时，调用方以
+        ``docker_config=DockerConfig(volumes={host_dir: {"bind": "/mnt/workspace_data", "mode": "rw"}})``
+        传入。仅本地 docker 使用 bind 挂载，远程返回 None。
+        """
+        docker_config = self._extra_kwargs.get("docker_config")
+        volumes = getattr(docker_config, "volumes", None) or {}
+        for host_path, spec in volumes.items():
+            bind = spec.get("bind") if isinstance(spec, dict) else None
+            if bind == SANDBOX_WORKSPACE_DATA_MOUNT:
+                try:
+                    return Path(host_path)
+                except Exception:
+                    return None
+        return None
 
     def _create_backend(self) -> ExecutionBackend:
         """Create execution backend instance"""

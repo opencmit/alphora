@@ -9,6 +9,7 @@ from alphora.sandbox.workspace import Workspace
 from alphora.sandbox.config import (
     SANDBOX_UPLOADS_MOUNT,
     SANDBOX_OUTPUTS_MOUNT,
+    SANDBOX_WORKSPACE_DATA_MOUNT,
 )
 
 
@@ -21,10 +22,12 @@ class PathResolver:
     - host absolute path, must stay inside workspace root
     - sandbox absolute path, e.g. "/mnt/workspace/src/main.py"
 
-    Optionally supports read-only mounts:
-    - skills sandbox path, e.g. "/mnt/skills/xlsx/scripts/recalc.py"
-    - uploads sandbox path, e.g. "/mnt/uploads/data.xlsx"
-    - outputs sandbox path, e.g. "/mnt/outputs/report.pdf"
+    Optionally supports extra mounts:
+    - skills sandbox path (read-only), e.g. "/mnt/skills/xlsx/scripts/recalc.py"
+    - uploads sandbox path (read-only), e.g. "/mnt/uploads/data.xlsx"
+    - outputs sandbox path (read-write), e.g. "/mnt/outputs/report.pdf"
+    - workspace_data sandbox path (read-write), e.g. "/mnt/workspace_data/report.xlsx"
+      —— 持久个人工作空间，独立于每会话临时的 /mnt/workspace。
     """
 
     def __init__(
@@ -36,6 +39,8 @@ class PathResolver:
         uploads_sandbox_root: str = SANDBOX_UPLOADS_MOUNT,
         outputs_host_root: Optional[Path] = None,
         outputs_sandbox_root: str = SANDBOX_OUTPUTS_MOUNT,
+        workspace_data_host_root: Optional[Path] = None,
+        workspace_data_sandbox_root: str = SANDBOX_WORKSPACE_DATA_MOUNT,
     ):
         self._host_root = workspace.host_root.resolve()
         self._sandbox_root = workspace.sandbox_root
@@ -45,6 +50,10 @@ class PathResolver:
         self._uploads_sandbox_root = uploads_sandbox_root
         self._outputs_host_root = outputs_host_root.resolve() if outputs_host_root else None
         self._outputs_sandbox_root = outputs_sandbox_root
+        self._workspace_data_host_root = (
+            workspace_data_host_root.resolve() if workspace_data_host_root else None
+        )
+        self._workspace_data_sandbox_root = workspace_data_sandbox_root
 
     @property
     def host_root(self) -> Path:
@@ -78,6 +87,14 @@ class PathResolver:
     def outputs_host_root(self, value: Optional[Path]) -> None:
         self._outputs_host_root = value.resolve() if value else None
 
+    @property
+    def workspace_data_host_root(self) -> Optional[Path]:
+        return self._workspace_data_host_root
+
+    @workspace_data_host_root.setter
+    def workspace_data_host_root(self, value: Optional[Path]) -> None:
+        self._workspace_data_host_root = value.resolve() if value else None
+
     # ------------------------------------------------------------------
     # Path type detection
     # ------------------------------------------------------------------
@@ -95,6 +112,12 @@ class PathResolver:
     def is_outputs_path(self, path: str) -> bool:
         """Check whether *path* refers to a location under the outputs mount."""
         return self._matches_mount(path, self._outputs_sandbox_root)
+
+    def is_workspace_data_path(self, path: str) -> bool:
+        """Check whether *path* refers to a location under the persistent workspace_data mount."""
+        if not self._workspace_data_host_root:
+            return False
+        return self._matches_mount(path, self._workspace_data_sandbox_root)
 
     def is_readonly_path(self, path: str) -> bool:
         """Check whether *path* refers to a read-only mount (skills or uploads)."""
@@ -147,6 +170,13 @@ class PathResolver:
             return self._extra_mount_to_host(
                 path, self._outputs_host_root, self._outputs_sandbox_root, "outputs"
             )
+        if self.is_workspace_data_path(path):
+            return self._extra_mount_to_host(
+                path,
+                self._workspace_data_host_root,
+                self._workspace_data_sandbox_root,
+                "workspace_data",
+            )
         rel = self.to_relative(path)
         resolved = self._resolve_and_check(self._host_root / rel, original=path)
         return resolved
@@ -157,6 +187,8 @@ class PathResolver:
         if self.is_uploads_path(path):
             return str(path).replace("\\", "/").strip()
         if self.is_outputs_path(path):
+            return str(path).replace("\\", "/").strip()
+        if self.is_workspace_data_path(path):
             return str(path).replace("\\", "/").strip()
         rel = self.to_relative(path)
         if not rel:
@@ -214,6 +246,12 @@ class PathResolver:
         """Convert a host-absolute outputs path back to a sandbox display path."""
         return self._host_to_sandbox_display(
             host_path, self._outputs_host_root, self._outputs_sandbox_root
+        )
+
+    def workspace_data_to_sandbox(self, host_path: Path) -> str:
+        """Convert a host-absolute workspace_data path back to a sandbox display path."""
+        return self._host_to_sandbox_display(
+            host_path, self._workspace_data_host_root, self._workspace_data_sandbox_root
         )
 
     @staticmethod

@@ -27,6 +27,9 @@ SANDBOX_WORKSPACE = "/mnt/workspace"
 SANDBOX_UPLOADS_MOUNT = "/mnt/uploads"
 SANDBOX_OUTPUTS_MOUNT = "/mnt/outputs"
 SANDBOX_SKILLS_MOUNT = "/mnt/skills"
+# 持久个人工作空间挂载点（读写）。与每会话临时的 /mnt/workspace 解耦：
+# 用户的私人文件存放于此，Agent 在此读取已有文件并写入交付结果。
+SANDBOX_WORKSPACE_DATA_MOUNT = "/mnt/workspace_data"
 
 
 @dataclass

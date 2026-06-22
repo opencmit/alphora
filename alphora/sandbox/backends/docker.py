@@ -31,6 +31,7 @@ from alphora.sandbox.config import (
     SANDBOX_SKILLS_MOUNT,
     SANDBOX_UPLOADS_MOUNT,
     SANDBOX_OUTPUTS_MOUNT,
+    SANDBOX_WORKSPACE_DATA_MOUNT,
 )
 from alphora.sandbox.exceptions import (
     DockerError,
@@ -159,11 +160,16 @@ class DockerBackend(ExecutionBackend):
         self._uploads_path = self._workspace_path.parent / "uploads"
         self._outputs_path = self._workspace_path.parent / "outputs"
         self._env_vars: Dict[str, str] = {}
+        # 从自定义 bind 挂载里识别持久工作空间（绑定到 /mnt/workspace_data 的宿主目录），
+        # 让 file_exists / read_file / list_files / inspect_file / recognize_image 等
+        # 走宿主侧解析的工具也能识别该路径（run_shell 在容器内本就可用）。
+        self._workspace_data_path = self._extract_workspace_data_host_root()
         self._path_resolver = PathResolver(
             Workspace(host_root=self._workspace_path, sandbox_root=self._container_workspace),
             skills_host_root=self._skill_host_path,
             uploads_host_root=self._uploads_path,
             outputs_host_root=self._outputs_path,
+            workspace_data_host_root=self._workspace_data_path,
         )
 
     @property
@@ -492,6 +498,25 @@ class DockerBackend(ExecutionBackend):
             for host_path, spec in self._docker_config.volumes.items():
                 volumes.setdefault(host_path, spec)
         return volumes
+
+    def _extract_workspace_data_host_root(self) -> Optional[Path]:
+        """从 DockerConfig.volumes 中找出绑定到 /mnt/workspace_data 的宿主目录。
+
+        api_server 绑定个人工作空间时会以
+        ``volumes={host_dir: {"bind": "/mnt/workspace_data", "mode": "rw"}}`` 传入。
+        远程 docker 不应用 bind 挂载，此时返回 None（远程走容器内 exec 解析）。
+        """
+        if self._is_remote:
+            return None
+        volumes = getattr(self._docker_config, "volumes", None) or {}
+        for host_path, spec in volumes.items():
+            bind = spec.get("bind") if isinstance(spec, dict) else None
+            if bind == SANDBOX_WORKSPACE_DATA_MOUNT:
+                try:
+                    return Path(host_path)
+                except Exception:
+                    return None
+        return None
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve file path to host path inside workspace boundaries."""
@@ -827,6 +852,7 @@ class DockerBackend(ExecutionBackend):
         is_skills = self._path_resolver.is_skills_path(path) if path else False
         is_uploads = self._path_resolver.is_uploads_path(path) if path else False
         is_outputs = self._path_resolver.is_outputs_path(path) if path else False
+        is_workspace_data = self._path_resolver.is_workspace_data_path(path) if path else False
         full_path = self._resolve_path(path) if path else self._workspace_path
         if not full_path.exists():
             return []
@@ -842,6 +868,8 @@ class DockerBackend(ExecutionBackend):
                     display_path = self._path_resolver.uploads_to_sandbox(item)
                 elif is_outputs:
                     display_path = self._path_resolver.outputs_to_sandbox(item)
+                elif is_workspace_data:
+                    display_path = self._path_resolver.workspace_data_to_sandbox(item)
                 else:
                     display_path = str(item.relative_to(self._workspace_path))
                 results.append({
@@ -910,6 +938,9 @@ class DockerBackend(ExecutionBackend):
             prepend_base = True
         elif path and self._path_resolver.is_skills_path(path):
             base_root = SANDBOX_SKILLS_MOUNT
+            prepend_base = True
+        elif path and self._path_resolver.is_workspace_data_path(path):
+            base_root = SANDBOX_WORKSPACE_DATA_MOUNT
             prepend_base = True
         else:
             base_root = self._container_workspace
