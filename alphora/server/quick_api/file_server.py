@@ -170,7 +170,11 @@ def set_redirect_resolver(fn) -> None:
 
 
 def _try_redirect(session_id: str, file_path: str, *, attachment: bool):
-    """命中解析器且返回 URL 时给出 307 重定向，否则 None（调用方回退 FileResponse）。"""
+    """命中解析器且返回 URL 时给出 302 重定向，否则 None（调用方回退 FileResponse）。
+
+    presigned GET URL 必须用 302（而非 307）：``POST /files/download`` 跟随 307 时会
+    以 POST 访问 MinIO，导致签名校验失败；302 允许浏览器/fetch 改用 GET。
+    """
     if _redirect_resolver is None:
         return None
     try:
@@ -179,7 +183,7 @@ def _try_redirect(session_id: str, file_path: str, *, attachment: bool):
         logger.warning("redirect resolver 异常，回退本地 FileResponse", exc_info=True)
         return None
     if url:
-        return RedirectResponse(url, status_code=307)
+        return RedirectResponse(url, status_code=302)
     return None
 
 HIDDEN_PATTERNS = {'.git', '__pycache__', '.DS_Store', 'node_modules', '.alphora_mnt_', '.alphadata'}
