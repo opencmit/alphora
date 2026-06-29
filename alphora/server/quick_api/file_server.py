@@ -152,10 +152,35 @@ from typing import List, Literal, Optional
 from urllib.parse import quote
 
 from fastapi import FastAPI, APIRouter, HTTPException, Query, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+# 可选的「下载重定向解析器」。上层（如 alphadata）注入后，download/serve 命中对象存储的
+# 文件会返回 302 presigned 直连（字节不过本服务）；返回 None 或未注入则照常 FileResponse。
+# 签名：resolver(*, session_id: str, file_path: str, attachment: bool) -> Optional[str]
+_redirect_resolver = None
+
+
+def set_redirect_resolver(fn) -> None:
+    """注入下载重定向解析器（线程无关，进程级单例）。传 None 可清除。"""
+    global _redirect_resolver
+    _redirect_resolver = fn
+
+
+def _try_redirect(session_id: str, file_path: str, *, attachment: bool):
+    """命中解析器且返回 URL 时给出 307 重定向，否则 None（调用方回退 FileResponse）。"""
+    if _redirect_resolver is None:
+        return None
+    try:
+        url = _redirect_resolver(session_id=session_id, file_path=file_path, attachment=attachment)
+    except Exception:
+        logger.warning("redirect resolver 异常，回退本地 FileResponse", exc_info=True)
+        return None
+    if url:
+        return RedirectResponse(url, status_code=307)
+    return None
 
 HIDDEN_PATTERNS = {'.git', '__pycache__', '.DS_Store', 'node_modules', '.alphora_mnt_', '.alphadata'}
 
@@ -516,6 +541,10 @@ def create_file_router(
         if not target.is_file():
             raise HTTPException(status_code=404, detail="文件不存在")
 
+        redirect = _try_redirect(req.session_id, req.path, attachment=True)
+        if redirect is not None:
+            return redirect
+
         mime = mimetypes.guess_type(str(target))[0] or 'application/octet-stream'
         # FileResponse 支持 Range，断点续传/大文件都 OK
         return FileResponse(
@@ -579,6 +608,9 @@ def create_file_router(
         target = _safe_path(root, "/" + file_path)
         if not target.is_file():
             raise HTTPException(status_code=404, detail="文件不存在")
+        redirect = _try_redirect(sid, file_path, attachment=False)
+        if redirect is not None:
+            return redirect
         mime = mimetypes.guess_type(str(target))[0] or 'application/octet-stream'
         return FileResponse(
             target,
