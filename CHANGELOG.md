@@ -1,19 +1,36 @@
 # ChangeLog
 
-## [1.2.9] - 2026-04-23
+## [1.3.4] - 2026-07-07
+### Added
+- **智能体并行协作**：新增 `agent_collab`、`tagged_callback`、`events` 等模块，优化多 Agent 并行输出与回调隔离
+- **沙箱工作空间路径挂载**：Docker 后端支持 workspace 路径挂载，扩展 `path_resolver`
+- **文件服务重定向解析**：`file_server.py` 新增重定向解析
+- **默认健康检查端点**：`publish_agent_api` 自动注册 `GET {path}/health`（如 `/alphadata/v1/health`），供网关/K8s 探测；新增 `APIPublisherConfig.health_enabled`、`service_version`
+
 ### Fixed
-- 新增公开 processor ensure_tool_call_integrity，修复了Agent中可能出现的找不到父 assistant 的孤儿 tool 情况；(alphora/memory/processor.py)
+- 修复沙箱 Docker 后端若干问题
+- 优化 Docker 繁忙时可能重复初始化的问题
 
 ### Update
-- 新增 Hook - MessageInspector 的对话导出功能
+- 沙箱 Docker 镜像新增 PDF/OCR 处理相关依赖配置
+- 更新 README 文档
 
+## [1.3.3] - 2026-06-05
+### Added
+- 新增 MCP 集成模块 `alphora/mcp`（stdio 工具注册与 setup）
+- 新增教程 `tutorials/21_mcp_stdio.py`
+- 新增文档 `docs/components/cn/mcp_readme.md`
 
-## [1.3.0] - 2026-05-31
+## [1.3.2] - 2026-05-31
 ### Update
-- 重写 OpenAILike 类，优化了可拓展性和鲁棒性
-- 新增DeepSeek-V4适配
-- 新增Qwen适配
-
+- 新增异常循环流输出检测，检测到循环异常可触发 stop 并流式输出异常消息；
+- 新增流式SSE输出中携带meta元数据，与content, content_type同级；
+- 新增 astream_status, astream_tool 等功能；
+- 优化工具调用参数流式后处理器（ToolCallArgStreamPP）：保持向后兼容的同时，新增多个args解析能力；
+- 将文件服务设置为了全部隐藏文件、路径均对外不可见；
+- `ToolExecutor` 支持通过 `before_execute` 钩子拦截工具执行**：在 `TOOLS_BEFORE_EXECUTE` 阶段，钩子可返回 `{"should_continue": False, "block_reason": "..."}` 跳过 `tool.arun`；被拦截时返回 `error_type="BlockedByHook"` 的 `ToolExecutionResult`，结果仍会正常写入 memory 并反馈给 LLM。（alphora/tools/executor.py）
+- 新增了 `tool_call_render` 用来适配工具流式与前端展示；
+- 优化了 BasePrompt 中的若干细节；
 
 ## [1.3.1] - 2026-04-28
 ### Fixed
@@ -47,13 +64,15 @@
   `'_singleton_memory'` / ...。如果有第三方代码绕过公共 API 直接读
   `agent.__dict__["config"]`，需要改为 `agent.config`。
 
-## [1.3.2] - 2026-04-24
+## [1.3.0] - 2026-04-26
 ### Update
-- 新增异常循环流输出检测，检测到循环异常可触发 stop 并流式输出异常消息；
-- 新增流式SSE输出中携带meta元数据，与content, content_type同级；
-- 新增 astream_status, astream_tool 等功能；
-- 优化工具调用参数流式后处理器（ToolCallArgStreamPP）：保持向后兼容的同时，新增多个args解析能力；
-- 将文件服务设置为了全部隐藏文件、路径均对外不可见；
-- `ToolExecutor` 支持通过 `before_execute` 钩子拦截工具执行**：在 `TOOLS_BEFORE_EXECUTE` 阶段，钩子可返回 `{"should_continue": False, "block_reason": "..."}` 跳过 `tool.arun`；被拦截时返回 `error_type="BlockedByHook"` 的 `ToolExecutionResult`，结果仍会正常写入 memory 并反馈给 LLM。（alphora/tools/executor.py）
-- 新增了 `tool_call_render` 用来适配工具流式与前端展示；
-- 优化了 BasePrompt 中的若干细节；
+- 重写 OpenAILike 类，优化了可拓展性和鲁棒性
+- 新增DeepSeek-V4适配
+- 新增Qwen适配
+
+## [1.2.9] - 2026-04-23
+### Fixed
+- 新增公开 processor ensure_tool_call_integrity，修复了Agent中可能出现的找不到父 assistant 的孤儿 tool 情况；(alphora/memory/processor.py)
+
+### Update
+- 新增 Hook - MessageInspector 的对话导出功能

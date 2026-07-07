@@ -14,6 +14,8 @@ class APIPublisherConfig:
     file_server_allow_empty_session: bool = False  # 是否允许 session_id 为空回退到 workspace 根目录
     api_title: Optional[str] = None
     api_description: Optional[str] = None
+    health_enabled: bool = True
+    service_version: Optional[str] = None
 
     def __post_init__(self):
         if self.api_title is None:

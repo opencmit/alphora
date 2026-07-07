@@ -1,5 +1,6 @@
 import logging
 import datetime
+import time
 from typing import Type, Dict, Any, Optional
 
 from fastapi import FastAPI
@@ -83,6 +84,19 @@ def publish_agent_api(
     # 注册路由
     app.include_router(api_router)
 
+    app_state: Dict[str, Any] = {"started_at": None}
+
+    if config.health_enabled:
+        from alphora.server.quick_api.health import register_health_router, build_health_path
+        health_router = register_health_router(
+            agent=agent,
+            method_name=method,
+            memory_pool=memory_pool,
+            config=config,
+            state=app_state,
+        )
+        app.include_router(health_router)
+
     # 文件服务
     if config.sandbox_workspace:
         from alphora.server.quick_api.file_server import publish_file_server
@@ -98,6 +112,8 @@ def publish_agent_api(
     @app.on_event("startup")
     async def startup():
         """启动钩子"""
+        app_state["started_at"] = time.time()
+
         # 启动后台清理任务
         task_manager.start_memory_cleanup_task(
             memory_pool=memory_pool,
@@ -105,7 +121,7 @@ def publish_agent_api(
         )
 
         # 打印启动信息
-        _print_startup_info(agent, method, config, memory_pool)
+        _print_startup_info(agent, method, config, memory_pool, config.health_enabled)
 
     @app.on_event("shutdown")
     async def shutdown():
@@ -120,7 +136,8 @@ def _print_startup_info(
         agent: BaseAgent,
         method: str,
         config: APIPublisherConfig,
-        memory_pool: MemoryPool
+        memory_pool: MemoryPool,
+        health_enabled: bool = True,
 ) -> None:
 
     llm_instance = agent.llm
@@ -173,6 +190,10 @@ def _print_startup_info(
             logger.info(f" -> {key}: {value}")
     logger.info("\n" + "=" * 90)
     logger.info(f"  对话接口: POST http://<host>:<port>{full_api_path}")
+    if health_enabled:
+        from alphora.server.quick_api.health import build_health_path
+        health_path = build_health_path(config.path)
+        logger.info(f"  健康检查: GET  http://<host>:<port>{health_path}")
     if config.sandbox_workspace:
         file_base = full_api_path.replace('/chat/completions', '/files')
         logger.info(f"  文件列表: POST http://<host>:<port>{file_base}/list")
