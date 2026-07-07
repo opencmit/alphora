@@ -299,10 +299,12 @@ class DockerBackend(ExecutionBackend):
 
     async def _initialize_local(self) -> None:
         """Local/DooD initialization: check image, create directories."""
+        import docker
+
         try:
             await self._run_sync(self._client.images.get, self._docker_image)
             logger.info(f"Using existing sandbox image: {self._docker_image}")
-        except Exception:
+        except docker.errors.ImageNotFound:
             if self._docker_image.startswith("alphora"):
                 await self._build_custom_image()
             else:
